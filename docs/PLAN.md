@@ -144,7 +144,11 @@ blocks a commit that adds an untraced line or lacks a `Refs:` trailer.
       fails if any installer exceeds 20 MB, and attaches SHA-256 checksums. It also generates a
       third-party license notices file from the Cargo and npm dependency trees, ships it inside
       each installer, and attaches it to the release. Add an inspection checklist for it in
-      `docs/verification/`.
+      `docs/verification/`. Attach the unmodified source of each shipped MPL-2.0 crate
+      (`scope = "shipped"` in `deps.toml`) to the release, and list crate, version, and source
+      link in the notices file. CI checks npm production dependencies against the shipped
+      license tier and dev dependencies against the build-only tier (ADR-0003). The SBOM
+      marks each dependency as shipped or build-only.
       Refs: CT-PLT-001, CT-EFF-001, CT-DEV-012, CT-DEV-014
 - [ ] **0.10 Decisions recorded.** Review ADR-0001, ADR-0002, and ADR-0003 against what was
       built, and update them. Fill `deps.toml` completely.

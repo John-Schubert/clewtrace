@@ -9,15 +9,36 @@ all-features = true
 # Unmaintained and unsound crates fail the check too, not only vulnerabilities.
 unmaintained = "all"
 yanked = "deny"
+ignore = [
+    # Approved by John 2026-10-21. proc-macro-error is unmaintained, not vulnerable.
+    # Path: tauri -> muda / tao -> gtk 0.18 -> glib -> glib-macros -> proc-macro-error.
+    # Linux build-only (a proc macro). Remove this when Tauri moves off gtk-rs 0.18.
+    { id = "RUSTSEC-2024-0370", reason = "Unmaintained proc macro under Tauri's GTK 0.18 crates, Linux build-only; remove when Tauri updates GTK" },
+]
 
 [licenses]
-# License policy, approved by John on 2026-10-21:
-# - Only the licenses in `allow` may ship. cargo-deny fails on any other license.
-# - Adding a license to `allow` needs John's approval first, even a permissive one.
-#   ed25519-dalek (BSD-3-Clause) needs that approval when it is added.
-# - GPL, AGPL, LGPL, and SSPL are never allowed, in `allow` or as an exception.
+# License policy, approved by John on 2026-10-21 (docs/adr/0003-licensing-model.md):
+# - Shipped code (crates linked into the app or CLI): only the licenses in `allow`, plus
+#   the per-crate exceptions below. Anything new needs John's approval first.
+# - Build-only crates (build scripts, proc macros, build tools): any permissive license
+#   may be added as a per-crate exception without asking: MIT, Apache-2.0, BSD-2-Clause,
+#   BSD-3-Clause, ISC, Zlib, Unicode-3.0, CC0-1.0, Apache-2.0 WITH LLVM-exception.
+# - GPL, AGPL, LGPL, and SSPL are never allowed in either tier, here or as an exception.
 #   The cargo-deny job in .github/workflows/ci.yml fails if any of them appear here.
-allow = ["MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "Unicode-3.0", "Zlib"]
+allow = ["MIT", "Apache-2.0", "Unicode-3.0", "Zlib"]
+exceptions = [
+    # MPL-2.0, approved by John 2026-10-21. File-level copyleft; we do not modify these.
+    # Build-only: tauri -> tauri-macros / tauri-codegen / tauri-build -> tauri-utils -> dom_query.
+    { crate = "cssparser", allow = ["MPL-2.0"] },
+    { crate = "cssparser-macros", allow = ["MPL-2.0"] },
+    { crate = "dtoa-short", allow = ["MPL-2.0"] },
+    { crate = "selectors", allow = ["MPL-2.0"] },
+    # Shipped in the app binary: tauri (and wry) -> dirs -> dirs-sys -> option-ext.
+    # Task 0.9 attaches its unmodified source to each release and lists it in the notices file.
+    { crate = "option-ext", allow = ["MPL-2.0"] },
+    # Build-only, approved by John 2026-10-21: under Tauri's Linux GTK crates.
+    { crate = "target-lexicon", allow = ["Apache-2.0 WITH LLVM-exception"] },
+]
 confidence-threshold = 0.93
 
 [licenses.private]

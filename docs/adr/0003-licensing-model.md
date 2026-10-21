@@ -21,6 +21,27 @@ nothing that conflicts with offline, air-gapped use in CUI environments.
   No activation server, no network calls.
 - **Expiry behavior:** projects stay readable and exportable; only editing is disabled.
 
+## Third-party licenses (decided by John, 2026-10-21)
+
+Two tiers, because license duties apply to code we distribute and build tools are not
+distributed.
+
+- **Shipped code** (Rust crates linked into the app or CLI, npm production dependencies in
+  the web bundle): MIT, Apache-2.0, Unicode-3.0, and Zlib, plus per-crate exceptions John
+  has approved. Any new license needs John's approval first.
+- **Build-only tools** (build scripts, proc macros, npm dev dependencies): any permissive
+  license is fine without asking: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, Zlib,
+  Unicode-3.0, CC0-1.0, Apache-2.0 WITH LLVM-exception, and approved MPL-2.0 crates.
+- **Never, in either tier:** GPL, AGPL, LGPL, and SSPL.
+- **MPL-2.0** is allowed only per crate, never on the general allowlist. Approved so far:
+  cssparser, cssparser-macros, dtoa-short, and selectors (build-only), and option-ext
+  (shipped). For each shipped MPL crate, each release attaches its unmodified source and
+  the CT-DEV-014 notices file lists its crate, version, and source link.
+- `deny.toml` enforces this for Rust crates and `deps.toml` records each exception with its
+  scope. npm production and dev dependencies are checked separately (task 0.9), and the SBOM
+  marks each dependency as shipped or build-only.
+- Confirm this policy in the attorney review planned below, before the first sale.
+
 ## Alternatives rejected
 
 - **PolyForm Noncommercial:** lets government institutions use the software free.
