@@ -97,6 +97,14 @@ jobs:
         with:
           persist-credentials: false
 
+      # John's policy (deny.toml): GPL, AGPL, LGPL, and SSPL are never allowed.
+      - name: Forbidden licenses
+        run: |
+          if grep -v '^[[:space:]]*#' deny.toml | grep -E 'GPL|SSPL'; then
+            echo "deny.toml must never allow GPL, AGPL, LGPL, or SSPL licenses" >&2
+            exit 1
+          fi
+
       # The release binary, checked against a pinned SHA-256.
       - name: Install cargo-deny
         run: |

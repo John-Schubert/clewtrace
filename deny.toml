@@ -11,8 +11,12 @@ unmaintained = "all"
 yanked = "deny"
 
 [licenses]
-# Permissive licenses only, so the BUSL-1.1 product can ship every crate it links.
-# Add BSD-3-Clause when ed25519-dalek is added (deps.toml).
+# License policy, approved by John on 2026-10-21:
+# - Only the licenses in `allow` may ship. cargo-deny fails on any other license.
+# - Adding a license to `allow` needs John's approval first, even a permissive one.
+#   ed25519-dalek (BSD-3-Clause) needs that approval when it is added.
+# - GPL, AGPL, LGPL, and SSPL are never allowed, in `allow` or as an exception.
+#   The cargo-deny job in .github/workflows/ci.yml fails if any of them appear here.
 allow = ["MIT", "Apache-2.0", "Unicode-3.0", "Zlib"]
 confidence-threshold = 0.93
 

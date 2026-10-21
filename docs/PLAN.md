@@ -118,8 +118,11 @@ blocks a commit that adds an untraced line or lacks a `Refs:` trailer.
       `docs/verification/no-network.md`.
       Refs: CT-SEC-001, CT-PLT-003
 - [ ] **0.9 Release workflow.** On a signed tag, CI builds MSI, DMG, AppImage, deb, and rpm,
-      fails if any installer exceeds 20 MB, and attaches SHA-256 checksums.
-      Refs: CT-PLT-001, CT-EFF-001, CT-DEV-012
+      fails if any installer exceeds 20 MB, and attaches SHA-256 checksums. It also generates a
+      third-party license notices file from the Cargo and npm dependency trees, ships it inside
+      each installer, and attaches it to the release. Add an inspection checklist for it in
+      `docs/verification/`.
+      Refs: CT-PLT-001, CT-EFF-001, CT-DEV-012, CT-DEV-014
 - [ ] **0.10 Decisions recorded.** Review ADR-0001, ADR-0002, and ADR-0003 against what was
       built, and update them. Fill `deps.toml` completely.
       Refs: CT-DEV-008, CT-DEV-010, CT-CMP-008
