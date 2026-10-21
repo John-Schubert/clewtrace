@@ -1,0 +1,60 @@
+# @file CT-DEV-008
+# Every third-party dependency: its license, why it exists, and the requirement it serves.
+# CI fails if a dependency in Cargo.lock or package-lock.json is missing here.
+# Planned dependencies are listed commented out; uncomment each one when it is first added.
+
+# [[dep]]
+# name = "tauri"
+# ecosystem = "cargo"
+# license = "MIT OR Apache-2.0"
+# serves = ["CT-PLT-001", "CT-EFF-001"]
+# why = "Desktop shell using the OS web view"
+
+# [[dep]]
+# name = "rusqlite"
+# ecosystem = "cargo"
+# license = "MIT"
+# serves = ["CT-MOD-001", "CT-EFF-004", "CT-EFF-006"]
+# why = "Bundled SQLite with FTS5 for the rebuildable index and search"
+
+# [[dep]]
+# name = "tree-sitter"
+# ecosystem = "cargo"
+# license = "MIT"
+# serves = ["CT-DEV-002", "CT-TRC-006"]
+# why = "Exact item spans for line-level trace coverage"
+
+# [[dep]]
+# name = "sha2"
+# ecosystem = "cargo"
+# license = "MIT OR Apache-2.0"
+# serves = ["CT-SEC-006", "CT-TRC-009", "CT-SEC-004"]
+# why = "Vetted SHA-256 for report hashes, evidence hashes, and the change log"
+
+# [[dep]]
+# name = "ed25519-dalek"
+# ecosystem = "cargo"
+# license = "BSD-3-Clause"
+# serves = ["CT-PLT-005", "CT-SEC-006"]
+# why = "Vetted Ed25519 signature check for offline license files"
+
+# [[dep]]
+# name = "clap"
+# ecosystem = "cargo"
+# license = "MIT OR Apache-2.0"
+# serves = ["CT-TRC-008"]
+# why = "Command-line parsing for the clew CLI"
+
+# [[dep]]
+# name = "svelte"
+# ecosystem = "npm"
+# license = "MIT"
+# serves = ["CT-USE-001", "CT-EFF-002"]
+# why = "Compiled UI framework with a small runtime"
+
+# [[dep]]
+# name = "codemirror"
+# ecosystem = "npm"
+# license = "MIT"
+# serves = ["CT-MOD-004", "CT-USE-004"]
+# why = "Small, accessible text editor for SysML v2"
