@@ -1,0 +1,7 @@
+# @file CT-DEV-009
+# Pins the Rust toolchain so anyone auditing the source builds it the same way.
+
+[toolchain]
+channel = "1.97.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

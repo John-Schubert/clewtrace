@@ -1,0 +1,14 @@
+# @file CT-TRC-008
+# The clew command-line interface.
+
+[package]
+name = "clew-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "clew"
+path = "src/main.rs"

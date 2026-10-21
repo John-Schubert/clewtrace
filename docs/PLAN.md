@@ -9,10 +9,14 @@ with a `Refs:` trailer. Note follow-ups under the task.
 Exit gate: an empty app installs on Windows, macOS, and Linux from CI-built installers, and CI
 blocks a commit that adds an untraced line or lacks a `Refs:` trailer.
 
-- [ ] **0.1 Repository skeleton.** Confirm `LICENSE`, `LICENSING.md`, and `CONTRIBUTING.md` are
+- [x] **0.1 Repository skeleton.** Confirm `LICENSE`, `LICENSING.md`, and `CONTRIBUTING.md` are
       present. Add `.gitignore`, `rust-toolchain.toml`, and a Cargo workspace with empty
       `crates/clew-core` and `crates/clew-cli`. `clew --version` prints the version.
       Refs: CT-DEV-009, CT-DEV-013, CT-TRC-008
+      Follow-ups:
+      - `clew check --self` does not exist yet (task 0.4), so this task was not gate-checked.
+      - `--version` parses arguments with the standard library. Revisit when `clap` is
+        approved and added for later subcommands.
 - [ ] **0.2 Requirement ID reader (v0).** In `clew-core`, read `model/requirements.sysml` and
       extract each requirement's short name, declared name, `doc` text, `verificationMethod`,
       and `phase`. This is a deliberately small reader for the shapes used in that file; the
