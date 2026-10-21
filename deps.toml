@@ -1,6 +1,7 @@
 # @file CT-DEV-008
-# Every third-party dependency: its license, why it exists, and the requirement it serves.
-# CI fails if a dependency in Cargo.lock or package-lock.json is missing here.
+# Every direct third-party dependency: its license, why it exists, and the requirement it
+# serves. Indirect crates are covered by the CI license checks and the release SBOM.
+# CI fails if a direct dependency in a Cargo.toml or package.json is missing here.
 # Planned dependencies are listed commented out; uncomment each one when it is first added.
 
 # [[dep]]
@@ -58,69 +59,6 @@ ecosystem = "cargo"
 license = "MIT OR Apache-2.0"
 serves = ["CT-TRC-008"]
 why = "Command-line parsing for the clew CLI. Default features off; std, derive, help, usage, error-context only"
-
-[[dep]]
-name = "clap_builder"
-ecosystem = "cargo"
-license = "MIT OR Apache-2.0"
-serves = ["CT-TRC-008"]
-why = "Part of clap: the argument parser itself"
-
-[[dep]]
-name = "clap_derive"
-ecosystem = "cargo"
-license = "MIT OR Apache-2.0"
-serves = ["CT-TRC-008"]
-why = "Part of clap: the derive macros, build time only"
-
-[[dep]]
-name = "clap_lex"
-ecosystem = "cargo"
-license = "MIT OR Apache-2.0"
-serves = ["CT-TRC-008"]
-why = "Part of clap: splits raw arguments"
-
-[[dep]]
-name = "anstyle"
-ecosystem = "cargo"
-license = "MIT OR Apache-2.0"
-serves = ["CT-TRC-008"]
-why = "Required by clap_builder for help text styling"
-
-[[dep]]
-name = "heck"
-ecosystem = "cargo"
-license = "MIT OR Apache-2.0"
-serves = ["CT-TRC-008"]
-why = "Required by clap_derive for name case conversion, build time only"
-
-[[dep]]
-name = "proc-macro2"
-ecosystem = "cargo"
-license = "MIT OR Apache-2.0"
-serves = ["CT-TRC-008"]
-why = "Required by clap_derive, build time only"
-
-[[dep]]
-name = "quote"
-ecosystem = "cargo"
-license = "MIT OR Apache-2.0"
-serves = ["CT-TRC-008"]
-why = "Required by clap_derive, build time only"
-
-[[dep]]
-name = "syn"
-ecosystem = "cargo"
-license = "MIT OR Apache-2.0"
-serves = ["CT-TRC-008"]
-why = "Required by clap_derive, build time only"
-
-[[dep]]
-name = "unicode-ident"
-ecosystem = "cargo"
-license = "(MIT OR Apache-2.0) AND Unicode-3.0"
-serves = ["CT-TRC-008"]
-why = "Required by proc-macro2 and syn, build time only"
 
 # [[dep]]
 # name = "svelte"
