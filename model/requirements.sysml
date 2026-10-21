@@ -403,7 +403,7 @@ package ClewtraceRequirements {
         }
 
         requirement <'CT-PLT-006'> trialTerms : ProductRequirement {
-            doc /* The application shall allow 12 months of personal, non-commercial use and 90 days of commercial evaluation without a license file, matching the license's Additional Use Grant. */
+            doc /* The application shall allow unlimited personal, non-commercial use and 90 days of commercial evaluation without a license file, matching the license's Additional Use Grant. */
             attribute :>> verificationMethod = "Test";
             attribute :>> phase = 2;
         }

@@ -6,9 +6,12 @@ summarizes it; the license text governs.
 | Who | What is free | After that |
 | --- | --- | --- |
 | Anyone | Reading, building, testing, and auditing the source code (non-production use) | Always free |
-| Individuals, personal and non-commercial use | 12 months from first install | Annual personal subscription |
+| Individuals, personal and non-commercial use | Unlimited, with no time limit | Always free |
 | Organizations, including government agencies and contractors | 90-day evaluation from first install | Annual subscription per user |
 
+- The first time Clewtrace runs, it asks whether you are using it personally or as an
+  organizational evaluation. It cannot check your answer. The license terms carry the
+  obligation: commercial and government use needs a paid license after the 90-day evaluation.
 - Each released version becomes available under the Apache License 2.0 four years after it
   is first published. Newer versions stay under the Business Source License.
 - License files are signed and checked offline. Clewtrace never phones home to check a

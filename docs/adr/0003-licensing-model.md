@@ -6,16 +6,22 @@
 
 ## Context
 
-John wants the source open to audit, every user to pay eventually, short free periods, and
-nothing that conflicts with offline, air-gapped use in CUI environments.
+John wants the source open to audit, commercial and government users to pay after a short
+evaluation, personal non-commercial use to stay free, and nothing that conflicts with
+offline, air-gapped use in CUI environments.
 
 ## Decision
 
 - **License:** Business Source License 1.1 with an Additional Use Grant: personal,
-  non-commercial use free for 12 months, organizational evaluation free for 90 days.
+  non-commercial use free with no time limit, organizational evaluation free for 90 days.
   Non-production use (reading, building, testing, auditing) is always free under the BSL.
   Each version converts to Apache-2.0 four years after first release.
-- **Pricing:** annual subscription per user. Government users pay like everyone else.
+- **Pricing:** annual subscription per user for commercial and government use. Government
+  users pay like everyone else. Personal, non-commercial use is free.
+- **Personal use (changed by John, 2026-10-21):** the earlier 12-month limit on personal,
+  non-commercial use is removed from the Additional Use Grant. At first run the app asks
+  whether use is personal or an organizational evaluation. It cannot verify the answer; the
+  license terms carry the obligation (CT-PLT-006).
 - **Contributions:** no outside code contributions, so no contributor agreement is needed.
 - **Enforcement:** an Ed25519-signed license file verified offline through a vetted library.
   No activation server, no network calls.
