@@ -55,3 +55,4 @@ There is no AppImage. It would bundle GTK and WebKitGTK, which are LGPL, and exc
 `THIRD-PARTY-NOTICES.txt` is installed next to the program on Windows, in
 `Clewtrace.app/Contents/Resources` on macOS, and in `/usr/lib/Clewtrace` on Linux. It is
 also attached to each release.
+
