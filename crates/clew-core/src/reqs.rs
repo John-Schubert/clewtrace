@@ -1,8 +1,15 @@
-//! Requirement reader (v0) for the shapes used in `model/requirements.sysml`.
-//! The full SysML v2 parser replaces it in task 1.2.
+//! Requirement reader: the requirements in a SysML v2 file, read with the parser.
+//!
+//! A requirement is a requirement usage with a short name, which is its ID:
+//! `requirement <'CT-EFF-001'> installerSize : ProductRequirement { ... }`. Its first `doc`
+//! is the statement, and the attributes `verificationMethod` and `phase` are read from
+//! their values.
 
 use std::fmt;
 use std::path::Path;
+
+use crate::parse::ast::{Kind, Member, Pos, Usage, UsageKind};
+use crate::parse::parser::{self, SyntaxError};
 
 // @implements CT-DEV-001, CT-TRC-001
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,36 +22,28 @@ pub struct Requirement {
     pub line: usize,
 }
 
-// @implements CT-DEV-001, CT-TRC-001
+// @implements CT-DEV-001, CT-TRC-001, CT-USE-007
 #[derive(Debug)]
 pub enum ReadError {
-    Io(std::io::Error),
-    Syntax {
-        line: usize,
-        message: String,
+    Io {
+        path: String,
+        error: std::io::Error,
     },
-    DuplicateId {
-        id: String,
-        line: usize,
-        first_line: usize,
+    /// Syntax errors, duplicate IDs, and bad attribute values, sorted by position.
+    Invalid {
+        path: String,
+        errors: Vec<SyntaxError>,
     },
 }
 
-// @implements CT-DEV-001, CT-TRC-001
+// @implements CT-DEV-001, CT-TRC-001, CT-USE-007
 impl fmt::Display for ReadError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ReadError::Io(e) => write!(f, "{e}"),
-            ReadError::Syntax { line, message } => write!(f, "line {line}: {message}"),
-            ReadError::DuplicateId {
-                id,
-                line,
-                first_line,
-            } => {
-                write!(
-                    f,
-                    "line {line}: duplicate requirement ID {id} (first at line {first_line})"
-                )
+            ReadError::Io { path, error } => write!(f, "{path}: {error}"),
+            ReadError::Invalid { path, errors } => {
+                let rendered: Vec<String> = errors.iter().map(|e| e.render(path)).collect();
+                write!(f, "{}", rendered.join("\n"))
             }
         }
     }
@@ -53,130 +52,100 @@ impl fmt::Display for ReadError {
 // @implements CT-DEV-001, CT-TRC-001
 impl std::error::Error for ReadError {}
 
-// @implements CT-DEV-001, CT-TRC-001
+// @implements CT-DEV-001, CT-TRC-001, CT-MOD-001
 pub fn read_requirements(path: &Path) -> Result<Vec<Requirement>, ReadError> {
-    let text = std::fs::read_to_string(path).map_err(ReadError::Io)?;
-    parse_requirements(&text)
+    let label = path.display().to_string();
+    let text = std::fs::read_to_string(path).map_err(|error| ReadError::Io {
+        path: label.clone(),
+        error,
+    })?;
+    parse_requirements(&text, &label)
 }
 
-// @implements CT-DEV-001, CT-TRC-001
-pub fn parse_requirements(text: &str) -> Result<Vec<Requirement>, ReadError> {
-    let mut reqs: Vec<Requirement> = Vec::new();
-    // The open requirement and its brace depth.
-    let mut current: Option<(Requirement, usize)> = None;
-    // Doc text gathered so far while a multi-line `doc /* ... */` is open.
-    let mut open_doc: Option<Vec<String>> = None;
-
-    for (index, raw) in text.lines().enumerate() {
-        let line_no = index + 1;
-        let line = raw.trim();
-
-        if let Some(parts) = open_doc.as_mut() {
-            let body = line.strip_prefix('*').unwrap_or(line);
-            match body.split_once("*/") {
-                Some((before, _)) => {
-                    parts.push(before.trim().to_string());
-                    if let Some((req, _)) = current.as_mut() {
-                        req.doc = join_doc(parts);
-                    }
-                    open_doc = None;
-                }
-                None => parts.push(body.trim().to_string()),
-            }
-            continue;
-        }
-
-        let Some((req, depth)) = current.as_mut() else {
-            if let Some(rest) = line.strip_prefix("requirement <'") {
-                let req = parse_header(rest, line_no)?;
-                if let Some(first) = reqs.iter().find(|r| r.id == req.id) {
-                    return Err(ReadError::DuplicateId {
-                        id: req.id,
-                        line: line_no,
-                        first_line: first.line,
-                    });
-                }
-                current = Some((req, 1));
-            }
-            continue;
-        };
-
-        if let Some(rest) = line.strip_prefix("doc /*") {
-            match rest.split_once("*/") {
-                Some((before, _)) => req.doc = before.trim().to_string(),
-                None => open_doc = Some(vec![rest.trim().to_string()]),
-            }
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("attribute :>>")
-            && let Some((key, value)) = rest.split_once('=')
-        {
-            let value = value.trim().trim_end_matches(';').trim();
-            match key.trim() {
-                "verificationMethod" => {
-                    req.verification_method = Some(value.trim_matches('"').to_string());
-                }
-                "phase" => {
-                    req.phase = Some(value.parse().map_err(|_| ReadError::Syntax {
-                        line: line_no,
-                        message: format!("phase is not a number: {value}"),
-                    })?);
-                }
-                _ => {}
-            }
-        }
-        *depth += line.matches('{').count();
-        *depth = depth.saturating_sub(line.matches('}').count());
-        if *depth == 0 {
-            reqs.extend(current.take().map(|(req, _)| req));
+/// Reads the requirements in `text`. `path` names the file in error messages.
+// @implements CT-DEV-001, CT-TRC-001, CT-MOD-001, CT-USE-007
+pub fn parse_requirements(text: &str, path: &str) -> Result<Vec<Requirement>, ReadError> {
+    let parsed = parser::parse(text);
+    let mut errors = parsed.errors;
+    let mut found: Vec<(Requirement, Pos)> = Vec::new();
+    collect(&parsed.members, &mut found, &mut errors);
+    for (index, (req, pos)) in found.iter().enumerate() {
+        if let Some((first, _)) = found[..index].iter().find(|(r, _)| r.id == req.id) {
+            errors.push(SyntaxError {
+                line: pos.line,
+                column: pos.column,
+                message: format!(
+                    "duplicate requirement ID {}, first used on line {}",
+                    req.id, first.line
+                ),
+                help: "give each requirement its own ID",
+            });
         }
     }
-
-    match current {
-        Some((req, _)) => Err(ReadError::Syntax {
-            line: req.line,
-            message: format!("requirement {} is not closed", req.id),
-        }),
-        None => Ok(reqs),
+    if errors.is_empty() {
+        return Ok(found.into_iter().map(|(req, _)| req).collect());
     }
-}
-
-// Reads `ID'> name : Type {` after the `requirement <'` prefix.
-// @implements CT-DEV-001, CT-TRC-001
-fn parse_header(rest: &str, line_no: usize) -> Result<Requirement, ReadError> {
-    let syntax = |message: &str| ReadError::Syntax {
-        line: line_no,
-        message: message.to_string(),
-    };
-    let (id, rest) = rest
-        .split_once("'>")
-        .ok_or_else(|| syntax("short name is not closed"))?;
-    if !rest.trim_end().ends_with('{') {
-        return Err(syntax("requirement header must end with '{'"));
-    }
-    let name = rest
-        .trim_start()
-        .split(|c: char| c.is_whitespace() || c == ':' || c == '{')
-        .next()
-        .unwrap_or_default();
-    Ok(Requirement {
-        id: id.to_string(),
-        name: name.to_string(),
-        doc: String::new(),
-        verification_method: None,
-        phase: None,
-        line: line_no,
+    errors.sort_by_key(|e| (e.line, e.column));
+    Err(ReadError::Invalid {
+        path: path.to_string(),
+        errors,
     })
 }
 
+/// Collects requirement usages with a short name, at any depth, in file order.
 // @implements CT-DEV-001, CT-TRC-001
-fn join_doc(parts: &[String]) -> String {
-    parts
-        .iter()
-        .filter(|p| !p.is_empty())
-        .cloned()
-        .collect::<Vec<_>>()
-        .join(" ")
+fn collect(members: &[Member], found: &mut Vec<(Requirement, Pos)>, errors: &mut Vec<SyntaxError>) {
+    for member in members {
+        if let Member::Usage(usage) = member
+            && usage.kind == UsageKind::Of(Kind::Requirement)
+            && let Some(id) = &usage.short_name
+        {
+            found.push((requirement(id, usage, errors), usage.pos));
+        }
+        collect(member.members(), found, errors);
+    }
+}
+
+// @implements CT-DEV-001, CT-TRC-001, CT-USE-007
+fn requirement(id: &str, usage: &Usage, errors: &mut Vec<SyntaxError>) -> Requirement {
+    let mut req = Requirement {
+        id: id.to_string(),
+        name: usage.name.clone().unwrap_or_default(),
+        doc: String::new(),
+        verification_method: None,
+        phase: None,
+        line: usage.pos.line as usize,
+    };
+    for member in &usage.members {
+        match member {
+            Member::Comment(c) if c.is_doc && req.doc.is_empty() => {
+                let lines: Vec<&str> = c.body.lines().filter(|l| !l.is_empty()).collect();
+                req.doc = lines.join(" ");
+            }
+            Member::Usage(a) if a.kind == UsageKind::Of(Kind::Attribute) => {
+                match (a.effective_name(), &a.value) {
+                    (Some("verificationMethod"), Some(v)) => {
+                        req.verification_method = Some(v.text.clone());
+                    }
+                    (Some("phase"), Some(v)) => match v.text.parse() {
+                        Ok(phase) => req.phase = Some(phase),
+                        Err(_) => errors.push(SyntaxError {
+                            line: v.pos.line,
+                            column: v.pos.column,
+                            message: format!(
+                                "phase is not a whole number from 0 to 255: {}",
+                                v.text
+                            ),
+                            help: "write the phase as a number, like `attribute :>> phase = 1;`",
+                        }),
+                    },
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+    req
 }
 
 // @verifies CT-DEV-001, CT-TRC-001
@@ -194,6 +163,7 @@ mod tests {
             doc /* Each installer shall be 20 MB or smaller. */
             attribute :>> verificationMethod = "Test";
             attribute :>> phase = 0;
+            doc /* A second doc is not the statement. */
         }
 
         requirement <'CT-USE-002'> palette : ProductRequirement {
@@ -201,7 +171,11 @@ mod tests {
              * open with one shortcut. */
             attribute :>> verificationMethod = "Demonstration";
             attribute :>> phase = 2;
+            attribute other = 1;
+            comment /* not the doc */
         }
+        requirement unidentified : ProductRequirement;
+        part p { requirement <'CT-DEV-001'>; }
     }
 }
 "#;
@@ -209,8 +183,8 @@ mod tests {
     // @verifies CT-DEV-001, CT-TRC-001
     #[test]
     fn reads_fields_of_each_requirement() {
-        let reqs = parse_requirements(FIXTURE).unwrap();
-        assert_eq!(reqs.len(), 2);
+        let reqs = parse_requirements(FIXTURE, "f.sysml").unwrap();
+        assert_eq!(reqs.len(), 3);
         assert_eq!(
             reqs[0],
             Requirement {
@@ -232,35 +206,56 @@ mod tests {
             Some("Demonstration")
         );
         assert_eq!(reqs[1].phase, Some(2));
+        // A nested requirement with an ID but no name, doc, or attributes.
+        assert_eq!(reqs[2].id, "CT-DEV-001");
+        assert_eq!(reqs[2].name, "");
+        assert_eq!(
+            (reqs[2].verification_method.clone(), reqs[2].phase),
+            (None, None)
+        );
     }
 
-    // @verifies CT-DEV-001, CT-TRC-001
+    // @verifies CT-DEV-001, CT-TRC-001, CT-USE-007
     #[test]
     fn rejects_duplicate_ids() {
-        let text = "requirement <'CT-EFF-001'> a : R {\n}\nrequirement <'CT-EFF-001'> b : R {\n}\n";
-        match parse_requirements(text) {
-            Err(ReadError::DuplicateId {
-                id,
-                line,
-                first_line,
-            }) => {
-                assert_eq!((id.as_str(), line, first_line), ("CT-EFF-001", 3, 1));
-            }
-            other => panic!("expected duplicate error, got {other:?}"),
-        }
+        let text = "requirement <'CT-EFF-001'> a : R;\n  requirement <'CT-EFF-001'> b : R { }\n";
+        let err = parse_requirements(text, "m.sysml").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "m.sysml:2:3: error: duplicate requirement ID CT-EFF-001, first used on line 1\n  \
+             help: give each requirement its own ID"
+        );
     }
 
-    // @verifies CT-DEV-001, CT-TRC-001
+    // @verifies CT-DEV-001, CT-TRC-001, CT-USE-007
     #[test]
-    fn rejects_unclosed_requirement() {
-        let text = "requirement <'CT-EFF-001'> a : R {\n    doc /* never closed */\n";
-        assert!(matches!(
-            parse_requirements(text),
-            Err(ReadError::Syntax { line: 1, .. })
-        ));
+    fn reports_every_error_with_path_line_and_column() {
+        let text = "requirement <'CT-EFF-001'> a : R {\n    attribute :>> phase = \"one\";\n\
+                    }\nrequirement <'CT-EFF-002'> b : R {\n    doc /* never closed */\n";
+        let err = parse_requirements(text, "m.sysml").unwrap_err();
+        let ReadError::Invalid { path, errors } = &err else {
+            panic!("expected invalid, got {err:?}")
+        };
+        assert_eq!(path, "m.sysml");
+        let found: Vec<(u32, u32)> = errors.iter().map(|e| (e.line, e.column)).collect();
+        assert_eq!(found, [(2, 27), (4, 34)]);
+        assert!(errors[0].message.contains("phase is not a whole number"));
+        assert_eq!(errors[1].message, "`{` is never closed");
+        let rendered = err.to_string();
+        assert_eq!(rendered.lines().count(), 4, "{rendered}");
+        assert!(rendered.starts_with("m.sysml:2:27: error: phase"));
+        assert!(rendered.contains("\nm.sysml:4:34: error:"));
     }
 
-    // @verifies CT-DEV-001, CT-TRC-001
+    // @verifies CT-DEV-001, CT-TRC-001, CT-USE-007
+    #[test]
+    fn missing_file_names_the_path() {
+        let err = read_requirements(Path::new("no/such/file.sysml")).unwrap_err();
+        assert!(matches!(err, ReadError::Io { .. }));
+        assert!(err.to_string().starts_with("no/such/file.sysml: "), "{err}");
+    }
+
+    // @verifies CT-DEV-001, CT-TRC-001, CT-MOD-001
     #[test]
     fn reads_the_real_requirements_file() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../model/requirements.sysml");

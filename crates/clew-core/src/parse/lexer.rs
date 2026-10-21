@@ -684,6 +684,9 @@ mod tests {
             vec!["CT-EFF-001", "it's", "say \"hi\"\t\\", "plain", ""]
         );
         assert!(matches!(lexed.tokens[0].value(src), Cow::Borrowed(_)));
+        assert_eq!(unescape(r"\b\t\n\f\r\q"), "\u{8}\t\n\u{c}\rq");
+        // A trailing backslash cannot come from the lexer, which treats `\'` as an escape.
+        assert_eq!(unescape("a\\"), "a");
     }
 
     // @verifies CT-MOD-002
@@ -709,6 +712,16 @@ mod tests {
                 (Integer, "7".into()),
                 (Symbol, ".".into()),
                 (Name, "e".into()),
+            ]
+        );
+        assert_eq!(
+            kinds_and_texts("1e 2E+"),
+            vec![
+                (Integer, "1".into()),
+                (Name, "e".into()),
+                (Integer, "2".into()),
+                (Name, "E".into()),
+                (Symbol, "+".into()),
             ]
         );
     }
@@ -790,6 +803,57 @@ mod tests {
             .find(|t| t.text(src) == "'bad\\q'")
             .unwrap();
         assert_eq!(bad.kind, TokenKind::Error);
+    }
+
+    // @verifies CT-USE-007
+    #[test]
+    fn reports_an_unterminated_note() {
+        let lexed = lex("a //* never closed\nb");
+        assert_eq!(
+            lexed.errors,
+            [LexError {
+                line: 1,
+                column: 3,
+                message: "unterminated note".into(),
+                help: "close the note with `*/`",
+            }]
+        );
+        assert_eq!(lexed.tokens.len(), 2, "the note runs to the end of input");
+    }
+
+    // @verifies CT-USE-007
+    #[test]
+    fn reports_a_control_character() {
+        let src = "a\u{7}b";
+        let lexed = lex(src);
+        assert_eq!(
+            lexed.errors,
+            [LexError {
+                line: 1,
+                column: 2,
+                message: "unexpected control character U+0007".into(),
+                help: "delete it; it is invisible in most editors",
+            }]
+        );
+        assert_eq!(lexed.tokens[1].kind, TokenKind::Error);
+        assert_eq!(lexed.tokens[2].text(src), "b");
+    }
+
+    // @verifies CT-USE-007
+    #[test]
+    fn reports_an_unterminated_quoted_name() {
+        let src = "part 'open\npart b;";
+        let lexed = lex(src);
+        assert_eq!(lexed.errors.len(), 1);
+        let error = &lexed.errors[0];
+        assert_eq!((error.line, error.column), (1, 6));
+        assert_eq!(error.message, "unterminated quoted name");
+        assert_eq!(error.help, "close the name with `'`");
+        assert_eq!(lexed.tokens[1].kind, TokenKind::Error);
+        assert_eq!(lexed.tokens[1].text(src), "'open");
+        // Recovery: lexing resumes on the next line.
+        assert_eq!(lexed.tokens[2].text(src), "part");
+        assert_eq!(lexed.tokens[2].line, 2);
     }
 
     // @verifies CT-USE-007

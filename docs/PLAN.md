@@ -237,10 +237,17 @@ requirement is implemented and verified or formally waived.
       lexer errors with the file path; the keyword list is the SysML v2 reserved words as
       recalled, so check it against the spec's keyword table when the parser grows past the
       subset.
-- [ ] **1.2 Parser.** Recursive descent with error recovery for packages, imports, comments
+- [x] **1.2 Parser.** Recursive descent with error recovery for packages, imports, comments
       and doc, part, attribute, port, and requirement definitions and usages, short names,
       satisfy, and verify. Replace the v0 reader from task 0.2. Fixture tests per construct.
       Refs: CT-MOD-001, CT-MOD-002, CT-USE-007
+      Done in `crates/clew-core/src/parse/ast.rs` and `parse/parser.rs`; `reqs.rs` now reads
+      requirements through the parser, with the same `clew reqs` output as the v0 reader.
+      Errors carry file, line, column, and help, and recovery skips to the next `;`, balanced
+      `{ }`, or member keyword. Follow-ups: feature values are kept as typed literals or raw
+      expression text, so a real expression parser is needed when calculations arrive;
+      `assert` / `not satisfy`, `locale`, metadata, and other SysML members are reported as
+      not supported yet; `subject` is parsed because requirement bodies use it.
 - [ ] **1.3 Model and name resolution.** Resolve qualified names and report unresolved
       references with file, line, and column.
       Refs: CT-MOD-002, CT-USE-007

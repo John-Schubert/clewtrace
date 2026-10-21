@@ -80,7 +80,7 @@ fn run_reqs(command: ReqsCommand) -> ExitCode {
     let all = match reqs::read_requirements(Path::new(REQUIREMENTS_PATH)) {
         Ok(all) => all,
         Err(e) => {
-            eprintln!("clew: {REQUIREMENTS_PATH}: {e}");
+            eprintln!("clew: {e}");
             return ExitCode::FAILURE;
         }
     };

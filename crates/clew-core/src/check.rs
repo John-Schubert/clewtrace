@@ -81,6 +81,7 @@ pub struct SetupError {
 impl fmt::Display for SetupError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.line {
+            _ if self.path.is_empty() => write!(f, "{}", self.message),
             0 => write!(f, "{}: {}", self.path, self.message),
             line => write!(f, "{}:{line}: {}", self.path, self.message),
         }
@@ -250,8 +251,14 @@ pub fn load_ids(root: &Path) -> Result<(TraceConfig, IdPattern, BTreeSet<String>
     })?;
     let mut known = BTreeSet::new();
     for file in &config.requirements {
-        let all = reqs::read_requirements(&root.join(file)).map_err(|e| SetupError {
+        let text = std::fs::read_to_string(root.join(file)).map_err(|e| SetupError {
             path: file.clone(),
+            line: 0,
+            message: e.to_string(),
+        })?;
+        // The reader's errors already start with the path, line, and column.
+        let all = reqs::parse_requirements(&text, file).map_err(|e| SetupError {
+            path: String::new(),
             line: 0,
             message: e.to_string(),
         })?;
@@ -1095,5 +1102,26 @@ mod tests {
             err.to_string().contains("Run clew from the project root"),
             "{err}"
         );
+    }
+
+    // @verifies CT-DEV-004, CT-USE-007
+    #[test]
+    fn requirement_errors_name_the_file_line_and_column() {
+        let root = project("bad-reqs", "", &[]);
+        fs::write(
+            root.join("model/req.sysml"),
+            "requirement <'CT-DEV-002'> a {
+",
+        )
+        .unwrap();
+        let err = check_project(&root).unwrap_err();
+        assert!(
+            err.to_string()
+                .starts_with("model/req.sysml:1:30: error: `{` is never closed"),
+            "{err}"
+        );
+        fs::remove_file(root.join("model/req.sysml")).unwrap();
+        let err = check_project(&root).unwrap_err();
+        assert_eq!((err.path.as_str(), err.line), ("model/req.sysml", 0));
     }
 }
