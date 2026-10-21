@@ -1,0 +1,6 @@
+{
+  "identifier": "main",
+  "description": "The main window may read the app name and version, and nothing else.",
+  "windows": ["main"],
+  "permissions": ["core:app:allow-name", "core:app:allow-version"]
+}

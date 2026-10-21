@@ -1,16 +1,23 @@
 # @file CT-DEV-008
 # Every direct third-party dependency: its license, why it exists, and the requirement it
 # serves. Indirect crates are covered by the CI license checks and the release SBOM.
-# `clew check --self` fails if a direct dependency in a Cargo.toml is missing here
-# (package.json from task 0.7). CI tools use ecosystem "ci" and are listed by hand.
+# `clew check --self` fails if a direct dependency in a Cargo.toml or package.json is missing
+# here. CI tools use ecosystem "ci" and are listed by hand.
 # Planned dependencies are listed commented out; uncomment each one when it is first added.
 
-# [[dep]]
-# name = "tauri"
-# ecosystem = "cargo"
-# license = "MIT OR Apache-2.0"
-# serves = ["CT-PLT-001", "CT-EFF-001"]
-# why = "Desktop shell using the OS web view"
+[[dep]]
+name = "tauri"
+ecosystem = "cargo"
+license = "MIT OR Apache-2.0"
+serves = ["CT-PLT-001", "CT-EFF-001"]
+why = "Desktop shell using the OS web view (ADR-0001). Default features off; wry only"
+
+[[dep]]
+name = "tauri-build"
+ecosystem = "cargo"
+license = "MIT OR Apache-2.0"
+serves = ["CT-PLT-001", "CT-SEC-001"]
+why = "Build script for the app: reads tauri.conf.json and compiles the capability files. Default features off; config-json only"
 
 # [[dep]]
 # name = "rusqlite"
@@ -61,12 +68,54 @@ license = "MIT OR Apache-2.0"
 serves = ["CT-TRC-008"]
 why = "Command-line parsing for the clew CLI. Default features off; std, derive, help, usage, error-context only"
 
-# [[dep]]
-# name = "svelte"
-# ecosystem = "npm"
-# license = "MIT"
-# serves = ["CT-USE-001", "CT-EFF-002"]
-# why = "Compiled UI framework with a small runtime"
+[[dep]]
+name = "svelte"
+ecosystem = "npm"
+license = "MIT"
+serves = ["CT-USE-001", "CT-EFF-002"]
+why = "Compiled UI framework with a small runtime (ADR-0001). Runes syntax only"
+
+[[dep]]
+name = "@tauri-apps/api"
+ecosystem = "npm"
+license = "Apache-2.0 OR MIT"
+serves = ["CT-PLT-001"]
+why = "Typed calls from the UI to the Rust side over Tauri IPC. Only the app module is used so far"
+
+[[dep]]
+name = "@tauri-apps/cli"
+ecosystem = "npm"
+license = "Apache-2.0 OR MIT"
+serves = ["CT-PLT-001"]
+why = "Build tool: runs the dev server with the app and builds release binaries and installers"
+
+[[dep]]
+name = "@sveltejs/vite-plugin-svelte"
+ecosystem = "npm"
+license = "MIT"
+serves = ["CT-PLT-001", "CT-EFF-002"]
+why = "Build tool: compiles Svelte components in the Vite build. Version 6, for Vite 7"
+
+[[dep]]
+name = "vite"
+ecosystem = "npm"
+license = "MIT"
+serves = ["CT-PLT-001", "CT-PLT-003"]
+why = "Build tool: bundles the UI into app/dist, which is embedded in the app binary. Version 7, since Vite 8 pulls in lightningcss (MPL-2.0)"
+
+[[dep]]
+name = "typescript"
+ecosystem = "npm"
+license = "Apache-2.0"
+serves = ["CT-DEV-004"]
+why = "Type checker for the UI, run by svelte-check. Version 6, the newest svelte-check supports"
+
+[[dep]]
+name = "svelte-check"
+ecosystem = "npm"
+license = "MIT"
+serves = ["CT-DEV-004"]
+why = "Type and Svelte diagnostics for the UI in CI (`npm run check`)"
 
 # [[dep]]
 # name = "codemirror"
@@ -88,3 +137,10 @@ ecosystem = "ci"
 license = "MIT"
 serves = ["CT-DEV-004"]
 why = "Checks out the repository in GitHub Actions. Pinned by commit in ci.yml"
+
+[[dep]]
+name = "actions/cache"
+ecosystem = "ci"
+license = "MIT"
+serves = ["CT-DEV-004"]
+why = "Caches the cargo registry and target directory between CI runs (ADR-0001). Pinned by commit in ci.yml. Chosen over Swatinem/rust-cache, which is LGPL-3.0"

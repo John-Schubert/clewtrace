@@ -1,9 +1,12 @@
-# @file CT-DEV-009, CT-TRC-008
-# Cargo workspace for the Clewtrace core library and the clew CLI.
+# @file CT-DEV-009, CT-TRC-008, CT-PLT-001
+# Cargo workspace for the Clewtrace core library, the clew CLI, and the desktop app.
 
 [workspace]
 resolver = "3"
-members = ["crates/clew-core", "crates/clew-cli"]
+members = ["crates/clew-core", "crates/clew-cli", "app/src-tauri"]
+# Plain `cargo build` and `cargo test` skip the desktop app, which needs the web view
+# libraries and a built UI in app/dist. CI builds it with --workspace.
+default-members = ["crates/clew-core", "crates/clew-cli"]
 
 [workspace.package]
 version = "0.1.0"
