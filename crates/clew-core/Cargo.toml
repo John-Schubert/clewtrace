@@ -1,0 +1,10 @@
+# @file CT-DEV-009
+# Core library: parse, scan, index, trace, io, audit, and license modules.
+
+[package]
+name = "clew-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true

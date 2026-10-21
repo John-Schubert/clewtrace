@@ -1,0 +1,10 @@
+# @file CT-DEV-009
+# Build output and local caches that never belong in the public source.
+/target/
+/.clewtrace/
+node_modules/
+/app/dist/
+/app/src-tauri/target/
+/app/src-tauri/gen/
+.DS_Store
+Thumbs.db
