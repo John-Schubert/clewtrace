@@ -30,14 +30,32 @@ blocks a commit that adds an untraced line or lacks a `Refs:` trailer.
         project-root lookup belongs with project opening in a later task.
       - `deps.toml` lists clap's transitive crates too, since its header says CI checks every
         crate in `Cargo.lock`. The task 0.4 checker should match that.
-- [ ] **0.3 Tag scanner (v0).** Use tree-sitter (Rust and TypeScript grammars) to find item
+- [x] **0.3 Tag scanner (v0).** Use tree-sitter (Rust and TypeScript grammars) to find item
       spans, read `@implements`, `@verifies`, `@begin`/`@end`, and `@file` tags, and compute
       which lines are traced. Svelte files use `@begin`/`@end` regions in v0. Build fixtures
       covering every rule in `docs/TRACEABILITY.md`, including failure cases.
       Refs: CT-DEV-002, CT-TRC-006
+      Follow-ups:
+      - `clew check --self` does not exist yet (task 0.4), so this task was not gate-checked.
+        A test in `scan.rs` scans every `.rs` file under `crates/` and requires no untraced
+        lines, which caught `lib.rs` (it now uses regions).
+      - John approved tree-sitter, tree-sitter-rust, and tree-sitter-typescript on 2026-10-21.
+        tree-sitter builds with default features off.
+      - The scanner checks ID shape only loosely. Task 0.4 checks IDs against `id_pattern`
+        and the model, and applies `max_scope_lines` and `[[exclude]]` from `trace.toml`.
+      - The Svelte example in `docs/TRACEABILITY.md` leaves its `<script>` and `</script>`
+        lines untraced. Decide whether to exempt those lines or fix the example.
+      - `trace.toml` allows `*.json` at file level, but JSON has no comments, so the scanner
+        has no `@file` reader for it. Decide how JSON files are traced, or excluded.
+      - Rust items also include type aliases, `macro_rules!`, `extern` blocks, and trait
+        method signatures. TypeScript `@verifies` also takes a call statement such as
+        `describe(...)` as a test block. Add these to the tag table in `docs/TRACEABILITY.md`.
 - [ ] **0.4 `clew check --self`.** Combine 0.2 and 0.3 with `trace.toml`: report untraced lines,
       unknown IDs, and oversized scopes with file:line output and a nonzero exit code on error.
       Refs: CT-DEV-002, CT-DEV-004, CT-TRC-008, CT-USE-007
+      Note: `deps.toml` lists only direct dependencies (John, 2026-10-21). Indirect crates are
+      covered by CI license checks and the release SBOM. Update the `deps.toml` header to say
+      so and drop clap's helper entries.
 - [ ] **0.5 `clew check-commit`.** Validate the `Refs:` trailer and its IDs. Add
       `scripts/install-hooks.sh` and `scripts/install-hooks.ps1` that install it as a
       `commit-msg` hook.

@@ -17,12 +17,26 @@
 # serves = ["CT-MOD-001", "CT-EFF-004", "CT-EFF-006"]
 # why = "Bundled SQLite with FTS5 for the rebuildable index and search"
 
-# [[dep]]
-# name = "tree-sitter"
-# ecosystem = "cargo"
-# license = "MIT"
-# serves = ["CT-DEV-002", "CT-TRC-006"]
-# why = "Exact item spans for line-level trace coverage"
+[[dep]]
+name = "tree-sitter"
+ecosystem = "cargo"
+license = "MIT"
+serves = ["CT-DEV-002", "CT-TRC-006"]
+why = "Exact item spans for line-level trace coverage. Default features off"
+
+[[dep]]
+name = "tree-sitter-rust"
+ecosystem = "cargo"
+license = "MIT"
+serves = ["CT-DEV-002", "CT-TRC-006"]
+why = "Rust grammar for the tag scanner"
+
+[[dep]]
+name = "tree-sitter-typescript"
+ecosystem = "cargo"
+license = "MIT"
+serves = ["CT-DEV-002", "CT-TRC-006"]
+why = "TypeScript grammar for the tag scanner"
 
 # [[dep]]
 # name = "sha2"
