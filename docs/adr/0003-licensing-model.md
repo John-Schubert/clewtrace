@@ -2,7 +2,9 @@
 
 - Status: Accepted
 - Date: 2026-10-20
-- Serves: CT-DEV-009, CT-DEV-013, CT-PLT-005, CT-PLT-006, CT-PLT-007, CT-SEC-001, CT-SEC-006
+- Updated: 2026-10-21 (task 0.10, reviewed against what was built in phase 0)
+- Serves: CT-DEV-009, CT-DEV-013, CT-PLT-005, CT-PLT-006, CT-PLT-007, CT-SEC-001, CT-SEC-006,
+  CT-DEV-008, CT-DEV-012, CT-DEV-014
 
 ## Context
 
@@ -38,14 +40,42 @@ distributed.
 - **Build-only tools** (build scripts, proc macros, npm dev dependencies): any permissive
   license is fine without asking: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, Zlib,
   Unicode-3.0, CC0-1.0, Apache-2.0 WITH LLVM-exception, and approved MPL-2.0 crates.
+  Each one is still added as a per-crate exception in `deny.toml`, never to the general
+  allowlist, and recorded in `deps.toml` with `scope = "build-only"`.
+- **MS-RL, for WiX Toolset 3 only** (John, 2026-10-21): build-only CI tool. tauri-cli
+  downloads WiX at build time to make the MSI. WiX's FAQ states that MSIs it produces are
+  not covered by MS-RL. No other MS-RL tool or crate is approved.
 - **Never, in either tier:** GPL, AGPL, LGPL, and SSPL.
 - **MPL-2.0** is allowed only per crate, never on the general allowlist. Approved so far:
   cssparser, cssparser-macros, dtoa-short, and selectors (build-only), and option-ext
   (shipped). For each shipped MPL crate, each release attaches its unmodified source and
   the CT-DEV-014 notices file lists its crate, version, and source link.
-- `deny.toml` enforces this for Rust crates and `deps.toml` records each exception with its
-  scope. npm production and dev dependencies are checked separately (task 0.9), and the SBOM
-  marks each dependency as shipped or build-only.
+- **Per-crate exceptions approved so far** (`deny.toml`, each recorded in `deps.toml` with
+  its scope and dependency path):
+
+  | Crate | License | Scope | Path |
+  | --- | --- | --- | --- |
+  | cssparser, cssparser-macros, dtoa-short, selectors | MPL-2.0 | build-only | tauri-utils -> dom_query |
+  | option-ext | MPL-2.0 | shipped | tauri, wry -> dirs -> dirs-sys |
+  | target-lexicon | Apache-2.0 WITH LLVM-exception | build-only | Tauri's Linux GTK sys crates |
+  | WiX Toolset 3 (CI tool) | MS-RL | build-only | tauri-cli, MSI bundling |
+
+- **Advisories:** RUSTSEC-2024-0370 (proc-macro-error, unmaintained) is ignored in
+  `deny.toml` until Tauri moves off its GTK 0.18 crates. Any other ignore needs John.
+- **Enforcement as built (task 0.9):** `cargo deny check` enforces the Rust tiers in CI.
+  `clew notices` runs on all three OSes in CI and in every release. It decides what ships
+  from `cargo tree -e normal,no-proc-macro` for six desktop targets (not `cargo metadata`
+  alone, which marks build-script crates as shipped), and from the npm lockfile (`dev`
+  packages are build-only, all others ship). It checks npm production packages against the
+  shipped tier and dev packages against the build-only tier, and checks each `scope` in
+  `deps.toml` against what really ships. It writes `THIRD-PARTY-NOTICES.txt` (bundled in
+  each installer), a CycloneDX SBOM that marks each package shipped or build-only, and the
+  unmodified source of each shipped MPL-2.0 crate.
+- **Linux system libraries:** the deb and rpm use the distribution's own GTK and WebKitGTK
+  (LGPL), which we do not distribute. That is why there is no AppImage (ADR-0001).
+- Some shipped packages publish no license file (the objc2 family, webview2-com, block2,
+  dlopen2, tree-sitter-typescript, is-reference, locate-character). The notices file names
+  their license and repository until their license texts are added.
 - Confirm this policy in the attorney review planned below, before the first sale.
 
 ## Alternatives rejected
@@ -62,3 +92,6 @@ distributed.
   production use of such builds; official signed builds are the supported path.
 - The BSL text may not be modified except for its parameters, per its Covenants of Licensor.
 - Have an attorney review the commercial subscription terms before the first sale.
+- Official installers must be code-signed (Windows MSI and macOS DMG) before the first
+  business pilot. Free open-source signing programs do not apply to a BSL project, so plan
+  on Microsoft Artifact Signing and the Apple Developer Program (`docs/PLAN.md`).

@@ -5,6 +5,12 @@ Verification method: Inspection for CT-DEV-012 and CT-DEV-014, backed by the rel
 workflow (`.github/workflows/release.yml`), which is the test for CT-PLT-001 and CT-EFF-001.
 Go through this list for every release, before publishing the draft, and record the result.
 
+## Before the first release
+
+- [ ] `.github/release-signers` holds John's dedicated, passphrase-protected SSH release key
+      (git allowed-signers format). The `verify tag` job fails until a signer file exists.
+      The reviewer of task 0.10 adds it; no one else edits it without John.
+
 ## Automated in the release workflow
 
 - `verify tag`: the tag is annotated and signed by a key in `.github/release-signers` or
@@ -44,7 +50,9 @@ Go through this list for every release, before publishing the draft, and record 
 
 - [ ] MSI, DMG, deb, and rpm are attached, each 20 MB or smaller, and each matches its line
       in `SHA256SUMS.txt` (`sha256sum -c SHA256SUMS.txt`).
+- [ ] No AppImage or other bundle that includes GTK or WebKitGTK is attached (ADR-0001).
 - [ ] The installer opens the app on Windows 10, macOS 13, and Ubuntu (Gate 0).
+- [ ] `docs/INSTALL.md` still matches the installers, including the offline WebView2 step.
 
 ## Record
 

@@ -373,7 +373,7 @@ package ClewtraceRequirements {
         doc /* Installs on mainstream desktops, runs offline, and licenses without phoning home. */
 
         requirement <'CT-PLT-001'> installers : ProductRequirement {
-            doc /* CI shall produce installers for Windows 10 and newer (MSI), macOS 13 and newer (DMG), and Linux (AppImage, deb, rpm) on x64, plus ARM64 where supported. */
+            doc /* CI shall produce installers for Windows 10 and newer (MSI), macOS 13 and newer (DMG), and Linux (deb, rpm) on x64, plus ARM64 where supported. */
             attribute :>> verificationMethod = "Test";
             attribute :>> phase = 0;
         }
