@@ -144,3 +144,60 @@ ecosystem = "ci"
 license = "MIT"
 serves = ["CT-DEV-004"]
 why = "Caches the cargo registry and target directory between CI runs (ADR-0001). Pinned by commit in ci.yml. Chosen over Swatinem/rust-cache, which is LGPL-3.0"
+
+# Indirect crates that need an approved license exception in deny.toml (John, 2026-10-21).
+# `scope` says whether the crate ships in a release binary or runs only at build time.
+
+[[dep]]
+name = "cssparser"
+ecosystem = "cargo"
+license = "MPL-2.0"
+scope = "build-only"
+via = "tauri -> tauri-macros / tauri-codegen / tauri-build -> tauri-utils -> dom_query"
+serves = ["CT-PLT-001"]
+why = "Indirect: CSS parsing in Tauri's build-time HTML handling"
+
+[[dep]]
+name = "cssparser-macros"
+ecosystem = "cargo"
+license = "MPL-2.0"
+scope = "build-only"
+via = "tauri-utils -> dom_query -> cssparser"
+serves = ["CT-PLT-001"]
+why = "Indirect: proc macros for cssparser"
+
+[[dep]]
+name = "dtoa-short"
+ecosystem = "cargo"
+license = "MPL-2.0"
+scope = "build-only"
+via = "tauri-utils -> dom_query -> cssparser"
+serves = ["CT-PLT-001"]
+why = "Indirect: number formatting for cssparser"
+
+[[dep]]
+name = "selectors"
+ecosystem = "cargo"
+license = "MPL-2.0"
+scope = "build-only"
+via = "tauri-utils -> dom_query"
+serves = ["CT-PLT-001"]
+why = "Indirect: CSS selector matching in Tauri's build-time HTML handling"
+
+[[dep]]
+name = "option-ext"
+ecosystem = "cargo"
+license = "MPL-2.0"
+scope = "shipped"
+via = "tauri (and wry) -> dirs -> dirs-sys"
+serves = ["CT-PLT-001", "CT-DEV-014"]
+why = "Indirect: helper for finding standard folders. Ships unmodified; task 0.9 attaches its source to each release and lists it in the notices file"
+
+[[dep]]
+name = "target-lexicon"
+ecosystem = "cargo"
+license = "Apache-2.0 WITH LLVM-exception"
+scope = "build-only"
+via = "Tauri's Linux GTK sys crates (build scripts)"
+serves = ["CT-PLT-001"]
+why = "Indirect: target triple parsing at build time on Linux"

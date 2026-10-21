@@ -7,20 +7,25 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 // @end
 
+/// The context the app is built with: tauri.conf.json and the capability files.
+/// Generated once, because a second `generate_context!` in the same build defines the
+/// embedded Info.plist symbol twice on macOS.
+// @implements CT-PLT-001, CT-PLT-003
+fn context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
+}
+
 // @implements CT-PLT-001, CT-PLT-003
 fn main() {
     tauri::Builder::default()
-        .run(tauri::generate_context!())
+        .run(context())
         .expect("Clewtrace could not start its window");
 }
 
 // @verifies CT-SEC-001, CT-PLT-003
 #[cfg(test)]
 mod tests {
-    /// The context the app is built with: tauri.conf.json and the capability files.
-    fn context() -> tauri::Context<tauri::Wry> {
-        tauri::generate_context!()
-    }
+    use super::context;
 
     // @verifies CT-SEC-001, CT-PLT-003
     #[test]
