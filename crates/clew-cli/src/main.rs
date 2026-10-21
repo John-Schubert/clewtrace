@@ -5,6 +5,8 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use clew_core::check::{self, Report, Severity};
 use clew_core::commit;
+use clew_core::json;
+use clew_core::notices::{self, Package};
 use clew_core::reqs::{self, Requirement};
 
 // @implements CT-DEV-001
@@ -39,6 +41,15 @@ enum Command {
         /// The commit message file, for example .git/COMMIT_EDITMSG
         file: PathBuf,
     },
+    /// Check third-party licenses (npm tiers, recorded scopes), and with --out write the
+    /// license notices file, the SBOM, and the source of each shipped MPL-2.0 crate.
+    /// Runs `cargo metadata` and reads app/package-lock.json and app/node_modules.
+    /// Exits 0 when clean, 1 on any error, and 2 when the check cannot run
+    Notices {
+        /// Folder to write THIRD-PARTY-NOTICES.txt, sbom.cdx.json, and mpl-sources/ into
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
 }
 
 // @implements CT-TRC-008, CT-TRC-001
@@ -60,6 +71,7 @@ fn main() -> ExitCode {
         Command::Reqs { command } => run_reqs(command),
         Command::Check { self_check: _ } => run_check(),
         Command::CheckCommit { file } => run_check_commit(&file),
+        Command::Notices { out } => run_notices(out.as_deref()),
     }
 }
 
@@ -135,6 +147,142 @@ fn run_check_commit(file: &Path) -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+// @implements CT-DEV-014, CT-DEV-008, CT-USE-007
+fn run_notices(out: Option<&Path>) -> ExitCode {
+    let packages = match read_packages() {
+        Ok(packages) => packages,
+        Err(e) => {
+            eprintln!("clew: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let deps = match fs::read_to_string(check::DEPS_FILE)
+        .map_err(|e| format!("{}: {e}", check::DEPS_FILE))
+        .and_then(|text| notices::read_dep_entries(&text))
+    {
+        Ok(deps) => deps,
+        Err(e) => {
+            eprintln!("clew: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let mut report = notices::check_policy(&packages, &deps);
+    report.files = 2;
+    let shipped = packages
+        .iter()
+        .filter(|p| p.scope == notices::Scope::Shipped)
+        .count();
+    println!(
+        "clew notices: {} packages, {shipped} shipped, {} build-only",
+        packages.len(),
+        packages.len() - shipped
+    );
+    let code = print_report("clew notices", &report);
+    if code != ExitCode::SUCCESS {
+        return code;
+    }
+    match out.map(|dir| write_notices(dir, &packages)) {
+        Some(Err(e)) => {
+            eprintln!("clew: {e}");
+            ExitCode::from(2)
+        }
+        _ => code,
+    }
+}
+
+/// Every third-party package, from `cargo metadata` for each desktop target and the npm
+/// lockfile, with the license texts found in its installed folder.
+// @implements CT-DEV-014
+fn read_packages() -> Result<Vec<Package>, String> {
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let run = |args: &[&str]| -> Result<String, String> {
+        let output = std::process::Command::new(&cargo)
+            .args(args)
+            .output()
+            .map_err(|e| format!("cannot run cargo: {e}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("cargo {} failed:\n{stderr}", args.join(" ")));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    };
+    let mut metadata = Vec::new();
+    let mut shipped = std::collections::BTreeSet::new();
+    for target in notices::DESKTOP_TARGETS {
+        let text = run(&[
+            "metadata",
+            "--locked",
+            "--format-version",
+            "1",
+            "--filter-platform",
+            target,
+        ])?;
+        metadata.push(json::parse(&text).map_err(|e| format!("cargo metadata: {e}"))?);
+        let tree = run(&[
+            "tree",
+            "--locked",
+            "--workspace",
+            "--edges",
+            "normal,no-proc-macro",
+            "--target",
+            target,
+            "--prefix",
+            "none",
+            "--format",
+            "{p}",
+        ])?;
+        shipped.extend(notices::tree_crates(&tree));
+    }
+    let mut packages = notices::cargo_packages(&metadata, &shipped)?;
+    let lock_text =
+        fs::read_to_string(notices::NPM_LOCK).map_err(|e| format!("{}: {e}", notices::NPM_LOCK))?;
+    let lock = json::parse(&lock_text).map_err(|e| format!("{}: {e}", notices::NPM_LOCK))?;
+    let modules = Path::new(notices::NPM_MODULES);
+    if !modules.is_dir() {
+        return Err(format!(
+            "{} is missing. Run `npm ci` in app/ first",
+            notices::NPM_MODULES
+        ));
+    }
+    let app = modules.parent().unwrap_or(Path::new("."));
+    packages.extend(notices::npm_packages(&lock, app));
+    for p in &mut packages {
+        if let Some(dir) = &p.dir {
+            p.license_texts = notices::read_license_texts(dir);
+        }
+    }
+    Ok(packages)
+}
+
+/// Writes the notices file, the SBOM, and a copy of each shipped MPL-2.0 crate archive.
+// @implements CT-DEV-014
+fn write_notices(dir: &Path, packages: &[Package]) -> Result<(), String> {
+    let sources = dir.join("mpl-sources");
+    fs::create_dir_all(&sources).map_err(|e| format!("{}: {e}", sources.display()))?;
+    let write = |path: PathBuf, text: String| {
+        fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
+    };
+    write(
+        dir.join("THIRD-PARTY-NOTICES.txt"),
+        notices::notices_text(packages),
+    )?;
+    write(
+        dir.join("sbom.cdx.json"),
+        notices::sbom_json(packages, env!("CARGO_PKG_VERSION")),
+    )?;
+    for p in packages.iter().filter(|p| p.needs_source()) {
+        let archive = p
+            .archive
+            .as_ref()
+            .filter(|a| a.is_file())
+            .ok_or_else(|| format!("no source archive found for {}", p.label()))?;
+        let name = archive.file_name().unwrap_or_default();
+        fs::copy(archive, sources.join(name)).map_err(|e| format!("{}: {e}", archive.display()))?;
+    }
+    println!("clew notices: wrote {}", dir.display());
+    Ok(())
 }
 
 /// Prints each finding and a summary line, and maps errors to the exit code.

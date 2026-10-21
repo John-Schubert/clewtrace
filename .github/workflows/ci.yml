@@ -1,7 +1,7 @@
-# @file CT-DEV-004, CT-DEV-005, CT-DEV-008, CT-PLT-001
+# @file CT-DEV-004, CT-DEV-005, CT-DEV-008, CT-DEV-014, CT-PLT-001
 # CI gate on Ubuntu, Windows, and macOS: builds the desktop app (UI and Tauri crate), then
-# format, lint, tests, the trace gate, the commit hook, and (on Ubuntu) commit trailers and
-# cargo-deny. Installers are built by the release workflow. Rules: docs/TRACEABILITY.md.
+# format, lint, tests, the trace gate, the license notices check, the commit hook, and (on
+# Ubuntu) commit trailers and cargo-deny. Installers are built by the release workflow. Rules: docs/TRACEABILITY.md.
 name: ci
 
 on:
@@ -81,6 +81,11 @@ jobs:
 
       - name: Trace gate
         run: cargo run --locked -p clew-cli -- check --self
+
+      # npm production packages against the shipped license tier, dev packages against the
+      # build-only tier, and deps.toml scopes against what ships (ADR-0003, CT-DEV-014).
+      - name: Notices and npm licenses
+        run: cargo run --locked -p clew-cli -- notices
 
       - name: Commit trailers
         if: github.event_name == 'pull_request' && runner.os == 'Linux'

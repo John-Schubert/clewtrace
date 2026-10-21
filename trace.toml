@@ -26,6 +26,11 @@ reason = "Tauri app config: window, strict content security policy, no plugins. 
 requirement = "CT-SEC-001"
 
 [[exclude]]
+path = "app/src-tauri/tauri.release.conf.json"
+reason = "Release-only Tauri config merged by the release workflow: installers, notices file, no WebView2 download. JSON has no comments"
+requirement = "CT-DEV-014"
+
+[[exclude]]
 path = "app/src-tauri/capabilities/*.json"
 reason = "Tauri capability files granting the UI its only commands. JSON has no comments"
 requirement = "CT-SEC-001"

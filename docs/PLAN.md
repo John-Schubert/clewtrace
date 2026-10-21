@@ -149,7 +149,7 @@ blocks a commit that adds an untraced line or lacks a `Refs:` trailer.
       - Follow-up: the check reads direct dependencies only. Tauri pulls `reqwest` on Android
         and iOS only, not on desktop. A resolved-tree check (`cargo tree` per desktop target)
         in CI would also catch a network crate added indirectly. Candidate for 0.9.
-- [ ] **0.9 Release workflow.** On a signed tag, CI builds MSI, DMG, AppImage, deb, and rpm,
+- [x] **0.9 Release workflow.** On a signed tag, CI builds MSI, DMG, AppImage, deb, and rpm,
       fails if any installer exceeds 20 MB, and attaches SHA-256 checksums. It also generates a
       third-party license notices file from the Cargo and npm dependency trees, ships it inside
       each installer, and attaches it to the release. Add an inspection checklist for it in
@@ -159,6 +159,35 @@ blocks a commit that adds an untraced line or lacks a `Refs:` trailer.
       license tier and dev dependencies against the build-only tier (ADR-0003). The SBOM
       marks each dependency as shipped or build-only.
       Refs: CT-PLT-001, CT-EFF-001, CT-DEV-012, CT-DEV-014
+      - `.github/workflows/release.yml` runs on a `v*` tag. It checks the tag is annotated,
+        signed by a key in `.github/release-signers` (SSH) or `.github/release-keys.asc`
+        (OpenPGP), on `main`, and matches the version. It then builds MSI (Windows), a
+        universal DMG (macOS), and deb and rpm (Ubuntu 22.04), fails over 20,000,000 bytes,
+        and attaches everything to a draft release with `SHA256SUMS.txt`. John publishes
+        the draft after `docs/verification/release.md`. No new actions: it uses `gh`.
+      - `clew notices [--out DIR]` (`crates/clew-core/src/notices.rs`) writes the notices
+        file, a CycloneDX SBOM, and `mpl-sources/`. Shipped crates are the ones
+        `cargo tree -e normal,no-proc-macro` lists for any of six desktop targets; license
+        data comes from `cargo metadata`. `cargo metadata` alone is not enough: it merges
+        build-script features into the normal graph and marks cssparser and selectors as
+        shipped. npm `dev` packages are build-only, all others shipped.
+      - CI runs `clew notices` on all three OSes: npm production packages against the
+        shipped tier, dev packages against the build-only tier, and each `scope` in
+        `deps.toml` against what really ships.
+      - svelte moved from devDependencies to dependencies: its runtime is compiled into the
+        web bundle, so it and its dependencies ship (all MIT or Apache-2.0).
+      - 0.8 follow-up closed: `resolved_desktop_trees_have_no_network_crates` in the
+        `no_network` module runs `cargo tree -e normal` for six desktop targets and fails on
+        any `NETWORK_CRATES` entry or `tauri-plugin-*` crate.
+      - `tauri.release.conf.json` turns bundling on, bundles the notices file, and sets
+        WebView2 install mode to `skip`, so the MSI never downloads WebView2. Needs John.
+      - Not built yet, needs John: AppImage (bundles GTK and WebKitGTK, which are LGPL and
+        far over 20 MB). The MSI is built with WiX, which tauri-cli downloads; WiX is
+        MS-RL, not on the build-only list.
+      - Not covered yet: Windows and Linux ARM64 installers, code signing of the MSI and
+        DMG (needs certificates), and 16 packages with no license file in their package
+        (objc2 family, webview2-com, block2, dlopen2, tree-sitter-typescript, is-reference,
+        locate-character): the notices file names their license and repository only.
 - [ ] **0.10 Decisions recorded.** Review ADR-0001, ADR-0002, and ADR-0003 against what was
       built, and update them. Fill `deps.toml` completely.
       Refs: CT-DEV-008, CT-DEV-010, CT-CMP-008
