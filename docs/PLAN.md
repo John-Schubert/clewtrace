@@ -16,13 +16,20 @@ blocks a commit that adds an untraced line or lacks a `Refs:` trailer.
       Follow-ups:
       - `clew check --self` does not exist yet (task 0.4), so this task was not gate-checked.
       - `--version` parses arguments with the standard library. Revisit when `clap` is
-        approved and added for later subcommands.
-- [ ] **0.2 Requirement ID reader (v0).** In `clew-core`, read `model/requirements.sysml` and
+        approved and added for later subcommands. Done in 0.2: John approved `clap` on
+        2026-10-21 and `--version` now uses it.
+- [x] **0.2 Requirement ID reader (v0).** In `clew-core`, read `model/requirements.sysml` and
       extract each requirement's short name, declared name, `doc` text, `verificationMethod`,
       and `phase`. This is a deliberately small reader for the shapes used in that file; the
       real parser replaces it in task 1.2. Add `clew reqs list` and `clew reqs show <ID>`.
       Test against the real file: 74 requirements, no duplicates.
       Refs: CT-DEV-001, CT-TRC-001
+      Follow-ups:
+      - `clew check --self` does not exist yet (task 0.4), so this task was not gate-checked.
+      - `clew reqs` reads `model/requirements.sysml` relative to the current directory. A
+        project-root lookup belongs with project opening in a later task.
+      - `deps.toml` lists clap's transitive crates too, since its header says CI checks every
+        crate in `Cargo.lock`. The task 0.4 checker should match that.
 - [ ] **0.3 Tag scanner (v0).** Use tree-sitter (Rust and TypeScript grammars) to find item
       spans, read `@implements`, `@verifies`, `@begin`/`@end`, and `@file` tags, and compute
       which lines are traced. Svelte files use `@begin`/`@end` regions in v0. Build fixtures
