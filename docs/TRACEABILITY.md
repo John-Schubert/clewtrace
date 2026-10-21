@@ -100,7 +100,10 @@ Refs: CT-TRC-004, CT-TRC-008
 ```
 
 `git blame` on any line then leads to the commit and the requirement behind it.
-`clew check-commit` validates the trailer, and CI runs it on every commit in a pull request.
+`clew check-commit <file>` validates the trailer, and CI runs it on every commit in a pull request.
+Run `sh scripts/install-hooks.sh` (or `scripts\install-hooks.ps1` on Windows) once per clone
+to run it as a `commit-msg` hook. The trailer must be in the last paragraph, after a blank
+line. Lines starting with `#` are comments and are ignored, as in git.
 
 ## What `clew check --self` reports
 

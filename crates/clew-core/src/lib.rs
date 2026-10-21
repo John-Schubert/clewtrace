@@ -2,6 +2,11 @@
 
 // @begin CT-DEV-002, CT-DEV-004
 pub mod check;
+// @end
+// @begin CT-DEV-005
+pub mod commit;
+// @end
+// @begin CT-DEV-002, CT-DEV-004
 pub mod config;
 // @end
 // @begin CT-DEV-001, CT-TRC-001

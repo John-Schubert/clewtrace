@@ -230,9 +230,9 @@ struct Checker {
     report: Report,
 }
 
-/// Runs every check on the project rooted at `root`.
-// @implements CT-DEV-002, CT-DEV-004, CT-TRC-008
-pub fn check_project(root: &Path) -> Result<Report, SetupError> {
+/// Reads `trace.toml`, its `id_pattern`, and the known requirement IDs under `root`.
+// @implements CT-DEV-004, CT-DEV-005, CT-USE-007
+pub fn load_ids(root: &Path) -> Result<(TraceConfig, IdPattern, BTreeSet<String>), SetupError> {
     let config_path = root.join(TRACE_CONFIG);
     if !config_path.is_file() {
         return Err(SetupError {
@@ -256,6 +256,13 @@ pub fn check_project(root: &Path) -> Result<Report, SetupError> {
         })?;
         known.extend(all.into_iter().map(|r| r.id));
     }
+    Ok((config, pattern, known))
+}
+
+/// Runs every check on the project rooted at `root`.
+// @implements CT-DEV-002, CT-DEV-004, CT-TRC-008
+pub fn check_project(root: &Path) -> Result<Report, SetupError> {
+    let (config, pattern, known) = load_ids(root)?;
     let mut checker = Checker {
         root: root.to_path_buf(),
         config,
