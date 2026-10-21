@@ -13,6 +13,9 @@ pub mod config;
 pub mod json;
 pub mod notices;
 // @end
+// @begin CT-MOD-002, CT-USE-007
+pub mod parse;
+// @end
 // @begin CT-DEV-001, CT-TRC-001
 pub mod reqs;
 // @end
