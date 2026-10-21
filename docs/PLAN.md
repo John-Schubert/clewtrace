@@ -231,8 +231,12 @@ blocks a commit that adds an untraced line or lacks a `Refs:` trailer.
 Exit gate: Clewtrace traces itself with 100% line coverage, and every phase 0 and phase 1
 requirement is implemented and verified or formally waived.
 
-- [ ] **1.1 Lexer.** SysML v2 tokens for the CT-MOD-002 subset, with exact line and column.
+- [x] **1.1 Lexer.** SysML v2 tokens for the CT-MOD-002 subset, with exact line and column.
       Refs: CT-MOD-002, CT-USE-007
+      Done in `crates/clew-core/src/parse/lexer.rs`. Follow-ups: the parser (1.2) prefixes
+      lexer errors with the file path; the keyword list is the SysML v2 reserved words as
+      recalled, so check it against the spec's keyword table when the parser grows past the
+      subset.
 - [ ] **1.2 Parser.** Recursive descent with error recovery for packages, imports, comments
       and doc, part, attribute, port, and requirement definitions and usages, short names,
       satisfy, and verify. Replace the v0 reader from task 0.2. Fixture tests per construct.
