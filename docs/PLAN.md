@@ -188,9 +188,24 @@ blocks a commit that adds an untraced line or lacks a `Refs:` trailer.
         DMG (needs certificates), and 16 packages with no license file in their package
         (objc2 family, webview2-com, block2, dlopen2, tree-sitter-typescript, is-reference,
         locate-character): the notices file names their license and repository only.
-- [ ] **0.10 Decisions recorded.** Review ADR-0001, ADR-0002, and ADR-0003 against what was
+- [x] **0.10 Decisions recorded.** Review ADR-0001, ADR-0002, and ADR-0003 against what was
       built, and update them. Fill `deps.toml` completely.
       Refs: CT-DEV-008, CT-DEV-010, CT-CMP-008
+      - Applied John's 0.9 release decisions: AppImage dropped (CT-PLT-001 now says Linux
+        (deb, rpm)), WebView2 install mode stays `skip` with the offline runtime step in
+        `docs/INSTALL.md`, and WiX Toolset 3 (MS-RL) recorded as a build-only CI tool.
+      - ADR-0001: installers, WebView2, what is built so far, Svelte scanned by regions only.
+        ADR-0002: as-built checker, trailer rules, JSON excludes, checklists. ADR-0003:
+        two-tier policy, per-crate exceptions table, MS-RL for WiX only, `clew notices`,
+        advisory ignore, code-signing gate.
+      - `deps.toml`: every entry has a `scope`, checked by `clew notices`; added the Rust
+        toolchain, Node.js, `gh`, and WiX as CI tools.
+      - `docs/verification/release.md` notes that the first release needs John's SSH key in
+        `.github/release-signers` (the reviewer adds it).
+      - Follow-up: fetch license files for the shipped packages that publish none (the objc2
+        family, webview2-com, block2, dlopen2, tree-sitter-typescript, is-reference,
+        locate-character) and add them to the notices file.
+      - Follow-up: ADR-0002 is still "Proposed"; John to decide whether to mark it Accepted.
 - [ ] **Gate 0 check.** John installs the release build on his Windows 10 laptop (4 GB) and
       confirms it runs; Mac and Linux installers are confirmed by CI smoke tests. Confirm CI
       rejects an untraced line and a commit without a trailer. Then set `current_phase = 1`

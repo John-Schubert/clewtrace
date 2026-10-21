@@ -1,6 +1,9 @@
 # @file CT-DEV-008
 # Every direct third-party dependency: its license, why it exists, and the requirement it
-# serves. Indirect crates are covered by the CI license checks and the release SBOM.
+# serves. Indirect crates are covered by the CI license checks and the release SBOM, except
+# those that need a license exception, which are listed at the end with their `via` path.
+# `scope` is "shipped" (linked into the app or CLI, or in the web bundle) or "build-only"
+# (build scripts, proc macros, dev tools). `clew notices` checks each scope in CI.
 # `clew check --self` fails if a direct dependency in a Cargo.toml or package.json is missing
 # here. CI tools use ecosystem "ci" and are listed by hand.
 # Planned dependencies are listed commented out; uncomment each one when it is first added.
@@ -9,6 +12,7 @@
 name = "tauri"
 ecosystem = "cargo"
 license = "MIT OR Apache-2.0"
+scope = "shipped"
 serves = ["CT-PLT-001", "CT-EFF-001"]
 why = "Desktop shell using the OS web view (ADR-0001). Default features off; wry only"
 
@@ -16,6 +20,7 @@ why = "Desktop shell using the OS web view (ADR-0001). Default features off; wry
 name = "tauri-build"
 ecosystem = "cargo"
 license = "MIT OR Apache-2.0"
+scope = "build-only"
 serves = ["CT-PLT-001", "CT-SEC-001"]
 why = "Build script for the app: reads tauri.conf.json and compiles the capability files. Default features off; config-json only"
 
@@ -30,6 +35,7 @@ why = "Build script for the app: reads tauri.conf.json and compiles the capabili
 name = "tree-sitter"
 ecosystem = "cargo"
 license = "MIT"
+scope = "shipped"
 serves = ["CT-DEV-002", "CT-TRC-006"]
 why = "Exact item spans for line-level trace coverage. Default features off"
 
@@ -37,6 +43,7 @@ why = "Exact item spans for line-level trace coverage. Default features off"
 name = "tree-sitter-rust"
 ecosystem = "cargo"
 license = "MIT"
+scope = "shipped"
 serves = ["CT-DEV-002", "CT-TRC-006"]
 why = "Rust grammar for the tag scanner"
 
@@ -44,6 +51,7 @@ why = "Rust grammar for the tag scanner"
 name = "tree-sitter-typescript"
 ecosystem = "cargo"
 license = "MIT"
+scope = "shipped"
 serves = ["CT-DEV-002", "CT-TRC-006"]
 why = "TypeScript grammar for the tag scanner"
 
@@ -65,6 +73,7 @@ why = "TypeScript grammar for the tag scanner"
 name = "clap"
 ecosystem = "cargo"
 license = "MIT OR Apache-2.0"
+scope = "shipped"
 serves = ["CT-TRC-008"]
 why = "Command-line parsing for the clew CLI. Default features off; std, derive, help, usage, error-context only"
 
@@ -72,6 +81,7 @@ why = "Command-line parsing for the clew CLI. Default features off; std, derive,
 name = "svelte"
 ecosystem = "npm"
 license = "MIT"
+scope = "shipped"
 serves = ["CT-USE-001", "CT-EFF-002"]
 why = "Compiled UI framework with a small runtime (ADR-0001). Runes syntax only"
 
@@ -79,6 +89,7 @@ why = "Compiled UI framework with a small runtime (ADR-0001). Runes syntax only"
 name = "@tauri-apps/api"
 ecosystem = "npm"
 license = "Apache-2.0 OR MIT"
+scope = "shipped"
 serves = ["CT-PLT-001"]
 why = "Typed calls from the UI to the Rust side over Tauri IPC. Only the app module is used so far"
 
@@ -86,6 +97,7 @@ why = "Typed calls from the UI to the Rust side over Tauri IPC. Only the app mod
 name = "@tauri-apps/cli"
 ecosystem = "npm"
 license = "Apache-2.0 OR MIT"
+scope = "build-only"
 serves = ["CT-PLT-001"]
 why = "Build tool: runs the dev server with the app and builds release binaries and installers"
 
@@ -93,6 +105,7 @@ why = "Build tool: runs the dev server with the app and builds release binaries 
 name = "@sveltejs/vite-plugin-svelte"
 ecosystem = "npm"
 license = "MIT"
+scope = "build-only"
 serves = ["CT-PLT-001", "CT-EFF-002"]
 why = "Build tool: compiles Svelte components in the Vite build. Version 6, for Vite 7"
 
@@ -100,6 +113,7 @@ why = "Build tool: compiles Svelte components in the Vite build. Version 6, for 
 name = "vite"
 ecosystem = "npm"
 license = "MIT"
+scope = "build-only"
 serves = ["CT-PLT-001", "CT-PLT-003"]
 why = "Build tool: bundles the UI into app/dist, which is embedded in the app binary. Version 7, since Vite 8 pulls in lightningcss (MPL-2.0)"
 
@@ -107,6 +121,7 @@ why = "Build tool: bundles the UI into app/dist, which is embedded in the app bi
 name = "typescript"
 ecosystem = "npm"
 license = "Apache-2.0"
+scope = "build-only"
 serves = ["CT-DEV-004"]
 why = "Type checker for the UI, run by svelte-check. Version 6, the newest svelte-check supports"
 
@@ -114,6 +129,7 @@ why = "Type checker for the UI, run by svelte-check. Version 6, the newest svelt
 name = "svelte-check"
 ecosystem = "npm"
 license = "MIT"
+scope = "build-only"
 serves = ["CT-DEV-004"]
 why = "Type and Svelte diagnostics for the UI in CI (`npm run check`)"
 
@@ -128,6 +144,7 @@ why = "Type and Svelte diagnostics for the UI in CI (`npm run check`)"
 name = "cargo-deny"
 ecosystem = "ci"
 license = "MIT OR Apache-2.0"
+scope = "build-only"
 serves = ["CT-DEV-008"]
 why = "CI check for disallowed licenses, known advisories, and unknown crate sources. Release binary pinned by SHA-256 in ci.yml"
 
@@ -135,6 +152,7 @@ why = "CI check for disallowed licenses, known advisories, and unknown crate sou
 name = "actions/checkout"
 ecosystem = "ci"
 license = "MIT"
+scope = "build-only"
 serves = ["CT-DEV-004"]
 why = "Checks out the repository in GitHub Actions. Pinned by commit in ci.yml"
 
@@ -142,8 +160,41 @@ why = "Checks out the repository in GitHub Actions. Pinned by commit in ci.yml"
 name = "actions/cache"
 ecosystem = "ci"
 license = "MIT"
+scope = "build-only"
 serves = ["CT-DEV-004"]
 why = "Caches the cargo registry and target directory between CI runs (ADR-0001). Pinned by commit in ci.yml. Chosen over Swatinem/rust-cache, which is LGPL-3.0"
+
+[[dep]]
+name = "rust"
+ecosystem = "ci"
+license = "MIT OR Apache-2.0"
+scope = "build-only"
+serves = ["CT-DEV-009", "CT-DEV-004"]
+why = "Rust compiler, cargo, rustfmt, and clippy. Version pinned in rust-toolchain.toml; rustup on the runner image installs it"
+
+[[dep]]
+name = "node"
+ecosystem = "ci"
+license = "MIT"
+scope = "build-only"
+serves = ["CT-PLT-001", "CT-DEV-004"]
+why = "Node.js and npm from the runner image: install, check, and build the UI. Vite 7 needs 20.19 or newer"
+
+[[dep]]
+name = "gh"
+ecosystem = "ci"
+license = "MIT"
+scope = "build-only"
+serves = ["CT-DEV-012"]
+why = "GitHub CLI from the runner image: creates the draft release and uploads its assets in release.yml, so no extra actions are needed"
+
+[[dep]]
+name = "wix3"
+ecosystem = "ci"
+license = "MS-RL"
+scope = "build-only"
+serves = ["CT-PLT-001"]
+why = "WiX Toolset 3 builds the Windows MSI. tauri-cli downloads it at build time in release.yml. WiX's FAQ states MSIs it produces are not covered by MS-RL. Approved by John 2026-10-21 for WiX only (ADR-0003)"
 
 # Indirect crates that need an approved license exception in deny.toml (John, 2026-10-21).
 # `scope` says whether the crate ships in a release binary or runs only at build time.
