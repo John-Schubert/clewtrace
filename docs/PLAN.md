@@ -84,12 +84,30 @@ blocks a commit that adds an untraced line or lacks a `Refs:` trailer.
         text below git's scissors line are ignored. The key is case-sensitive.
       - The hook uses `$CLEW`, then `clew` on PATH, then `cargo run`, and blocks the commit
         when none is found. The `.ps1` installer was not run here (no PowerShell in the
-        cloud session). Check it once on Windows.
-- [ ] **0.6 CI workflow.** GitHub Actions on Ubuntu, Windows, and macOS: fmt, clippy, tests,
+        cloud session). Check it once on Windows. Done in 0.6: the Windows CI job runs
+        `scripts\install-hooks.ps1` and checks that the hook blocks a commit without a
+        `Refs:` trailer and allows one with it.
+- [x] **0.6 CI workflow.** GitHub Actions on Ubuntu, Windows, and macOS: fmt, clippy, tests,
       `clew check --self`, `clew check-commit` on each pull request commit, and cargo-deny for
       licenses and advisories. Every dependency so far is listed in `deps.toml`, and CI fails
       when one is missing.
       Refs: CT-DEV-004, CT-DEV-008
+      Follow-ups:
+      - `.github/workflows/ci.yml` runs fmt, clippy, tests, `clew check --self`, and the commit
+        hook test on all three OSes. `clew check-commit` on each PR commit and cargo-deny run
+        on Ubuntu. Not yet run on GitHub when this was written; check the first PR run.
+      - `clew check --self` now fails when a direct dependency in any `Cargo.toml` has no
+        `cargo` entry in `deps.toml`. Path and `workspace = true` dependencies are skipped.
+        package.json is not read yet; add that in 0.7 when `app/` gets one.
+      - John's 2026-10-21 decisions applied: `max_scope_lines` skips scopes with only
+        `@verifies` tags (rule 4 updated), and the `scan.rs` test that duplicated the gate is
+        removed. `impl Scanner` in `scan.rs` still warns at 346 lines.
+      - cargo-deny 0.20.2 is installed from its release binary, pinned by SHA-256.
+        actions/checkout is pinned by commit. Both are in `deps.toml` as ecosystem `ci`.
+      - `deny.toml` allows MIT, Apache-2.0, Unicode-3.0, and Zlib (foldhash, a build-time
+        crate under tree-sitter). John to confirm the allowlist. Add BSD-3-Clause with
+        ed25519-dalek.
+      - No build cache in CI, to avoid another action. Add one if CI time becomes a problem.
 - [ ] **0.7 Empty desktop app.** Tauri 2 with Svelte 5 (runes syntax) + TypeScript showing a
       window with the app name and version. Lock down Tauri capabilities: no HTTP, shell, or
       updater plugins, and a strict content security policy. Every source file tagged. The

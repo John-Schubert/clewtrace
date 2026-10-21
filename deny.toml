@@ -1,0 +1,30 @@
+# @file CT-DEV-008
+# cargo-deny policy: allowed licenses, known advisories, and crate sources. CI runs
+# `cargo deny check` on every pull request.
+
+[graph]
+all-features = true
+
+[advisories]
+# Unmaintained and unsound crates fail the check too, not only vulnerabilities.
+unmaintained = "all"
+yanked = "deny"
+
+[licenses]
+# Permissive licenses only, so the BUSL-1.1 product can ship every crate it links.
+# Add BSD-3-Clause when ed25519-dalek is added (deps.toml).
+allow = ["MIT", "Apache-2.0", "Unicode-3.0", "Zlib"]
+confidence-threshold = 0.93
+
+[licenses.private]
+# Our own crates are BUSL-1.1 (LICENSE) and are not published.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

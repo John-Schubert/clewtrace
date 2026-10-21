@@ -30,8 +30,10 @@ Rules:
    A file that has no tagged item fails, so imports alone never pass.
 3. Blank lines and comment-only lines are exempt. In Svelte files, a line holding only a
    `<script ...>`, `</script>`, `<style ...>`, or `</style>` tag is exempt too.
-4. A single tagged scope longer than `max_scope_lines` in `trace.toml` (default 200) produces a
-   warning. Large scopes usually mean the tag is too coarse to be meaningful.
+4. An `@implements` scope or `@begin`/`@end` region longer than `max_scope_lines` in
+   `trace.toml` (default 200) produces a warning. Large scopes usually mean the tag is too
+   coarse to be meaningful. Scopes that carry only `@verifies` tags, such as test modules, are
+   exempt, since each test inside has its own tag.
 5. Generated or vendored code is excluded only by an `[[exclude]]` entry in `trace.toml`, with
    a reason and the requirement it serves.
 6. JSON has no comments, so it cannot carry an `@file` tag. Each JSON config file under a
@@ -115,8 +117,9 @@ line. Lines starting with `#` are comments and are ignored, as in git.
 | Commit without a `Refs:` trailer | Error |
 | File under a source root whose type cannot be traced, and no `[[exclude]]` | Error |
 | `[[exclude]]` with an empty reason or an unknown requirement | Error |
+| Direct dependency in a `Cargo.toml` with no `[[dep]]` entry in `deps.toml` | Error |
 | `[[exclude]]` that matches no file | Warning |
-| Tagged scope longer than `max_scope_lines` | Warning |
+| `@implements` scope or region longer than `max_scope_lines` | Warning |
 | Requirement with an unusually large or small code footprint | Info, in the report |
 
 Each finding prints as `path:line: severity: message` with a `help:` line saying how to fix

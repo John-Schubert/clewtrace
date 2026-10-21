@@ -1,7 +1,8 @@
 # @file CT-DEV-008
 # Every direct third-party dependency: its license, why it exists, and the requirement it
 # serves. Indirect crates are covered by the CI license checks and the release SBOM.
-# CI fails if a direct dependency in a Cargo.toml or package.json is missing here.
+# `clew check --self` fails if a direct dependency in a Cargo.toml is missing here
+# (package.json from task 0.7). CI tools use ecosystem "ci" and are listed by hand.
 # Planned dependencies are listed commented out; uncomment each one when it is first added.
 
 # [[dep]]
@@ -73,3 +74,17 @@ why = "Command-line parsing for the clew CLI. Default features off; std, derive,
 # license = "MIT"
 # serves = ["CT-MOD-004", "CT-USE-004"]
 # why = "Small, accessible text editor for SysML v2"
+
+[[dep]]
+name = "cargo-deny"
+ecosystem = "ci"
+license = "MIT OR Apache-2.0"
+serves = ["CT-DEV-008"]
+why = "CI check for disallowed licenses, known advisories, and unknown crate sources. Release binary pinned by SHA-256 in ci.yml"
+
+[[dep]]
+name = "actions/checkout"
+ecosystem = "ci"
+license = "MIT"
+serves = ["CT-DEV-004"]
+why = "Checks out the repository in GitHub Actions. Pinned by commit in ci.yml"

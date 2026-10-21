@@ -1,5 +1,6 @@
 //! `clew check --self`: scans the source roots in `trace.toml` and reports untraced lines,
-//! unknown requirement IDs, and oversized scopes. Rules: docs/TRACEABILITY.md.
+//! unknown requirement IDs, oversized scopes, and dependencies missing from `deps.toml`.
+//! Rules: docs/TRACEABILITY.md.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -515,7 +516,13 @@ impl Checker {
         let max = self.config.max_scope_lines;
         for scope in &result.scopes {
             let lines = scope.end_line - scope.start_line + 1;
-            if matches!(scope.kind, ScopeKind::Item | ScopeKind::Region) && lines > max {
+            // Test scopes are exempt: each test inside carries its own `@verifies` tag.
+            let sized = match scope.kind {
+                ScopeKind::Item => !scope.implements.is_empty(),
+                ScopeKind::Region => true,
+                ScopeKind::File | ScopeKind::Import => false,
+            };
+            if sized && lines > max {
                 self.push(
                     path,
                     scope.start_line,
@@ -527,20 +534,70 @@ impl Checker {
         }
     }
 
-    /// Checks the `serves` IDs of every `[[dep]]` in `deps.toml`.
+    /// Checks the `serves` IDs of every `[[dep]]` in `deps.toml`, and that every direct
+    /// dependency in a `Cargo.toml` has a `[[dep]]` entry.
     fn check_deps(&mut self) -> Result<(), SetupError> {
-        let Ok(text) = std::fs::read_to_string(self.root.join(DEPS_FILE)) else {
-            return Ok(());
-        };
+        let text = std::fs::read_to_string(self.root.join(DEPS_FILE)).unwrap_or_default();
         let tables = parse_tables(&text).map_err(|e| setup_error(DEPS_FILE, e))?;
+        let mut listed = BTreeSet::new();
         for dep in tables.iter().filter(|t| t.array && t.name == "dep") {
             let serves = dep.list("serves").map_err(|e| setup_error(DEPS_FILE, e))?;
             let line = dep.get("serves").map_or(dep.line, |e| e.line);
             for id in serves {
                 self.check_id(DEPS_FILE, line, id);
             }
+            if let (Ok(name), Ok("cargo")) = (dep.string("name"), dep.string("ecosystem")) {
+                listed.insert(name.to_string());
+            }
+        }
+        for path in self.manifests()? {
+            let Ok(text) = std::fs::read_to_string(self.root.join(&path)) else {
+                continue;
+            };
+            for dep in manifest_deps(&text) {
+                if !dep.local && !listed.contains(&dep.name) {
+                    self.push(
+                        &path,
+                        dep.line,
+                        Severity::Error,
+                        format!("cargo dependency `{}` is not listed in deps.toml", dep.name),
+                        "add a [[dep]] entry with its license, why, and the requirements it serves, after John approves the dependency",
+                    );
+                }
+            }
         }
         Ok(())
+    }
+
+    /// Every `Cargo.toml` in the project, skipping build output and hidden directories.
+    fn manifests(&self) -> Result<Vec<String>, SetupError> {
+        let mut found = Vec::new();
+        let mut dirs = vec![PathBuf::new()];
+        while let Some(dir) = dirs.pop() {
+            let io = |e: std::io::Error| SetupError {
+                path: dir.display().to_string(),
+                line: 0,
+                message: e.to_string(),
+            };
+            for entry in std::fs::read_dir(self.root.join(&dir)).map_err(io)? {
+                let entry = entry.map_err(io)?;
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let kind = entry.file_type().map_err(io)?;
+                if kind.is_dir()
+                    && !(name.starts_with('.') || name == "target" || name == "node_modules")
+                {
+                    dirs.push(dir.join(&name));
+                } else if kind.is_file() && name == "Cargo.toml" {
+                    let parts: Vec<_> = dir
+                        .components()
+                        .map(|c| c.as_os_str().to_string_lossy())
+                        .collect();
+                    found.push(parts.iter().map(|p| format!("{p}/")).collect::<String>() + &name);
+                }
+            }
+        }
+        found.sort();
+        Ok(found)
     }
 
     /// Checks every word in an ADR that looks like a requirement ID.
@@ -586,7 +643,93 @@ impl Checker {
     }
 }
 
-// @verifies CT-DEV-002, CT-DEV-004
+/// One dependency declared in a `Cargo.toml`. `local` marks path and workspace-inherited
+/// dependencies, which are first-party or listed where the workspace declares them.
+// @implements CT-DEV-008
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ManifestDep {
+    name: String,
+    line: usize,
+    local: bool,
+}
+
+/// Reads the dependency names from a `Cargo.toml`, line by line. Cargo files use inline
+/// tables and booleans, which the `config` reader does not take, and only the names and a
+/// few keys matter here.
+// @implements CT-DEV-008
+fn manifest_deps(text: &str) -> Vec<ManifestDep> {
+    let is_deps = |h: &str| {
+        h == "dependencies" || h.ends_with("-dependencies") || h.ends_with(".dependencies")
+    };
+    let unquote = |t: &str| t.trim().trim_matches(|c| c == '"' || c == '\'').to_string();
+    let mut deps: Vec<ManifestDep> = Vec::new();
+    // Some(true) inside a [dependencies] table, Some(false) inside a [dependencies.name] table.
+    let mut section = None;
+    for (index, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.starts_with('#') {
+            continue;
+        }
+        if let Some(header) = line.strip_prefix('[') {
+            let header = header
+                .trim_start_matches('[')
+                .split(']')
+                .next()
+                .unwrap_or("")
+                .trim();
+            section = None;
+            if is_deps(header) {
+                section = Some(true);
+            } else if let Some((parent, name)) = header.rsplit_once('.')
+                && is_deps(parent)
+            {
+                section = Some(false);
+                deps.push(ManifestDep {
+                    name: unquote(name),
+                    line: index + 1,
+                    local: false,
+                });
+            }
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let (key, value) = (unquote(key), value.trim());
+        match section {
+            Some(true) => {
+                let mut dep = ManifestDep {
+                    name: key,
+                    line: index + 1,
+                    local: false,
+                };
+                // Inline table: { version = "1", package = "real-name", path = "../x" }
+                let inner = value.trim_start_matches('{').trim_end_matches('}');
+                for (k, v) in inner.split(',').filter_map(|p| p.split_once('=')) {
+                    match k.trim() {
+                        "path" | "workspace" => dep.local = true,
+                        "package" => dep.name = unquote(v),
+                        _ => {}
+                    }
+                }
+                deps.push(dep);
+            }
+            Some(false) => {
+                if let Some(dep) = deps.last_mut() {
+                    match key.as_str() {
+                        "path" | "workspace" => dep.local = true,
+                        "package" => dep.name = unquote(value),
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    deps
+}
+
+// @verifies CT-DEV-002, CT-DEV-004, CT-DEV-008
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -747,6 +890,79 @@ mod tests {
         );
         assert_eq!(report.count(Severity::Error), 10);
         assert_eq!(report.count(Severity::Warning), 2);
+    }
+
+    // @verifies CT-DEV-002
+    #[test]
+    fn long_test_modules_do_not_warn() {
+        let items = "    fn a() {}\n    fn b() {}\n    fn c() {}\n";
+        let statements = "    1;\n    2;\n    3;\n";
+        let root = project(
+            "scope-kinds",
+            "",
+            &[(
+                "src/a.rs",
+                &format!(
+                    "// @verifies CT-DEV-002\nmod tests {{\n{items}}}\n\
+                     // @implements CT-DEV-002\nfn a() {{\n{statements}}}\n\
+                     // @begin CT-DEV-002\nconst B: u8 = 1;\nconst C: u8 = 1;\nconst D: u8 = 1;\nconst E: u8 = 1;\n// @end\n"
+                ),
+            )],
+        );
+        let report = check_project(&root).unwrap();
+        let want = vec![
+            ("src/a.rs".to_string(), 8, Severity::Warning),
+            ("src/a.rs".to_string(), 13, Severity::Warning),
+        ];
+        assert_eq!(summary(&report), want, "{:#?}", report.findings);
+    }
+
+    // @verifies CT-DEV-008
+    #[test]
+    fn reports_dependencies_missing_from_deps_toml() {
+        let root = project(
+            "deps",
+            "",
+            &[
+                (
+                    "Cargo.toml",
+                    "[workspace]\nmembers = [\"a\"]\n\n[workspace.dependencies]\nlisted = \"1\"\nshared = \"2\"\n",
+                ),
+                (
+                    "a/Cargo.toml",
+                    "[package]\nname = \"a\"\npublish = false\n\n[dependencies]\nlisted = { workspace = true }\n\
+                     local = { path = \"../local\" }\nrenamed = { version = \"1\", package = \"real-name\" }\n\
+                     \"quoted\" = \"1\"\n\n[target.'cfg(windows)'.dev-dependencies]\nwin = \"1\"\n\n\
+                     [build-dependencies.table-form]\nversion = \"1\"\n\n[dependencies.local-table]\npath = \"x\"\n\n\
+                     [features]\nnot-a-dep = []\n",
+                ),
+                (
+                    "target/debug/build/Cargo.toml",
+                    "[dependencies]\nignored = \"1\"\n",
+                ),
+                (
+                    "deps.toml",
+                    "[[dep]]\nname = \"listed\"\necosystem = \"cargo\"\nserves = [\"CT-DEV-002\"]\n\
+                     [[dep]]\nname = \"win\"\necosystem = \"npm\"\nserves = [\"CT-DEV-002\"]\n",
+                ),
+            ],
+        );
+        let report = check_project(&root).unwrap();
+        let want = vec![
+            ("Cargo.toml".to_string(), 6, Severity::Error),
+            ("a/Cargo.toml".to_string(), 8, Severity::Error),
+            ("a/Cargo.toml".to_string(), 9, Severity::Error),
+            ("a/Cargo.toml".to_string(), 12, Severity::Error),
+            ("a/Cargo.toml".to_string(), 14, Severity::Error),
+        ];
+        assert_eq!(summary(&report), want, "{:#?}", report.findings);
+        let text = report.findings[1].to_string();
+        assert!(
+            text.starts_with(
+                "a/Cargo.toml:8: error: cargo dependency `real-name` is not listed in deps.toml"
+            ),
+            "{text}"
+        );
     }
 
     // @verifies CT-DEV-004, CT-USE-007
