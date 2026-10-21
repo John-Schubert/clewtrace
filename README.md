@@ -15,7 +15,7 @@ License 1.1; see `LICENSING.md`.
 | Path | Purpose |
 | --- | --- |
 | `CLAUDE.md` | Standing instructions Claude Code reads every session |
-| `model/requirements.sysml` | The 74 product requirements in SysML v2 text; the source of truth for every trace tag |
+| `model/requirements.sysml` | The 75 product requirements in SysML v2 text; the source of truth for every trace tag |
 | `docs/TRACEABILITY.md` | How code, tests, and commits trace to requirements, and what CI enforces |
 | `docs/PLAN.md` | Session-sized tasks for phases 0 and 1, with exit gates |
 | `docs/adr/` | Architecture decisions: stack, trace annotations, licensing |

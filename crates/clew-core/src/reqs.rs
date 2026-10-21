@@ -265,11 +265,11 @@ mod tests {
     fn reads_the_real_requirements_file() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../model/requirements.sysml");
         let reqs = read_requirements(&path).unwrap();
-        assert_eq!(reqs.len(), 74);
+        assert_eq!(reqs.len(), 75);
         let mut ids: Vec<&str> = reqs.iter().map(|r| r.id.as_str()).collect();
         ids.sort_unstable();
         ids.dedup();
-        assert_eq!(ids.len(), 74);
+        assert_eq!(ids.len(), 75);
         assert!(
             reqs.iter()
                 .all(|r| !r.doc.is_empty() && r.verification_method.is_some() && r.phase.is_some())

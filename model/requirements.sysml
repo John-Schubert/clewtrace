@@ -495,5 +495,11 @@ package ClewtraceRequirements {
             attribute :>> verificationMethod = "Inspection";
             attribute :>> phase = 0;
         }
+
+        requirement <'CT-DEV-014'> licenseNotices : ProductRequirement {
+            doc /* Each release shall include a third-party license notices file generated from the dependency tree. */
+            attribute :>> verificationMethod = "Inspection";
+            attribute :>> phase = 0;
+        }
     }
 }
