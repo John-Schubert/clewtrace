@@ -50,12 +50,29 @@ blocks a commit that adds an untraced line or lacks a `Refs:` trailer.
       - Rust items also include type aliases, `macro_rules!`, `extern` blocks, and trait
         method signatures. TypeScript `@verifies` also takes a call statement such as
         `describe(...)` as a test block. Add these to the tag table in `docs/TRACEABILITY.md`.
-- [ ] **0.4 `clew check --self`.** Combine 0.2 and 0.3 with `trace.toml`: report untraced lines,
+- [x] **0.4 `clew check --self`.** Combine 0.2 and 0.3 with `trace.toml`: report untraced lines,
       unknown IDs, and oversized scopes with file:line output and a nonzero exit code on error.
       Refs: CT-DEV-002, CT-DEV-004, CT-TRC-008, CT-USE-007
       Note: `deps.toml` lists only direct dependencies (John, 2026-10-21). Indirect crates are
       covered by CI license checks and the release SBOM. Update the `deps.toml` header to say
       so and drop clap's helper entries.
+      Follow-ups:
+      - Done with John's 0.3 decisions: bare Svelte `<script>`/`<style>` wrapper lines are
+        exempt, `*.json` is out of `file_level_allowed` (JSON files need `[[exclude]]`), and
+        the extra Rust and TypeScript item kinds are in the tag table.
+      - `trace.toml` and `deps.toml` are read by a small standard-library reader for the TOML
+        subset they use (one-line arrays of strings, basic strings, integers). No TOML crate
+        is planned in `deps.toml`, so none was added. Swap in a crate if the files outgrow it.
+      - `id_pattern` supports literals, `(a|b)`, `[0-9]` classes, and `{n}` only, for the same
+        reason: no regex crate is planned.
+      - Also checks IDs in `deps.toml` `serves` lists and in `docs/adr/*.md`. Commit trailers
+        are left to 0.5 and requirement coverage and waivers to 1.9.
+      - Two existing scopes in `scan.rs` warn as over 200 lines: `impl Scanner` (346) and its
+        `mod tests` (464). Warnings do not fail the gate. Split `impl Scanner` in a later
+        touch of that file; a long test module may need a rule decision.
+      - `scan.rs` still has its own test that every `.rs` file under `crates/` is traced. It
+        overlaps `clew check --self` now; removing it needs John's approval.
+      - Symlinks under source roots are not followed or checked.
 - [ ] **0.5 `clew check-commit`.** Validate the `Refs:` trailer and its IDs. Add
       `scripts/install-hooks.sh` and `scripts/install-hooks.ps1` that install it as a
       `commit-msg` hook.

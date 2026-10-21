@@ -1,6 +1,7 @@
 //! Tag scanner (v0). Finds trace tags in source files and works out which lines they cover.
 //! Rules: docs/TRACEABILITY.md. Rust and TypeScript item spans come from tree-sitter.
-//! Svelte files use `@begin`/`@end` regions only in v0.
+//! Svelte files use `@begin`/`@end` regions only in v0, and their bare `<script>` and
+//! `<style>` wrapper lines are exempt.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -271,6 +272,25 @@ fn is_attribute(kind: &str) -> bool {
     matches!(kind, "attribute_item" | "decorator")
 }
 
+/// Whether a Svelte line is only a `<script>`, `</script>`, `<style>`, or `</style>` tag.
+/// These wrapper lines are exempt like blank lines.
+// @implements CT-DEV-002
+fn is_svelte_wrapper(line: &str) -> bool {
+    let line = line.trim();
+    let Some(inner) = line.strip_prefix('<').and_then(|l| l.strip_suffix('>')) else {
+        return false;
+    };
+    if inner.contains(['<', '>']) {
+        return false;
+    }
+    let name = inner.strip_prefix('/').unwrap_or(inner);
+    ["script", "style"].into_iter().any(|tag| {
+        name.strip_prefix(tag).is_some_and(|rest| {
+            rest.is_empty() || (!inner.starts_with('/') && rest.starts_with(char::is_whitespace))
+        })
+    })
+}
+
 /// Working state for one file: tags, scopes, and which lines hold code.
 // @implements CT-DEV-002, CT-TRC-006
 struct Scanner {
@@ -477,6 +497,9 @@ impl Scanner {
         // The closing marker of a block comment left open by an earlier line.
         let mut open: Option<&str> = None;
         for (row, line) in text.lines().enumerate() {
+            if open.is_none() && is_svelte_wrapper(line) {
+                continue;
+            }
             let mut rest = line;
             let mut code = false;
             loop {
@@ -1013,11 +1036,22 @@ mount();
         assert_eq!(ids(&scan, 3), vec!["CT-TRC-003"]);
         assert_eq!(ids(&scan, 9), vec!["CT-USE-001"]);
         assert_eq!(scan.lines[11], Exempt);
-        assert_eq!(scan.untraced_lines(), vec![1, 6, 14, 16, 17]);
+        assert_eq!(scan.untraced_lines(), vec![16]);
+        for line in [1, 6, 14, 17] {
+            assert_eq!(scan.lines[line - 1], Exempt, "line {line}");
+        }
         assert_eq!(
             problem_kinds(&scan),
             vec![(15, ProblemKind::TagNotAllowed(TagKind::Implements))]
         );
+    }
+
+    // @verifies CT-DEV-002
+    #[test]
+    fn only_bare_svelte_wrapper_lines_are_exempt() {
+        let text = "<script>\n<script context=\"module\" lang=\"ts\">\n</script>\n<style lang=\"css\">\n</style>\n<script>let a = 1;</script>\n<scripts>\n<p>\n";
+        let scan = scan_source(Syntax::Svelte, text);
+        assert_eq!(scan.untraced_lines(), vec![6, 7, 8]);
     }
 
     // @verifies CT-DEV-002, CT-TRC-006
