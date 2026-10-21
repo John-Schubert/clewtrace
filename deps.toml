@@ -252,3 +252,23 @@ scope = "build-only"
 via = "Tauri's Linux GTK sys crates (build scripts)"
 serves = ["CT-PLT-001"]
 why = "Indirect: target triple parsing at build time on Linux"
+
+# System libraries the Linux deb and rpm depend on (John, 2026-10-21). The distribution's
+# package manager installs its own copies; Clewtrace never distributes them, so their LGPL
+# terms are met by the distribution (ADR-0001, ADR-0003). Not checked by `clew notices`.
+
+[[dep]]
+name = "webkit2gtk-4.1"
+ecosystem = "system"
+license = "LGPL and BSD (see the distribution's copyright file)"
+scope = "system-provided"
+serves = ["CT-PLT-001"]
+why = "Web view on Linux, linked from the distribution (deb: libwebkit2gtk-4.1-0, rpm: webkit2gtk4.1). Not distributed with Clewtrace"
+
+[[dep]]
+name = "gtk3"
+ecosystem = "system"
+license = "LGPL-2.1-or-later"
+scope = "system-provided"
+serves = ["CT-PLT-001"]
+why = "Window toolkit on Linux, linked from the distribution (deb: libgtk-3-0, rpm: gtk3). Not distributed with Clewtrace"

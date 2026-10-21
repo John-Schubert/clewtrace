@@ -1,6 +1,6 @@
 # ADR-0002: Scope-based code trace annotations
 
-- Status: Proposed
+- Status: Accepted (John, 2026-10-21)
 - Date: 2026-10-20
 - Updated: 2026-10-21 (task 0.10, reviewed against what was built in phase 0)
 - Serves: CT-DEV-002, CT-DEV-003, CT-DEV-004, CT-DEV-005, CT-TRC-006
