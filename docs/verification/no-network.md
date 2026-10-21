@@ -15,8 +15,12 @@ whenever a capability, a Tauri feature, or a dependency changes. Record the resu
 - `cargo_features_enable_no_network_access`: `tauri` and `tauri-build` keep default features
   off and enable only allowlisted features (`wry`, `config-json`). No dependency is a known
   network crate (HTTP clients, TLS stacks, sockets) or a `tauri-plugin-*` crate.
-- `capability_check_rejects_network_grants` and
-  `manifest_check_rejects_network_features_and_crates` prove both checks fail on bad input.
+- `resolved_desktop_trees_have_no_network_crates`: `cargo tree -p clewtrace -e normal` for
+  Windows, macOS, and Linux on x64 and ARM64 lists no crate from `NETWORK_CRATES` and no
+  `tauri-plugin-*` crate, so an indirect or target-specific network dependency fails too.
+- `capability_check_rejects_network_grants`,
+  `manifest_check_rejects_network_features_and_crates`, and
+  `tree_check_rejects_network_crates_and_plugins` prove the checks fail on bad input.
 
 ## Written check
 
@@ -27,6 +31,9 @@ whenever a capability, a Tauri feature, or a dependency changes. Record the resu
       `http://ipc.localhost` is the Tauri IPC channel on Windows, not a network host.
 - [x] `cargo tree -p clewtrace -e normal` for Windows, macOS, and Linux targets lists no
       `reqwest`, `hyper`, or TLS crate. Tauri pulls `reqwest` only on Android and iOS.
+      Automated since task 0.9 by `resolved_desktop_trees_have_no_network_crates`.
+- [x] The Windows installer does not download WebView2 (`webviewInstallMode` is `skip` in
+      `tauri.release.conf.json`).
 - [x] Every permission added to `OFFLINE_PERMISSIONS` since the last record was reviewed
       against the Tauri docs and grants no network access.
 - [ ] Before release: run the installed app with the network disconnected and confirm it
@@ -38,3 +45,4 @@ whenever a capability, a Tauri feature, or a dependency changes. Record the resu
 | Date | Commit | Result | Checked by |
 | --- | --- | --- | --- |
 | 2026-10-21 | task 0.8 | Pass, automated and written checks; release run pending | Claude Code |
+| 2026-10-21 | task 0.9 | Pass, resolved-tree check added for six desktop targets | Claude Code |

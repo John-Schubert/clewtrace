@@ -72,7 +72,9 @@ mod tests {
 #[cfg(test)]
 mod no_network {
     use super::context;
+    use std::collections::BTreeSet;
     use std::path::Path;
+    use std::process::Command;
     use tauri::utils::acl::capability::{Capability, CapabilityFile};
     use tauri::utils::config::{CapabilityEntry, WebviewUrl};
 
@@ -104,6 +106,30 @@ mod no_network {
         "openssl",
         "socket2",
     ];
+
+    /// The desktop targets Clewtrace ships for: Windows, macOS, and Linux on x64 and ARM64.
+    const DESKTOP_TARGETS: [&str; 6] = [
+        "x86_64-pc-windows-msvc",
+        "aarch64-pc-windows-msvc",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+    ];
+
+    /// Problems in `cargo tree --prefix none --format {p}` output for one target, empty when
+    /// no crate in the resolved tree is a known network crate or a Tauri plugin.
+    fn tree_problems(target: &str, tree: &str) -> Vec<String> {
+        let names: BTreeSet<&str> = tree
+            .lines()
+            .filter_map(|line| line.split_whitespace().next())
+            .collect();
+        names
+            .into_iter()
+            .filter(|name| NETWORK_CRATES.contains(name) || name.starts_with("tauri-plugin"))
+            .map(|name| format!("{target}: `{name}` is in the resolved dependency tree"))
+            .collect()
+    }
 
     /// Every capability: the files in capabilities/ and any inlined in tauri.conf.json.
     fn capabilities() -> Vec<Capability> {
@@ -278,6 +304,48 @@ mod no_network {
         let manifest = std::fs::read_to_string(&path).expect("Cargo.toml is readable");
         let problems = manifest_problems(&manifest);
         assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    /// Checks the dependency tree cargo resolves for each desktop target, so a network
+    /// crate pulled in indirectly or by a target-specific dependency fails too.
+    /// Build dependencies are left out: they run on the build machine and do not ship.
+    // @verifies CT-SEC-001, CT-PLT-003
+    #[test]
+    fn resolved_desktop_trees_have_no_network_crates() {
+        let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+        let mut problems = Vec::new();
+        for target in DESKTOP_TARGETS {
+            let output = Command::new(&cargo)
+                .current_dir(env!("CARGO_MANIFEST_DIR"))
+                .args(["tree", "--locked", "-p", "clewtrace", "--edges", "normal"])
+                .args(["--target", target, "--prefix", "none", "--format", "{p}"])
+                .output()
+                .expect("cargo runs");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(output.status.success(), "cargo tree for {target}: {stderr}");
+            let tree = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                tree.contains("tauri v"),
+                "{target}: tree lacks tauri:\n{tree}"
+            );
+            problems.extend(tree_problems(target, &tree));
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    // @verifies CT-SEC-001, CT-PLT-003
+    #[test]
+    fn tree_check_rejects_network_crates_and_plugins() {
+        let tree = "clewtrace v0.1.0 (/src)\ntauri v2.12.4\nreqwest v0.12.0\n\
+                    tauri-plugin-shell v2.0.0\nhyper v1.0.0 (*)\nserde v1.0.0\n";
+        assert_eq!(
+            tree_problems("t", tree),
+            [
+                "t: `hyper` is in the resolved dependency tree",
+                "t: `reqwest` is in the resolved dependency tree",
+                "t: `tauri-plugin-shell` is in the resolved dependency tree",
+            ]
+        );
     }
 
     // @verifies CT-SEC-001, CT-PLT-003

@@ -1,0 +1,202 @@
+# @file CT-PLT-001, CT-EFF-001, CT-DEV-012, CT-DEV-014
+# Release: runs only for a signed version tag on a commit in main. Builds the installers
+# (Windows MSI, universal macOS DMG, Linux deb and rpm), fails if any is over 20 MB, and
+# attaches them to a draft GitHub release with SHA-256 checksums, the third-party notices
+# file (also shipped inside each installer), the SBOM, and the unmodified source of each
+# shipped MPL-2.0 crate. John publishes the draft after docs/verification/release.md.
+# Uses the gh CLI that comes with the GitHub runner images.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ github.ref_name }}
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  verify:
+    name: verify tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # actions/checkout v7.0.1, pinned by commit. Full history, to check the tag is on main.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      # CT-DEV-012: the tag must be annotated and signed by a key in .github/release-signers
+      # (SSH, git's allowed signers format) or .github/release-keys.asc (OpenPGP).
+      - name: Signed tag on main
+        run: |
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG" "+refs/heads/main:refs/remotes/origin/main"
+          if [ "$(git cat-file -t "$TAG")" != tag ]; then
+            echo "::error::$TAG is a lightweight tag. Release tags must be annotated and signed (git tag -s)"
+            exit 1
+          fi
+          if [ -s .github/release-keys.asc ]; then
+            gpg --batch --import .github/release-keys.asc
+          fi
+          if [ ! -s .github/release-signers ] && [ ! -s .github/release-keys.asc ]; then
+            echo "::error::No release signing key. Add .github/release-signers or .github/release-keys.asc"
+            exit 1
+          fi
+          touch "$RUNNER_TEMP/signers"
+          if [ -s .github/release-signers ]; then cp .github/release-signers "$RUNNER_TEMP/signers"; fi
+          git -c gpg.ssh.allowedSignersFile="$RUNNER_TEMP/signers" verify-tag "$TAG"
+          if ! git merge-base --is-ancestor "$TAG^{commit}" origin/main; then
+            echo "::error::$TAG does not point to a commit on main"
+            exit 1
+          fi
+
+      - name: Tag matches the version
+        run: |
+          cargo_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          npm_version=$(sed -n 's/^  "version": "\(.*\)",$/\1/p' app/package.json | head -n 1)
+          if [ "v$cargo_version" != "$TAG" ] || [ "v$npm_version" != "$TAG" ]; then
+            echo "::error::$TAG does not match Cargo.toml ($cargo_version) and app/package.json ($npm_version)"
+            exit 1
+          fi
+
+      # A draft, so nothing is public until John publishes it. Kept on a re-run.
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" --draft --verify-tag --title "Clewtrace $TAG" \
+              --notes "Built by the release workflow from the signed tag $TAG. Check docs/verification/release.md before publishing."
+          fi
+
+  build:
+    name: build (${{ matrix.os }})
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bundles: msi
+            args: ""
+          # One universal DMG for Intel and Apple silicon Macs.
+          - os: macos-latest
+            bundles: dmg
+            args: --target universal-apple-darwin
+          # The oldest supported Ubuntu, so the deb and rpm need an older glibc than the
+          # latest runner would.
+          - os: ubuntu-22.04
+            bundles: deb,rpm
+            args: ""
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      # The web view and GTK libraries Tauri links on Linux (same list as ci.yml).
+      - name: Tauri Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Rust targets for the universal macOS build
+        if: runner.os == 'macOS'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: UI install
+        working-directory: app
+        run: npm ci --no-audit --no-fund
+
+      # Writes target/notices/THIRD-PARTY-NOTICES.txt, which tauri.release.conf.json bundles
+      # into the installer. Fails on any license policy error.
+      - name: Notices
+        shell: bash
+        run: cargo run --locked -p clew-cli -- notices --out target/notices
+
+      - name: Installers
+        shell: bash
+        working-directory: app
+        run: |
+          npm run tauri build -- --ci --bundles ${{ matrix.bundles }} \
+            --config src-tauri/tauri.release.conf.json ${{ matrix.args }}
+
+      # CT-EFF-001: each installer is 20 MB (20,000,000 bytes) or smaller.
+      - name: Installer size
+        shell: bash
+        run: |
+          mkdir -p dist
+          find target -path '*/release/bundle/*' -type f \
+            \( -name '*.msi' -o -name '*.dmg' -o -name '*.deb' -o -name '*.rpm' \) \
+            -exec cp {} dist/ \;
+          failed=0
+          for f in dist/*; do
+            size=$(wc -c < "$f" | tr -d ' ')
+            echo "$f: $size bytes"
+            if [ "$size" -gt 20000000 ]; then
+              echo "::error::$f is $size bytes, over the 20 MB budget (CT-EFF-001)"
+              failed=1
+            fi
+          done
+          for ext in $(echo "${{ matrix.bundles }}" | tr ',' ' '); do
+            if ! ls dist/*."$ext" > /dev/null 2>&1; then
+              echo "::error::no .$ext installer was built"
+              failed=1
+            fi
+          done
+          exit $failed
+
+      - name: Attach installers
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/* --clobber
+
+  finish:
+    name: notices and checksums
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: UI install
+        working-directory: app
+        run: npm ci --no-audit --no-fund
+
+      # CT-DEV-014: the notices file, the SBOM (each package marked shipped or build-only),
+      # and the unmodified .crate source of each shipped MPL-2.0 crate.
+      - name: Notices, SBOM, and MPL sources
+        run: cargo run --locked -p clew-cli -- notices --out target/notices
+
+      - name: Checksums and attachments
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist
+          gh release download "$TAG" --dir dist --pattern '*.msi' --pattern '*.dmg' \
+            --pattern '*.deb' --pattern '*.rpm'
+          for ext in msi dmg deb rpm; do
+            if ! ls dist/*."$ext" > /dev/null 2>&1; then
+              echo "::error::the release has no .$ext installer"
+              exit 1
+            fi
+          done
+          cp target/notices/THIRD-PARTY-NOTICES.txt target/notices/sbom.cdx.json dist/
+          if ls target/notices/mpl-sources/* > /dev/null 2>&1; then
+            cp target/notices/mpl-sources/* dist/
+          fi
+          (cd dist && sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          gh release upload "$TAG" dist/* --clobber

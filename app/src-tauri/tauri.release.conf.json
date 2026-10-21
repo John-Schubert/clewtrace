@@ -1,0 +1,12 @@
+{
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "dmg", "deb", "rpm"],
+    "resources": {
+      "../../target/notices/THIRD-PARTY-NOTICES.txt": "THIRD-PARTY-NOTICES.txt"
+    },
+    "windows": {
+      "webviewInstallMode": { "type": "skip" }
+    }
+  }
+}
