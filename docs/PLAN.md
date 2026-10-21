@@ -202,6 +202,15 @@ requirement is implemented and verified or formally waived.
 - [ ] **Gate 1 check.** `clew check --self` shows 100% line coverage and no uncovered phase 0
       or phase 1 requirements. Set `current_phase = 2`.
 
+## Before the first business pilot
+
+- [ ] **Code-signed installers.** Every installer is code-signed before the first business
+      pilot. Plan on Microsoft Artifact Signing (Basic, about $10 a month) for the Windows MSI
+      and the Apple Developer Program ($99 a year) to sign and notarize the macOS DMG. Free
+      open-source signing programs do not apply, because Clewtrace uses the Business Source
+      License (John, 2026-10-21).
+      Refs: CT-PLT-001, CT-DEV-012
+
 ## Later phases
 
 Phase 2 (desktop MVP, including offline license files, trial terms, and read-only expiry per
