@@ -73,10 +73,18 @@ blocks a commit that adds an untraced line or lacks a `Refs:` trailer.
       - `scan.rs` still has its own test that every `.rs` file under `crates/` is traced. It
         overlaps `clew check --self` now; removing it needs John's approval.
       - Symlinks under source roots are not followed or checked.
-- [ ] **0.5 `clew check-commit`.** Validate the `Refs:` trailer and its IDs. Add
+- [x] **0.5 `clew check-commit`.** Validate the `Refs:` trailer and its IDs. Add
       `scripts/install-hooks.sh` and `scripts/install-hooks.ps1` that install it as a
       `commit-msg` hook.
       Refs: CT-DEV-005
+      - `clew check-commit <file>` takes one message file and exits 0, 1, or 2 like
+        `clew check --self`. CI in 0.6 can loop over PR commits with
+        `git log --format=%B -n1 <sha> > msg.txt`.
+      - `Refs:` must be in the last paragraph and not the summary line. `#` lines and
+        text below git's scissors line are ignored. The key is case-sensitive.
+      - The hook uses `$CLEW`, then `clew` on PATH, then `cargo run`, and blocks the commit
+        when none is found. The `.ps1` installer was not run here (no PowerShell in the
+        cloud session). Check it once on Windows.
 - [ ] **0.6 CI workflow.** GitHub Actions on Ubuntu, Windows, and macOS: fmt, clippy, tests,
       `clew check --self`, `clew check-commit` on each pull request commit, and cargo-deny for
       licenses and advisories. Every dependency so far is listed in `deps.toml`, and CI fails
