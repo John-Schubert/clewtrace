@@ -1,0 +1,3 @@
+# Keys allowed to sign Clewtrace release tags (CT-DEV-012). Format: git allowed signers.
+# Each line: principal (tagger email), namespaces, public key. Private keys never go here.
+johnschubert@yahoo.com namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEdhXn5Y0GZtWMbV77vfxjvl1tgVWmpN0hrC+KEzWTo2 Clewtrace release signing
