@@ -19,3 +19,5 @@ pub mod reqs;
 // @begin CT-DEV-002, CT-TRC-006
 pub mod scan;
 // @end
+
+pub fn gate0_untraced_probe() {}
