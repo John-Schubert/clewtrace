@@ -26,6 +26,9 @@ in `model/requirements.sysml` are the authority once code exists.
   stop and propose a new requirement (ID, statement, verification method, phase) to John.
   Add it to `model/requirements.sysml` only after he approves.
 - **Every commit carries a trailer:** `Refs: CT-XXX-NNN[, CT-YYY-NNN]`. Use `.gitmessage`.
+- **Commit as John** (CT-DEV-013). Before the first commit of a session, run
+  `git config user.name "John Schubert"` and `git config user.email "johnschubert@yahoo.com"`.
+  Do not add a `Co-Authored-By` trailer.
 - **Tests first.** Write the `@verifies` test, watch it fail, then implement.
 - **No new dependency** without an entry in `deps.toml` (license, why, requirement served).
   A dependency that changes the architecture also needs an ADR in `docs/adr/`.
