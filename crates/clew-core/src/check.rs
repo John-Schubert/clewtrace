@@ -535,10 +535,11 @@ impl Checker {
     }
 
     /// Checks the `serves` IDs of every `[[dep]]` in `deps.toml`, and that every direct
-    /// dependency in a `Cargo.toml` has a `[[dep]]` entry.
+    /// dependency in a `Cargo.toml` or `package.json` has a `[[dep]]` entry.
     fn check_deps(&mut self) -> Result<(), SetupError> {
         let text = std::fs::read_to_string(self.root.join(DEPS_FILE)).unwrap_or_default();
         let tables = parse_tables(&text).map_err(|e| setup_error(DEPS_FILE, e))?;
+        // (ecosystem, name) of every listed dependency.
         let mut listed = BTreeSet::new();
         for dep in tables.iter().filter(|t| t.array && t.name == "dep") {
             let serves = dep.list("serves").map_err(|e| setup_error(DEPS_FILE, e))?;
@@ -546,21 +547,29 @@ impl Checker {
             for id in serves {
                 self.check_id(DEPS_FILE, line, id);
             }
-            if let (Ok(name), Ok("cargo")) = (dep.string("name"), dep.string("ecosystem")) {
-                listed.insert(name.to_string());
+            if let (Ok(name), Ok(ecosystem)) = (dep.string("name"), dep.string("ecosystem")) {
+                listed.insert((ecosystem.to_string(), name.to_string()));
             }
         }
         for path in self.manifests()? {
             let Ok(text) = std::fs::read_to_string(self.root.join(&path)) else {
                 continue;
             };
-            for dep in manifest_deps(&text) {
-                if !dep.local && !listed.contains(&dep.name) {
+            let (ecosystem, deps) = if path.ends_with("package.json") {
+                ("npm", package_deps(&text))
+            } else {
+                ("cargo", manifest_deps(&text))
+            };
+            for dep in deps {
+                if !dep.local && !listed.contains(&(ecosystem.to_string(), dep.name.clone())) {
                     self.push(
                         &path,
                         dep.line,
                         Severity::Error,
-                        format!("cargo dependency `{}` is not listed in deps.toml", dep.name),
+                        format!(
+                            "{ecosystem} dependency `{}` is not listed in deps.toml",
+                            dep.name
+                        ),
                         "add a [[dep]] entry with its license, why, and the requirements it serves, after John approves the dependency",
                     );
                 }
@@ -569,7 +578,8 @@ impl Checker {
         Ok(())
     }
 
-    /// Every `Cargo.toml` in the project, skipping build output and hidden directories.
+    /// Every `Cargo.toml` and `package.json` in the project, skipping build output,
+    /// installed packages, and hidden directories.
     fn manifests(&self) -> Result<Vec<String>, SetupError> {
         let mut found = Vec::new();
         let mut dirs = vec![PathBuf::new()];
@@ -587,7 +597,7 @@ impl Checker {
                     && !(name.starts_with('.') || name == "target" || name == "node_modules")
                 {
                     dirs.push(dir.join(&name));
-                } else if kind.is_file() && name == "Cargo.toml" {
+                } else if kind.is_file() && (name == "Cargo.toml" || name == "package.json") {
                     let parts: Vec<_> = dir
                         .components()
                         .map(|c| c.as_os_str().to_string_lossy())
@@ -651,6 +661,74 @@ struct ManifestDep {
     name: String,
     line: usize,
     local: bool,
+}
+
+/// Reads the dependency names from a `package.json`: the keys of its top-level
+/// `dependencies`, `devDependencies`, `optionalDependencies`, and `peerDependencies`
+/// objects. A small JSON tokenizer is enough, since only object keys and nesting matter.
+// @implements CT-DEV-008
+fn package_deps(text: &str) -> Vec<ManifestDep> {
+    const SECTIONS: [&str; 4] = [
+        "dependencies",
+        "devDependencies",
+        "optionalDependencies",
+        "peerDependencies",
+    ];
+    let mut deps = Vec::new();
+    let mut depth = 0usize;
+    let mut line = 1;
+    // The last string read and its line, until the next token shows whether it is a key.
+    let mut last: Option<(String, usize)> = None;
+    // The top-level key whose value is being read, and whether that key is a section.
+    let mut key: Option<String> = None;
+    let mut in_section = false;
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\n' => line += 1,
+            '"' => {
+                let mut value = String::new();
+                while let Some(c) = chars.next() {
+                    match c {
+                        '"' => break,
+                        '\\' => value.extend(chars.next()),
+                        '\n' => line += 1,
+                        c => value.push(c),
+                    }
+                }
+                last = Some((value, line));
+            }
+            ':' => {
+                if let Some((name, at)) = last.take() {
+                    if depth == 1 {
+                        key = Some(name);
+                    } else if depth == 2 && in_section {
+                        deps.push(ManifestDep {
+                            name,
+                            line: at,
+                            local: false,
+                        });
+                    }
+                }
+            }
+            '{' | '[' => {
+                if depth == 1 {
+                    in_section = c == '{' && key.as_deref().is_some_and(|k| SECTIONS.contains(&k));
+                }
+                depth += 1;
+                last = None;
+            }
+            '}' | ']' => {
+                depth = depth.saturating_sub(1);
+                if depth == 1 {
+                    in_section = false;
+                }
+                last = None;
+            }
+            _ => {}
+        }
+    }
+    deps
 }
 
 /// Reads the dependency names from a `Cargo.toml`, line by line. Cargo files use inline
@@ -963,6 +1041,45 @@ mod tests {
             ),
             "{text}"
         );
+    }
+
+    // @verifies CT-DEV-008
+    #[test]
+    fn reports_npm_dependencies_missing_from_deps_toml() {
+        let root = project(
+            "npm",
+            "",
+            &[
+                (
+                    "app/package.json",
+                    "{\n  \"name\": \"app\",\n  \"scripts\": { \"dev\": \"vite\" },\n  \"dependencies\": {\n    \"listed\": \"1.0.0\"\n  },\n  \"devDependencies\": {\n    \"@scope/missing\": \"2.0.0\",\n    \"cargo-only\": \"1\", \"esc\\\"aped\": \"1\"\n  },\n  \"config\": { \"dependencies\": { \"nested\": \"1\" } }\n}\n",
+                ),
+                (
+                    "app/node_modules/x/package.json",
+                    "{ \"dependencies\": { \"ignored\": \"1\" } }",
+                ),
+                (
+                    "deps.toml",
+                    "[[dep]]\nname = \"listed\"\necosystem = \"npm\"\nserves = [\"CT-DEV-002\"]\n\
+                     [[dep]]\nname = \"cargo-only\"\necosystem = \"cargo\"\nserves = [\"CT-DEV-002\"]\n",
+                ),
+            ],
+        );
+        let report = check_project(&root).unwrap();
+        let want = vec![
+            ("app/package.json".to_string(), 8, Severity::Error),
+            ("app/package.json".to_string(), 9, Severity::Error),
+            ("app/package.json".to_string(), 9, Severity::Error),
+        ];
+        assert_eq!(summary(&report), want, "{:#?}", report.findings);
+        let text = report.findings[0].to_string();
+        assert!(
+            text.starts_with(
+                "app/package.json:8: error: npm dependency `@scope/missing` is not listed in deps.toml"
+            ),
+            "{text}"
+        );
+        assert!(report.findings[2].to_string().contains("`esc\"aped`"));
     }
 
     // @verifies CT-DEV-004, CT-USE-007

@@ -1,6 +1,7 @@
-# @file CT-DEV-004, CT-DEV-005, CT-DEV-008
-# CI gate on Ubuntu, Windows, and macOS: format, lint, tests, the trace gate, the commit
-# hook, and (on Ubuntu) commit trailers and cargo-deny. Rules: docs/TRACEABILITY.md.
+# @file CT-DEV-004, CT-DEV-005, CT-DEV-008, CT-PLT-001
+# CI gate on Ubuntu, Windows, and macOS: builds the desktop app (UI and Tauri crate), then
+# format, lint, tests, the trace gate, the commit hook, and (on Ubuntu) commit trailers and
+# cargo-deny. Installers are built by the release workflow. Rules: docs/TRACEABILITY.md.
 name: ci
 
 on:
@@ -29,6 +30,42 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # actions/cache v6.1.0, pinned by commit. Caches the cargo registry and target/
+      # (ADR-0001). A new Cargo.lock or toolchain starts from the last cache for this OS.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      # The web view and GTK libraries Tauri links on Linux (same list as README.md).
+      - name: Tauri Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      # Node.js comes with the runner image. Vite 7 needs 20.19 or newer.
+      - name: UI install
+        working-directory: app
+        run: |
+          node --version
+          npm ci --no-audit --no-fund
+
+      - name: UI check
+        working-directory: app
+        run: npm run check
+
+      # The Tauri crate embeds app/dist, so the UI is built before any cargo step.
+      - name: UI build
+        working-directory: app
+        run: npm run build
+
       # rustup on the runner installs the toolchain pinned in rust-toolchain.toml.
       - name: Format
         run: cargo fmt --all --check
@@ -38,6 +75,9 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --locked
+
+      - name: Desktop app build
+        run: cargo build --locked -p clewtrace
 
       - name: Trace gate
         run: cargo run --locked -p clew-cli -- check --self

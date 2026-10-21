@@ -108,11 +108,34 @@ blocks a commit that adds an untraced line or lacks a `Refs:` trailer.
         crate under tree-sitter). John to confirm the allowlist. Add BSD-3-Clause with
         ed25519-dalek.
       - No build cache in CI, to avoid another action. Add one if CI time becomes a problem.
-- [ ] **0.7 Empty desktop app.** Tauri 2 with Svelte 5 (runes syntax) + TypeScript showing a
+- [x] **0.7 Empty desktop app.** Tauri 2 with Svelte 5 (runes syntax) + TypeScript showing a
       window with the app name and version. Lock down Tauri capabilities: no HTTP, shell, or
       updater plugins, and a strict content security policy. Every source file tagged. The
       cloud environment's setup script installs the Tauri Linux packages (see README).
       Refs: CT-PLT-001, CT-PLT-003, CT-SEC-001
+      Follow-ups:
+      - `app/src-tauri` is a workspace member, but `default-members` leaves it out, so plain
+        `cargo build` and `cargo test` stay light. CI builds the UI, then runs clippy, tests,
+        and `cargo build -p clewtrace` on all three OSes. `npm run tauri dev` runs the app.
+      - Tauri features: `wry` only (no compression, dynamic ACL, X11, or D-Bus). Revisit
+        `compression` in 0.9 against the CT-EFF-001 installer budget.
+      - Capability `main` grants only `core:app:allow-name` and `core:app:allow-version`.
+        No plugins. Two tests in `app/src-tauri/src/main.rs` check the CSP and that no
+        plugin is configured; 0.8 adds the Cargo feature and capability checks.
+      - Vite 7 and vite-plugin-svelte 6, not Vite 8: Vite 8 depends on lightningcss (MPL-2.0).
+        TypeScript 6, since svelte-check does not support 7 yet.
+      - actions/cache is the CI build cache. Swatinem/rust-cache is LGPL-3.0, so it was not used.
+      - `clew check --self` now also reads `package.json` (npm deps must be in `deps.toml`).
+        The trace root is `app/src-tauri` instead of `app/src-tauri/src`, so `build.rs` and its
+        `Cargo.toml` are checked too. Files in `app/` itself (`index.html`, `vite.config.ts`,
+        `package.json`, `tsconfig.json`) are tagged but outside any source root; HTML has no
+        scanner yet.
+      - cargo-deny fails on the Tauri tree. Needs John (see the PR): MPL-2.0 crates and the
+        unmaintained proc-macro-error advisory. `Apache-2.0 WITH LLVM-exception` was added.
+      - Bundle identifier is `com.clewtrace.desktop`. Confirm before 0.9, since it sets the
+        app data path.
+      - No npm license check runs in CI yet. Today the npm tree is MIT, ISC, Apache-2.0, and
+        BSD-3-Clause only.
 - [ ] **0.8 No-network test.** A test that fails if the Tauri capability files or Cargo
       features enable any network access, plus a written check in
       `docs/verification/no-network.md`.
