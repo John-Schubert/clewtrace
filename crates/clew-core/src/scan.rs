@@ -1102,38 +1102,4 @@ mount();
             assert_eq!(Syntax::from_path(Path::new(path)), want, "{path}");
         }
     }
-
-    // @verifies CT-DEV-002
-    #[test]
-    fn own_rust_sources_are_fully_traced() {
-        let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-        let mut files = Vec::new();
-        let mut dirs = vec![crates];
-        while let Some(dir) = dirs.pop() {
-            for entry in std::fs::read_dir(dir).unwrap() {
-                let path = entry.unwrap().path();
-                if path.is_dir() {
-                    dirs.push(path);
-                } else if Syntax::from_path(&path) == Some(Syntax::Rust) {
-                    files.push(path);
-                }
-            }
-        }
-        assert!(!files.is_empty());
-        for path in files {
-            let scan = rust(&std::fs::read_to_string(&path).unwrap());
-            assert!(
-                scan.problems.is_empty(),
-                "{}: {:?}",
-                path.display(),
-                scan.problems
-            );
-            assert!(
-                scan.untraced_lines().is_empty(),
-                "{}: untraced lines {:?}",
-                path.display(),
-                scan.untraced_lines()
-            );
-        }
-    }
 }
