@@ -5,7 +5,7 @@
 requirements = ["model/requirements.sysml"]
 id_pattern = "CT-(EFF|USE|TRC|MOD|XCH|CMP|SEC|PLT|DEV)-[0-9]{3}"
 # Requirement coverage is enforced for requirements whose phase <= current_phase.
-current_phase = 0
+current_phase = 1
 
 [coverage]
 source_roots = ["crates", "app/src", "app/src-tauri", "scripts", ".github/workflows"]

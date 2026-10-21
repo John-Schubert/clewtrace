@@ -206,10 +206,25 @@ blocks a commit that adds an untraced line or lacks a `Refs:` trailer.
         family, webview2-com, block2, dlopen2, tree-sitter-typescript, is-reference,
         locate-character) and add them to the notices file.
       - Follow-up: ADR-0002 is still "Proposed"; John to decide whether to mark it Accepted.
-- [ ] **Gate 0 check.** John installs the release build on his Windows 10 laptop (4 GB) and
+- [x] **Gate 0 check.** John installs the release build on his Windows 10 laptop (4 GB) and
       confirms it runs; Mac and Linux installers are confirmed by CI smoke tests. Confirm CI
       rejects an untraced line and a commit without a trailer. Then set `current_phase = 1`
       in `trace.toml`.
+      Record (2026-10-21):
+      - v0.1.0 was signed with John's release key, and the release workflow verified the tag and
+        built the MSI (2.7 MB), universal DMG (5.2 MB), deb, and rpm (2.6 MB each), all under
+        20 MB. The MSI and the notices file match `SHA256SUMS.txt`.
+      - John installed the MSI on his Windows 10 laptop (4 GB) in under a minute, after
+        installing the WebView2 runtime, which the laptop lacked. The app and its desktop
+        shortcut opened and showed the name and version. The Clewtrace process used about
+        3 MB. The WebView2 processes are counted separately.
+      - CI rejected an untraced function (PR #14, `lib.rs:23 ... not inside a tagged scope`, on
+        all three OSes) and a commit without a trailer (PR #15). The ruleset blocked both
+        merges. Both were closed unmerged.
+      Follow-ups:
+      - Mac and Linux are covered by CI building the installers and running the app tests.
+        Launching the installed DMG, deb, and rpm in CI is not automated yet.
+      - Measure idle memory including the WebView2 processes against CT-EFF-002 (task 1.8).
 
 ## Phase 1: Trace engine and CLI
 
