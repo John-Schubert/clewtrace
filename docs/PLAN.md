@@ -132,14 +132,23 @@ blocks a commit that adds an untraced line or lacks a `Refs:` trailer.
         scanner yet.
       - cargo-deny fails on the Tauri tree. Needs John (see the PR): MPL-2.0 crates and the
         unmaintained proc-macro-error advisory. `Apache-2.0 WITH LLVM-exception` was added.
-      - Bundle identifier is `com.clewtrace.desktop`. Confirm before 0.9, since it sets the
-        app data path.
+      - Bundle identifier was `com.clewtrace.desktop`. John set it to
+        `io.github.john-schubert.clewtrace` (2026-10-21), changed in 0.8.
       - No npm license check runs in CI yet. Today the npm tree is MIT, ISC, Apache-2.0, and
         BSD-3-Clause only.
-- [ ] **0.8 No-network test.** A test that fails if the Tauri capability files or Cargo
+- [x] **0.8 No-network test.** A test that fails if the Tauri capability files or Cargo
       features enable any network access, plus a written check in
       `docs/verification/no-network.md`.
       Refs: CT-SEC-001, CT-PLT-003
+      - Tests are in the `no_network` module of `app/src-tauri/src/main.rs`. Capabilities:
+        every permission must be on a reviewed offline allowlist, no `remote` URLs, all local.
+        Windows load only bundled pages. `Cargo.toml`: Tauri crates keep default features off
+        and enable only allowlisted features, and no dependency is a known network crate or
+        a `tauri-plugin-*`. Each dependency must sit on one line so the check can read it.
+      - The bundle identifier is now `io.github.john-schubert.clewtrace` (John, 2026-10-21).
+      - Follow-up: the check reads direct dependencies only. Tauri pulls `reqwest` on Android
+        and iOS only, not on desktop. A resolved-tree check (`cargo tree` per desktop target)
+        in CI would also catch a network crate added indirectly. Candidate for 0.9.
 - [ ] **0.9 Release workflow.** On a signed tag, CI builds MSI, DMG, AppImage, deb, and rpm,
       fails if any installer exceeds 20 MB, and attaches SHA-256 checksums. It also generates a
       third-party license notices file from the Cargo and npm dependency trees, ships it inside

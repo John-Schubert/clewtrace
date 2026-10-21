@@ -1,6 +1,6 @@
 {
   "productName": "Clewtrace",
-  "identifier": "com.clewtrace.desktop",
+  "identifier": "io.github.john-schubert.clewtrace",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
