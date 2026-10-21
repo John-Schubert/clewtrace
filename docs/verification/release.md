@@ -58,4 +58,4 @@ Go through this list for every release, before publishing the draft, and record 
 
 | Date | Tag | Result | Checked by |
 | --- | --- | --- | --- |
-| 2026-10-21 | v0.1.0 | Draft built from the signed tag. Checksums match. The MSI installed and ran on the Windows 10 reference laptop. Not yet published. | John (laptop), Claude (checksums, notices) |
+| 2026-10-21 | v0.1.0 | Draft built from the signed tag. Checksums match. The MSI installed and ran on the Windows 10 reference laptop. Published 2026-10-21. | John (laptop), Claude (checksums, notices) |
