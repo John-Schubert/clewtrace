@@ -2,8 +2,8 @@
 # CI gate on Ubuntu, Windows, and macOS: builds the desktop app (UI and Tauri crate), then
 # format, lint, tests, the trace gate, the license notices check, the commit hook, and (on
 # Ubuntu) commit trailers, cargo-deny, and the performance budgets on 4 GB and 2 CPUs.
-# The trace gate fails on untraced lines, unknown IDs, and requirements due in a started
-# phase with no implementation, verification, or waiver.
+# The trace gate fails on untraced lines, unknown IDs, and requirements from a finished
+# phase with no implementation, verification, or waiver (current-phase gaps are warnings).
 # Installers are built by the release workflow. Rules: docs/TRACEABILITY.md.
 name: ci
 

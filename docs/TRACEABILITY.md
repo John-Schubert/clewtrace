@@ -118,11 +118,23 @@ release installers.
 ## Requirement coverage
 
 - Each requirement whose `phase` is less than or equal to `current_phase` in `trace.toml` needs
-  an implementation and a verification, or a `[[waiver]]` in `trace.toml` (see below). A
-  requirement with no `phase` is always due. An implementation is an `@implements` scope, a
+  an implementation and a verification, or a `[[waiver]]` in `trace.toml` (see below). An
+  implementation is an `@implements` scope, a
   model element that satisfies it, or a document (below). A verification is an `@verifies`
   test, a model element that verifies it, a checklist, or a workflow step (above).
   `clew check --self` uses the same coverage as `clew report coverage`.
+- The phase decides how a gap is reported (John, 2026-10-22, Gate 1):
+  - a requirement from a finished phase (`phase` less than `current_phase`) with a gap is
+    an error;
+  - a requirement in the current phase (`phase` equal to `current_phase`) with a gap is a
+    warning that names the requirement, its phase, and what it lacks;
+  - a requirement with no `phase` is always due, and a gap is an error;
+  - a requirement from a later phase is not checked yet.
+
+  The Gate N check needs zero current-phase warnings before `current_phase` is raised past
+  N, so every gap left in a phase becomes an error once the phase is finished. Performance
+  budgets are different: each is enforced from the start of its phase (`phase` less than or
+  equal to `current_phase`).
 - Each requirement needs a parent: it derives from or refines another requirement, or is
   nested in one. Requirements typed by a requirement definition listed in
   `top_level_definitions` under `[coverage]` in `trace.toml`, or by one that specializes it,
@@ -203,8 +215,9 @@ line. Lines starting with `#` are comments and are ignored, as in git.
 | Workflow `@verifies` not directly above a step's `- name:` line | Error |
 | Workflow `@verifies` on a step that sets, or whose job sets, `continue-on-error` | Error |
 | ADR in `docs/adr/` that cites no requirement | Error |
-| Requirement due in a started phase with no implementation or no verification, and no waiver | Error |
+| Requirement from a finished phase, or with no phase, with no implementation or no verification, and no waiver | Error |
 | `[[waiver]]` with an empty reason or part, a bad date or status, a missing approver, an approver on a proposed waiver, or a second waiver for one requirement | Error |
+| Requirement in the current phase with no implementation or no verification, and no waiver | Warning |
 | Proposed `[[waiver]]`, not yet approved | Warning |
 | `[[waiver]]` with no `part` for a requirement that is implemented and verified | Warning |
 | Commit without a `Refs:` trailer | Error |

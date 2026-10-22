@@ -2,7 +2,8 @@
 //! unknown requirement IDs, oversized scopes, dependencies missing from `deps.toml`, ADRs
 //! that cite no requirement, Markdown documents that implement a requirement not verified by
 //! Inspection or Demonstration, and requirements due in a started phase that lack an
-//! implementation or a verification and have no waiver. Rules: docs/TRACEABILITY.md.
+//! implementation or a verification and have no waiver: an error for a finished phase, a
+//! warning for the current one. Rules: docs/TRACEABILITY.md.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -710,7 +711,8 @@ impl Checker {
 impl Checker {
     /// Reports each requirement due in a started phase, or with no phase, that has no
     /// implementation or no verification and no waiver, using the same coverage as
-    /// `clew report coverage`. Also checks the waivers and the checklists' IDs.
+    /// `clew report coverage`. The gap is an error for a finished phase (below
+    /// `current_phase`) or no phase, and a warning for the current phase. Also checks the waivers and the checklists' IDs.
     fn check_requirements(&mut self) -> Result<(), SetupError> {
         let project = report::load_project(&self.root)?;
         let coverage = report::project_coverage(&project);
@@ -744,6 +746,7 @@ impl Checker {
                     "remove the waiver",
                 );
             }
+            // Later phases are not due yet. A requirement with no phase is always due.
             let due = req.phase.is_none_or(|p| i64::from(p) <= current);
             if !due || waiver.is_some() || (implemented && verified) {
                 continue;
@@ -753,6 +756,23 @@ impl Checker {
                 (false, true) => "no implementation",
                 _ => "no verification",
             };
+            let help = "tag code with `@implements` and a test with `@verifies` (an Inspection or Demonstration requirement may instead be cited by a Markdown document's `@implements` tag and a docs/verification/ checklist), or propose a [[waiver]] in trace.toml for John to approve";
+            // A gap in the current phase is a warning until the phase's gate check.
+            if req.phase.is_some_and(|p| i64::from(p) == current) {
+                self.push(
+                    &path,
+                    req.line,
+                    Severity::Warning,
+                    format!(
+                        "{} (phase {current}) is in the current phase and has {missing}",
+                        req.id
+                    ),
+                    &format!(
+                        "{help}, before the Gate {current} check: it becomes an error when current_phase is above {current}"
+                    ),
+                );
+                continue;
+            }
             let phase = match req.phase {
                 Some(p) => format!("phase {p}"),
                 None => "no phase".to_string(),
@@ -761,8 +781,11 @@ impl Checker {
                 &path,
                 req.line,
                 Severity::Error,
-                format!("{} ({phase}) is due at current_phase {current} but has {missing}", req.id),
-                "tag code with `@implements` and a test with `@verifies` (an Inspection or Demonstration requirement may instead be cited by a Markdown document's `@implements` tag and a docs/verification/ checklist), or propose a [[waiver]] in trace.toml for John to approve",
+                format!(
+                    "{} ({phase}) is due at current_phase {current} but has {missing}",
+                    req.id
+                ),
+                help,
             );
         }
         Ok(())
@@ -1088,6 +1111,12 @@ mod tests {
     /// Builds a project under the system temp directory.
     // @verifies CT-DEV-002, CT-DEV-004
     fn project(name: &str, extra_config: &str, files: &[(&str, &str)]) -> PathBuf {
+        project_at(name, 0, extra_config, files)
+    }
+
+    /// Like `project`, with `current_phase` set to `phase`.
+    // @verifies CT-DEV-002, CT-DEV-003, CT-DEV-004
+    fn project_at(name: &str, phase: i64, extra_config: &str, files: &[(&str, &str)]) -> PathBuf {
         let root = std::env::temp_dir().join(format!("clew-check-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("model")).unwrap();
@@ -1100,7 +1129,7 @@ mod tests {
         .unwrap();
         let config = format!(
             "[project]\nrequirements = [\"model/req.sysml\"]\nid_pattern = \"CT-[A-Z]{{3}}-[0-9]{{3}}\"\n\
-             current_phase = 0\n[coverage]\nsource_roots = [\"src\", \"missing\"]\n\
+             current_phase = {phase}\n[coverage]\nsource_roots = [\"src\", \"missing\"]\n\
              languages = [\"rust\", \"svelte\"]\nfile_level_allowed = [\"*.yml\"]\nmax_scope_lines = 3\n{extra_config}"
         );
         fs::write(root.join(TRACE_CONFIG), config).unwrap();
@@ -1258,7 +1287,7 @@ mod tests {
             ("CT-DEV-002", "covered", Some(0), "Test"),
             ("CT-DEV-003", "untested", Some(0), "Test"),
             ("CT-DEV-004", "bare", Some(0), "Test"),
-            ("CT-DEV-005", "later", Some(1), "Test"),
+            ("CT-DEV-005", "later", Some(2), "Test"),
             ("CT-DEV-008", "phaseless", None, "Test"),
             ("CT-DEV-010", "inspected", Some(0), "Inspection"),
             ("CT-DEV-012", "unimplemented", Some(0), "Test"),
@@ -1280,8 +1309,9 @@ mod tests {
                 "John Schubert",
                 "2026-10-21",
             );
-        let root = project(
+        let root = project_at(
             "gate",
+            1,
             &waivers,
             &[
                 ("model/req.sysml", reqs.as_str()),
@@ -1303,10 +1333,10 @@ mod tests {
             first_lines,
             [
                 "docs/verification/c.md:1: error: unknown requirement ID CT-DEV-999",
-                "model/req.sysml:3: error: CT-DEV-003 (phase 0) is due at current_phase 0 but has no verification",
-                "model/req.sysml:4: error: CT-DEV-004 (phase 0) is due at current_phase 0 but has no implementation and no verification",
-                "model/req.sysml:6: error: CT-DEV-008 (no phase) is due at current_phase 0 but has no implementation and no verification",
-                "model/req.sysml:8: error: CT-DEV-012 (phase 0) is due at current_phase 0 but has no implementation",
+                "model/req.sysml:3: error: CT-DEV-003 (phase 0) is due at current_phase 1 but has no verification",
+                "model/req.sysml:4: error: CT-DEV-004 (phase 0) is due at current_phase 1 but has no implementation and no verification",
+                "model/req.sysml:6: error: CT-DEV-008 (no phase) is due at current_phase 1 but has no implementation and no verification",
+                "model/req.sysml:8: error: CT-DEV-012 (phase 0) is due at current_phase 1 but has no implementation",
                 "trace.toml:16: warning: waiver for CT-DEV-014 is proposed and not approved",
                 "trace.toml:22: warning: waiver for CT-DEV-009 is not needed: it is implemented and verified",
             ]
@@ -1316,6 +1346,62 @@ mod tests {
              Demonstration requirement may instead be cited by a Markdown document's \
              `@implements` tag and a docs/verification/ checklist), or propose a [[waiver]] in \
              trace.toml for John to approve"
+        ));
+    }
+
+    // @verifies CT-DEV-003, CT-DEV-004, CT-USE-007
+    #[test]
+    fn a_current_phase_gap_is_a_warning_and_a_finished_phase_gap_is_an_error() {
+        let reqs = model(&[
+            ("CT-DEV-002", "finished", Some(0), "Test"),
+            ("CT-DEV-003", "current", Some(1), "Test"),
+            ("CT-DEV-004", "untested", Some(1), "Test"),
+            ("CT-DEV-005", "unimplemented", Some(1), "Test"),
+            ("CT-DEV-008", "covered", Some(1), "Test"),
+            ("CT-DEV-009", "waived", Some(1), "Test"),
+            ("CT-DEV-010", "later", Some(2), "Test"),
+            ("CT-DEV-012", "phaseless", None, "Test"),
+        ]);
+        let waivers = waiver(
+            "CT-DEV-009",
+            "Policy",
+            "approved",
+            "John Schubert",
+            "2026-10-22",
+        );
+        let root = project_at(
+            "phases",
+            1,
+            &waivers,
+            &[
+                ("model/req.sysml", reqs.as_str()),
+                (
+                    "src/a.rs",
+                    "// @implements CT-DEV-004, CT-DEV-008\nfn a() {}\n\
+                     // @verifies CT-DEV-005, CT-DEV-008\n#[test]\nfn t() {}\n",
+                ),
+            ],
+        );
+        let report = check_project(&root).unwrap();
+        let text: Vec<String> = report.findings.iter().map(|f| f.to_string()).collect();
+        let first_lines: Vec<&str> = text.iter().map(|t| t.lines().next().unwrap()).collect();
+        assert_eq!(
+            first_lines,
+            [
+                "model/req.sysml:2: error: CT-DEV-002 (phase 0) is due at current_phase 1 but has no implementation and no verification",
+                "model/req.sysml:3: warning: CT-DEV-003 (phase 1) is in the current phase and has no implementation and no verification",
+                "model/req.sysml:4: warning: CT-DEV-004 (phase 1) is in the current phase and has no verification",
+                "model/req.sysml:5: warning: CT-DEV-005 (phase 1) is in the current phase and has no implementation",
+                "model/req.sysml:9: error: CT-DEV-012 (no phase) is due at current_phase 1 but has no implementation and no verification",
+            ]
+        );
+        assert_eq!(report.count(Severity::Error), 2);
+        assert!(text[1].ends_with(
+            "help: tag code with `@implements` and a test with `@verifies` (an Inspection or \
+             Demonstration requirement may instead be cited by a Markdown document's \
+             `@implements` tag and a docs/verification/ checklist), or propose a [[waiver]] in \
+             trace.toml for John to approve, before the Gate 1 check: it becomes an error \
+             when current_phase is above 1"
         ));
     }
 
@@ -1402,7 +1488,7 @@ mod tests {
         let reqs = model(&[
             ("CT-DEV-002", "covered", Some(0), "Test"),
             ("CT-DEV-004", "bare", Some(0), "Test"),
-            ("CT-DEV-008", "later", Some(1), "Test"),
+            ("CT-DEV-008", "later", Some(2), "Test"),
         ]);
         let approved = |id: &str, part: &str| {
             waiver(id, "ARM64 later", "approved", "John Schubert", "2026-10-22")
@@ -1411,8 +1497,9 @@ mod tests {
         let waivers = approved("CT-DEV-002", "ARM64 installers")
             + &approved("CT-DEV-004", "ARM64 installers")
             + &approved("CT-DEV-008", " ");
-        let root = project(
+        let root = project_at(
             "part",
+            1,
             &waivers,
             &[
                 ("model/req.sysml", reqs.as_str()),
@@ -1428,7 +1515,7 @@ mod tests {
         assert_eq!(
             first_lines,
             [
-                "model/req.sysml:3: error: CT-DEV-004 (phase 0) is due at current_phase 0 but has no implementation and no verification",
+                "model/req.sysml:3: error: CT-DEV-004 (phase 0) is due at current_phase 1 but has no implementation and no verification",
                 "trace.toml:24: error: waiver for CT-DEV-008 has an empty part",
             ]
         );

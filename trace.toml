@@ -4,7 +4,10 @@
 [project]
 requirements = ["model/requirements.sysml"]
 id_pattern = "CT-(EFF|USE|TRC|MOD|XCH|CMP|SEC|PLT|DEV)-[0-9]{3}"
-# Requirement coverage is enforced for requirements whose phase <= current_phase.
+# Requirement coverage by phase: a gap in a requirement with phase < current_phase, or with
+# no phase, is an error; a gap with phase == current_phase is a warning until the gate check
+# for that phase; later phases are not checked. Performance budgets are enforced for
+# phase <= current_phase.
 current_phase = 1
 
 [coverage]
