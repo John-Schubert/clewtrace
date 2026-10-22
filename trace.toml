@@ -64,3 +64,17 @@ reason = "Verified by the release workflow, not by a test the gate can read: its
 status = "proposed"
 approved_by = ""
 date = "2026-10-22"
+
+[[waiver]]
+id = "CT-CMP-008"
+reason = "A rule on what the app and its docs say, not behavior, so no code implements it. LICENSING.md holds the disclaimer and docs/verification/no-cert-claim.md verifies it. Waived for good unless John lets a document implement an Inspection requirement."
+status = "proposed"
+approved_by = ""
+date = "2026-10-22"
+
+[[waiver]]
+id = "CT-DEV-013"
+reason = "A project policy, not behavior, so no code implements it. CONTRIBUTING.md states it and docs/verification/public-source.md verifies it. Waived for good unless John lets a document implement an Inspection requirement."
+status = "proposed"
+approved_by = ""
+date = "2026-10-22"
