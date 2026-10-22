@@ -129,10 +129,10 @@ struct Row {
     doc: String,
 }
 
-// @implements CT-EFF-007, CT-TRC-004
+// @implements CT-EFF-007, CT-TRC-004, CT-TRC-009
 /// A file's content hash and text, read in one go.
 pub(crate) struct Loaded {
-    sha256: Vec<u8>,
+    pub(crate) sha256: Vec<u8>,
     pub(crate) text: String,
 }
 
@@ -366,7 +366,7 @@ fn stamp(meta: &fs::Metadata) -> (i64, i64) {
     (i64::try_from(meta.len()).unwrap_or(i64::MAX), mtime)
 }
 
-// @implements CT-EFF-007, CT-USE-007, CT-TRC-004
+// @implements CT-EFF-007, CT-USE-007, CT-TRC-004, CT-TRC-009
 /// Reads a file, hashes it with SHA-256, and decodes it as UTF-8.
 pub(crate) fn read_file(abs: &Path) -> Result<Loaded, String> {
     let bytes = fs::read(abs).map_err(|e| format!("cannot read the file: {e}"))?;

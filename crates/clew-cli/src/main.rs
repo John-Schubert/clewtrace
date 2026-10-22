@@ -8,7 +8,7 @@ use clew_core::commit;
 use clew_core::index::Index;
 use clew_core::json;
 use clew_core::notices::{self, Package};
-use clew_core::report::{self, Project};
+use clew_core::reproduce::{self, GenerateError, ReportKind};
 use clew_core::reqs::{self, Requirement};
 
 // @implements CT-DEV-001
@@ -57,7 +57,8 @@ enum Command {
         command: ReportCommand,
     },
     /// List every element and code scope reachable from one element through trace links,
-    /// upstream (what it traces to) and downstream (what traces to it). Exits 0 when clean,
+    /// upstream (what it traces to) and downstream (what traces to it). The report starts
+    /// with its command, Git commit, tool version, and inputs hash. Exits 0 when clean,
     /// 1 when the element is not found or files have problems, and 2 when it cannot run
     Impact {
         /// A requirement ID such as CT-TRC-005, or a qualified name such as Design::Engine
@@ -86,13 +87,20 @@ enum ReqsCommand {
     },
 }
 
-// @implements CT-TRC-008, CT-TRC-004
+// @implements CT-TRC-008, CT-TRC-004, CT-TRC-009
 #[derive(Subcommand)]
 enum ReportCommand {
     /// Requirements lacking a parent, an implementation, or a verification, and model
-    /// elements traced to no requirement. Exits 0 when clean, 1 when files have problems,
-    /// and 2 when the report cannot run
+    /// elements traced to no requirement. The report starts with its command, Git commit,
+    /// tool version, and inputs hash. Exits 0 when clean, 1 when files have problems, and 2
+    /// when the report cannot run
     Coverage,
+    /// Make a saved report again from the files under the current folder and compare.
+    /// Exits 0 when it matches, 1 when it differs, and 2 when the comparison cannot run
+    Verify {
+        /// The report file, saved from `clew report coverage` or `clew impact`
+        file: PathBuf,
+    },
 }
 
 // @implements CT-TRC-008
@@ -109,63 +117,69 @@ fn main() -> ExitCode {
     }
 }
 
-// @implements CT-TRC-008, CT-TRC-004, CT-TRC-005, CT-USE-007
-/// Reads the project under the current folder and prints its problems, or the exit code
-/// when it cannot be read.
-fn load_project() -> Result<Project, ExitCode> {
-    match report::load_project(Path::new(".")) {
-        Ok(project) => {
-            for problem in &project.problems {
-                println!("{problem}");
+// @implements CT-TRC-008, CT-TRC-004, CT-TRC-005, CT-TRC-009, CT-USE-007
+/// Makes a report of the project under the current folder and prints it. Exits 1 when
+/// files have problems or the element is not found, and 2 when the project cannot be read.
+fn run_generate(kind: &ReportKind) -> ExitCode {
+    match reproduce::generate(Path::new("."), kind) {
+        Ok(report) => {
+            print!("{}", report.text());
+            if report.problems {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
             }
-            Ok(project)
+        }
+        Err(e @ GenerateError::NotFound(_)) => {
+            eprintln!("clew: {e}");
+            ExitCode::FAILURE
         }
         Err(e) => {
             eprintln!("clew: {e}");
-            Err(ExitCode::from(2))
+            ExitCode::from(2)
         }
     }
 }
 
-// @implements CT-TRC-008, CT-TRC-004, CT-TRC-005
-fn problems_code(project: &Project) -> ExitCode {
-    if project.problems.is_empty() {
+// @implements CT-TRC-008, CT-TRC-004, CT-DEV-003, CT-TRC-009
+fn run_report(command: ReportCommand) -> ExitCode {
+    match command {
+        ReportCommand::Coverage => run_generate(&ReportKind::Coverage),
+        ReportCommand::Verify { file } => run_verify(&file),
+    }
+}
+
+// @implements CT-TRC-008, CT-TRC-009, CT-USE-007
+fn run_verify(file: &Path) -> ExitCode {
+    let label = file.display().to_string();
+    let verdict = fs::read_to_string(file)
+        .map_err(|e| e.to_string())
+        .and_then(|text| reproduce::verify(Path::new("."), &text));
+    let verdict = match verdict {
+        Ok(verdict) => verdict,
+        Err(e) => {
+            eprintln!("clew: {label}: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    for note in &verdict.notes {
+        println!("{label}: note: {note}");
+    }
+    for difference in &verdict.differences {
+        println!("{label}: error: {difference}");
+    }
+    if verdict.differences.is_empty() {
+        println!("clew report verify: {label} matches a fresh run");
         ExitCode::SUCCESS
     } else {
+        println!("clew report verify: {label} differs from a fresh run");
         ExitCode::FAILURE
     }
 }
 
-// @implements CT-TRC-008, CT-TRC-004, CT-DEV-003
-fn run_report(command: ReportCommand) -> ExitCode {
-    let ReportCommand::Coverage = command;
-    let project = match load_project() {
-        Ok(project) => project,
-        Err(code) => return code,
-    };
-    let coverage = report::coverage(&project.model, &project.graph);
-    print!("{}", report::coverage_text(&project.model, &coverage));
-    problems_code(&project)
-}
-
-// @implements CT-TRC-008, CT-TRC-005, CT-USE-007
+// @implements CT-TRC-008, CT-TRC-005, CT-TRC-009, CT-USE-007
 fn run_impact(name: &str) -> ExitCode {
-    let project = match load_project() {
-        Ok(project) => project,
-        Err(code) => return code,
-    };
-    let Some(element) = report::find_element(&project, name) else {
-        eprintln!(
-            "clew: no element named {name}\n  help: give a requirement ID such as CT-TRC-005, \
-             or a qualified name such as Design::Engine"
-        );
-        return ExitCode::FAILURE;
-    };
-    print!(
-        "{}",
-        report::impact_text(&project.model, &project.graph, element)
-    );
-    problems_code(&project)
+    run_generate(&ReportKind::Impact(name.to_string()))
 }
 
 // @implements CT-TRC-008, CT-MOD-001, CT-EFF-007, CT-USE-007
