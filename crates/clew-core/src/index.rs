@@ -393,6 +393,7 @@ fn collect_rows(members: &[Member], prefix: &str, rows: &mut Vec<Row>) {
                 u.effective_name().map(str::to_string),
                 u.short_name.clone(),
             ),
+            Member::Dependency(d) => ("dependency", d.name.clone(), d.short_name.clone()),
             Member::Satisfy(_) | Member::Verify(_) => {
                 collect_rows(member.members(), prefix, rows);
                 continue;
@@ -586,6 +587,23 @@ mod tests {
         assert_eq!(hits[0].kind, "part");
         assert!(index.search("  ", 10, 0).unwrap().is_empty());
         assert!(index.search("\"quoted", 10, 0).unwrap().is_empty());
+    }
+
+    // @verifies CT-MOD-001, CT-TRC-002
+    #[test]
+    fn indexes_named_dependencies() {
+        let root = project("dependencies");
+        fs::write(
+            root.join("model/links.sysml"),
+            "package Links {\n    #refinement dependency <'L1'> engineRefines from Parts::Engine to Reqs::incrementalIndex;\n    #evidence dependency Parts::Vehicle to Reqs::incrementalIndex;\n}\n",
+        )
+        .unwrap();
+        let mut index = Index::open(&root).unwrap();
+        assert!(index.update().unwrap().problems.is_empty());
+        let hits = index.search("L1", 10, 0).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].kind, "dependency");
+        assert_eq!(hits[0].qualified_name, "Links::engineRefines");
     }
 
     // @verifies CT-EFF-006

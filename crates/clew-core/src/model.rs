@@ -16,7 +16,9 @@
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 
-use crate::parse::ast::{ImportKind, Kind, Member, Pos, QualifiedName, UsageKind, Visibility};
+use crate::parse::ast::{
+    DependencyKind, ImportKind, Kind, Member, Pos, QualifiedName, UsageKind, Visibility,
+};
 use crate::parse::parser::{self, SyntaxError};
 
 // @implements CT-MOD-002
@@ -55,6 +57,7 @@ pub enum ElementKind {
     Usage(UsageKind),
     Satisfy,
     Verify,
+    Dependency(DependencyKind),
 }
 
 // @implements CT-MOD-002
@@ -103,6 +106,10 @@ pub enum Role {
     SatisfiedBy,
     /// An element a comment is `about`.
     About,
+    /// A name before `to` in a dependency.
+    Client,
+    /// A name after `to` in a dependency.
+    Supplier,
 }
 
 // @implements CT-MOD-002, CT-USE-007
@@ -117,6 +124,8 @@ impl Role {
             Role::Requirement => "requirement",
             Role::SatisfiedBy => "satisfying element",
             Role::About => "annotated element",
+            Role::Client => "dependency source",
+            Role::Supplier => "dependency target",
         }
     }
 
@@ -276,7 +285,7 @@ impl Model {
             skip,
         });
         if let Cite::Itself(id) = from
-            && !matches!(role, Role::SatisfiedBy)
+            && !matches!(role, Role::SatisfiedBy | Role::Client | Role::Supplier)
         {
             self.elements[id.0].generals.push(index);
         }
@@ -337,6 +346,15 @@ impl Model {
                     Member::Verify(v) => {
                         let e = Element::new(ElementKind::Verify, None, file, v.pos);
                         (e, vec![(Role::Requirement, &v.requirement)], &v.members)
+                    }
+                    Member::Dependency(d) => {
+                        let kind = ElementKind::Dependency(d.kind);
+                        let mut e = Element::new(kind, d.name.clone(), file, d.pos);
+                        e.short_name.clone_from(&d.short_name);
+                        e.visibility = d.visibility.unwrap_or(Visibility::Public);
+                        let cited = (d.clients.iter().map(|n| (Role::Client, n)))
+                            .chain(d.suppliers.iter().map(|n| (Role::Supplier, n)));
+                        (e, cited.collect(), &d.members)
                     }
                 };
             let id = self.add_element(ns, element);
@@ -972,6 +990,40 @@ mod tests {
             m.errors[0].error.help,
             "check the spelling and that the file declaring it is in the project; only \
              ScalarValues of the standard library is built in"
+        );
+    }
+
+    // @verifies CT-TRC-002, CT-USE-007
+    #[test]
+    fn resolves_dependency_ends_without_inheriting_from_them() {
+        let m = one(
+            "package P {\n  requirement def R { attribute x; }\n  requirement a : R;\n  \
+             private #refinement dependency <'D1'> d from a to R { doc /* why */ }\n  \
+             #evidence dependency Gone to a;\n}\n",
+        );
+        let p = m.find("P").unwrap();
+        let d = m.element(m.element(p).members[2]);
+        assert_eq!(d.kind, ElementKind::Dependency(DependencyKind::Refinement));
+        assert_eq!(
+            (d.name.as_deref(), d.short_name.as_deref()),
+            (Some("d"), Some("D1"))
+        );
+        assert_eq!(d.visibility, Visibility::Private);
+        assert!(d.generals.is_empty());
+        assert_eq!(target(&m, Role::Client, "a"), Some("P::a".into()));
+        assert_eq!(target(&m, Role::Supplier, "R"), Some("P::R".into()));
+        assert_eq!(
+            rendered(&m),
+            [
+                "m.sysml:5:24: error: cannot resolve dependency source `Gone`\n  help: check the \
+              spelling, or import the package that declares it, for example \
+              `private import ScalarValues::*;`"
+            ]
+        );
+        let m = one("part def T;\n#derivation dependency T to Missing;\n");
+        assert_eq!(
+            m.errors[0].error.message,
+            "cannot resolve dependency target `Missing`"
         );
     }
 

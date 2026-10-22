@@ -273,9 +273,23 @@ requirement is implemented and verified or formally waived.
       replaced on open. Follow-ups: rows come from each file's syntax tree alone, so links and
       resolved names wait for the trace graph (1.5); search has no CLI or UI caller yet, and
       its 200 ms budget (CT-EFF-006, phase 2) is for the harness in 1.8 to measure.
-- [ ] **1.5 Trace graph.** Link types derives, refines, satisfies, verifies, implements, and
+- [x] **1.5 Trace graph.** Link types derives, refines, satisfies, verifies, implements, and
       evidences, from both the model and code tags.
       Refs: CT-TRC-002, CT-TRC-006
+      Done in `crates/clew-core/src/trace.rs`. `TraceGraph::build` takes a `Model` and the tag
+      scans of the code. `satisfy R by x` links x to R, and `satisfy R` and `verify R` link
+      their owner to R. The parser now reads `#derivation dependency a to b;` (a derives from
+      b), `#refinement dependency a to b;` (a refines b), and `#evidence dependency a to b;`
+      (a evidences b), with an optional `<'id'> name from` and lists on both sides; a plain
+      `dependency` or other metadata is a syntax error. `@implements` and `@verifies` scopes
+      link to the requirement whose short name they cite. Links are looked up by the element
+      at either end. A tag citing no requirement in the model, and a top-level `satisfy` or
+      `verify` with nothing to own it, are reported with a `help:` line. `clew index` also
+      keeps each file's syntax errors and reports them on every run (review of PR #20).
+      Follow-ups: the `#derivation`/`#refinement`/`#evidence` syntax awaits John's approval;
+      targets of satisfy and verify are not checked to be requirements; a short name used by
+      two requirements links to the first; links are not stored in the index yet, and the
+      graph has no CLI caller until 1.6.
 - [ ] **1.6 Coverage and impact.** `clew report coverage` and `clew impact <ID>`.
       Refs: CT-TRC-004, CT-TRC-005, CT-DEV-003
 - [ ] **1.7 Reproducible reports.** Every report records the Git commit, tool version, and a

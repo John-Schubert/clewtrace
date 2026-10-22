@@ -47,6 +47,7 @@ pub enum Member {
     Usage(Usage),
     Satisfy(Satisfy),
     Verify(Verify),
+    Dependency(Dependency),
 }
 
 // @implements CT-MOD-002
@@ -61,6 +62,7 @@ impl Member {
             Member::Usage(m) => m.pos,
             Member::Satisfy(m) => m.pos,
             Member::Verify(m) => m.pos,
+            Member::Dependency(m) => m.pos,
         }
     }
 
@@ -72,6 +74,7 @@ impl Member {
             Member::Usage(m) => &m.members,
             Member::Satisfy(m) => &m.members,
             Member::Verify(m) => &m.members,
+            Member::Dependency(m) => &m.members,
             Member::Import(_) | Member::Comment(_) => &[],
         }
     }
@@ -251,5 +254,33 @@ pub struct Satisfy {
 pub struct Verify {
     pub pos: Pos,
     pub requirement: QualifiedName,
+    pub members: Vec<Member>,
+}
+
+// @implements CT-TRC-002
+/// The trace meaning of a dependency, given by the metadata written before it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DependencyKind {
+    /// `#derivation`: each source is derived from each target.
+    Derivation,
+    /// `#refinement`: each source refines each target.
+    Refinement,
+    /// `#evidence`: each source is evidence for each target.
+    Evidence,
+}
+
+// @implements CT-TRC-002
+/// `#refinement dependency <'D1'> name from a, b to c;` or `#derivation dependency a to b;`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Dependency {
+    pub pos: Pos,
+    pub visibility: Option<Visibility>,
+    pub kind: DependencyKind,
+    pub short_name: Option<String>,
+    pub name: Option<String>,
+    /// The names before `to`, which SysML v2 calls the clients.
+    pub clients: Vec<QualifiedName>,
+    /// The names after `to`, which SysML v2 calls the suppliers.
+    pub suppliers: Vec<QualifiedName>,
     pub members: Vec<Member>,
 }
