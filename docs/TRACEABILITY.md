@@ -6,6 +6,10 @@ Every non-blank, non-comment line of first-party source code must sit inside a s
 with at least one valid requirement ID. `clew check --self` enforces this in CI and lists every
 untraced line by file and line number.
 
+Model files trace to each other with `satisfy`, `verify`, and the `#derivation`,
+`#refinement`, and `#evidence` dependencies. Their syntax and the Clewtrace library are in
+[MODELING.md](MODELING.md).
+
 ## Requirement IDs
 
 - Pattern: `CT-(EFF|USE|TRC|MOD|XCH|CMP|SEC|PLT|DEV)-[0-9]{3}`, for example `CT-TRC-004`.

@@ -17,6 +17,8 @@ License 1.1; see `LICENSING.md`.
 | `CLAUDE.md` | Standing instructions Claude Code reads every session |
 | `model/requirements.sysml` | The 75 product requirements in SysML v2 text; the source of truth for every trace tag |
 | `docs/TRACEABILITY.md` | How code, tests, and commits trace to requirements, and what CI enforces |
+| `docs/MODELING.md` | Trace link syntax in model files, and the Clewtrace library for other SysML v2 tools |
+| `library/Clewtrace.sysml` | The Clewtrace library: metadata for `#derivation` and `#evidence` links |
 | `docs/PLAN.md` | Session-sized tasks for phases 0 and 1, with exit gates |
 | `docs/adr/` | Architecture decisions: stack, trace annotations, licensing |
 | `LICENSE`, `LICENSING.md` | Business Source License 1.1 with Clewtrace's terms, and a plain-words summary |
