@@ -224,6 +224,10 @@ fn parse_string(text: &str) -> Result<(String, &str), String> {
     Err("string is not closed on the same line".into())
 }
 
+/// The `[coverage]` key that lists the top-level requirement definitions.
+// @implements CT-TRC-004, CT-DEV-003
+pub const TOP_LEVEL_DEFINITIONS: &str = "top_level_definitions";
+
 // @implements CT-DEV-002, CT-DEV-004
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Exclude {
@@ -233,8 +237,8 @@ pub struct Exclude {
     pub line: usize,
 }
 
-/// The settings in `trace.toml` that `clew check --self` uses.
-// @implements CT-DEV-002, CT-DEV-004
+/// The settings in `trace.toml` that `clew check --self` and `clew report` use.
+// @implements CT-DEV-002, CT-DEV-004, CT-TRC-004
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraceConfig {
     pub requirements: Vec<String>,
@@ -244,10 +248,15 @@ pub struct TraceConfig {
     pub languages: Vec<String>,
     pub file_level_allowed: Vec<String>,
     pub max_scope_lines: usize,
+    /// Qualified names of the requirement definitions whose usages need no parent in
+    /// `clew report coverage`, from `[coverage] top_level_definitions`. Empty if not set.
+    pub top_level_definitions: Vec<String>,
+    /// The line of `top_level_definitions`, or 0 if it is not set.
+    pub top_level_line: usize,
     pub excludes: Vec<Exclude>,
 }
 
-// @implements CT-DEV-002, CT-DEV-004, CT-USE-007
+// @implements CT-DEV-002, CT-DEV-004, CT-USE-007, CT-TRC-004
 impl TraceConfig {
     pub fn parse(text: &str) -> Result<TraceConfig, ConfigError> {
         let tables = parse_tables(text)?;
@@ -270,6 +279,11 @@ impl TraceConfig {
                 line: coverage.get("max_scope_lines").map_or(1, |e| e.line),
                 message: "`max_scope_lines` must be a positive integer".into(),
             })?;
+        let top_level_definitions = match coverage.get(TOP_LEVEL_DEFINITIONS) {
+            Some(_) => coverage.list(TOP_LEVEL_DEFINITIONS)?.to_vec(),
+            None => Vec::new(),
+        };
+        let top_level_line = coverage.get(TOP_LEVEL_DEFINITIONS).map_or(0, |e| e.line);
         let mut excludes = Vec::new();
         for t in tables.iter().filter(|t| t.array && t.name == "exclude") {
             excludes.push(Exclude {
@@ -287,6 +301,8 @@ impl TraceConfig {
             languages: coverage.list("languages")?.to_vec(),
             file_level_allowed: coverage.list("file_level_allowed")?.to_vec(),
             max_scope_lines,
+            top_level_definitions,
+            top_level_line,
             excludes,
         })
     }
@@ -361,6 +377,33 @@ name = \"two\"
         assert_eq!(config.max_scope_lines, 200);
         assert!(config.languages.contains(&"rust".to_string()));
         assert!(!config.file_level_allowed.contains(&"*.json".to_string()));
+        assert_eq!(
+            config.top_level_definitions,
+            ["ClewtraceRequirements::ProductRequirement"]
+        );
+        assert!(config.top_level_line > 0);
+    }
+
+    // @verifies CT-TRC-004, CT-DEV-003
+    #[test]
+    fn top_level_definitions_are_optional_and_must_be_a_list() {
+        let text = "[project]\nrequirements = []\nid_pattern = \"x\"\ncurrent_phase = 0\n\
+                    [coverage]\nsource_roots = []\nlanguages = []\nfile_level_allowed = []\n\
+                    max_scope_lines = 5\n";
+        let config = TraceConfig::parse(text).unwrap();
+        assert!(config.top_level_definitions.is_empty());
+        assert_eq!(config.top_level_line, 0);
+        let listed = format!("{text}top_level_definitions = [\"P::R\"]\n");
+        let config = TraceConfig::parse(&listed).unwrap();
+        assert_eq!(config.top_level_definitions, ["P::R"]);
+        assert_eq!(config.top_level_line, 10);
+        let wrong = format!("{text}top_level_definitions = \"P::R\"\n");
+        let err = TraceConfig::parse(&wrong).unwrap_err();
+        assert_eq!(err.line, 10);
+        assert_eq!(
+            err.message,
+            "`top_level_definitions` must be an array of strings"
+        );
     }
 
     // @verifies CT-DEV-004, CT-USE-007

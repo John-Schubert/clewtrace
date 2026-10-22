@@ -10,8 +10,9 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::check::{self, SetupError};
+use crate::config::{TOP_LEVEL_DEFINITIONS, TraceConfig};
 use crate::index;
-use crate::model::{ElementId, ElementKind, LIBRARY_PATH, Model};
+use crate::model::{ElementId, ElementKind, LIBRARY_PATH, Model, Role};
 use crate::parse::ast::{Kind, Member, UsageKind};
 use crate::parse::parser;
 use crate::reproduce;
@@ -29,6 +30,8 @@ pub struct Project {
     /// Every file read as text, `trace.toml` included, with the SHA-256 of its text from
     /// `reproduce::text_sha256`.
     pub inputs: Vec<(String, Vec<u8>)>,
+    /// The requirement definitions in `trace.toml` whose usages need no parent.
+    pub top_level: Vec<ElementId>,
 }
 
 // @implements CT-TRC-004, CT-TRC-005, CT-USE-007, CT-TRC-009
@@ -65,6 +68,7 @@ pub fn load_project(root: &Path) -> Result<Project, SetupError> {
         .collect();
     let model = Model::build(&inputs);
     problems.extend(model.errors.iter().map(ToString::to_string));
+    let top_level = top_level_definitions(&model, &config)?;
     let mut scans = Vec::new();
     for path in check::source_files(root, &config)? {
         let excluded = (config.excludes.iter()).any(|e| check::glob_matches(&e.path, &path));
@@ -83,7 +87,53 @@ pub fn load_project(root: &Path) -> Result<Project, SetupError> {
         graph,
         problems,
         inputs: hashed,
+        top_level,
     })
+}
+
+// @implements CT-TRC-004, CT-USE-007
+/// Resolves `[coverage] top_level_definitions` in `trace.toml`. Each entry must be the
+/// qualified name of a requirement definition.
+fn top_level_definitions(
+    model: &Model,
+    config: &TraceConfig,
+) -> Result<Vec<ElementId>, SetupError> {
+    let error = |name: &str, problem: &str| SetupError {
+        path: check::TRACE_CONFIG.to_string(),
+        line: config.top_level_line,
+        message: format!(
+            "`{TOP_LEVEL_DEFINITIONS}` entry `{name}` {problem}\n  help: list the qualified \
+             names of requirement definitions, such as `Requirements::TopLevelRequirement`"
+        ),
+    };
+    let mut found = Vec::new();
+    for name in &config.top_level_definitions {
+        let id = model
+            .find(name)
+            .ok_or_else(|| error(name, "names no element in the model"))?;
+        if model.element(id).kind != ElementKind::Definition(Kind::Requirement) {
+            return Err(error(name, "is not a requirement definition"));
+        }
+        found.push(id);
+    }
+    Ok(found)
+}
+
+// @implements CT-TRC-004
+/// Whether `id` is typed by one of the `top_level` definitions or by a definition that
+/// specializes one, directly or through other definitions.
+fn is_top_level(model: &Model, id: ElementId, top_level: &[ElementId]) -> bool {
+    let mut seen = HashSet::new();
+    let mut todo: Vec<ElementId> = model.cited(id, Role::Type).collect();
+    while let Some(definition) = todo.pop() {
+        if top_level.contains(&definition) {
+            return true;
+        }
+        if seen.insert(definition) {
+            todo.extend(model.cited(definition, Role::Specializes));
+        }
+    }
+    false
 }
 
 // @implements CT-TRC-004, CT-DEV-003
@@ -109,12 +159,13 @@ pub struct Coverage {
 }
 
 // @implements CT-TRC-004, CT-DEV-003
-/// Works out the coverage of a model and its trace graph.
+/// Works out the coverage of a model and its trace graph. A requirement typed by one of
+/// the `top_level` definitions, or by a definition that specializes one, needs no parent.
 ///
 /// An element counts as traced when it, an element that owns it, or an element it owns
 /// is linked to a requirement, directly or through other links, in either direction. Definitions and usages count; packages, links,
 /// metadata definitions, and the features of a requirement do not.
-pub fn coverage(model: &Model, graph: &TraceGraph) -> Coverage {
+pub fn coverage(model: &Model, graph: &TraceGraph, top_level: &[ElementId]) -> Coverage {
     let is_requirement = |id: ElementId| {
         matches!(
             model.element(id).kind,
@@ -139,7 +190,9 @@ pub fn coverage(model: &Model, graph: &TraceGraph) -> Coverage {
             let into = || graph.links_to(id).map(|l| l.kind);
             RequirementCoverage {
                 requirement: id,
-                has_parent: parent_link || model.element(id).owner.is_some_and(is_requirement),
+                has_parent: parent_link
+                    || model.element(id).owner.is_some_and(is_requirement)
+                    || is_top_level(model, id, top_level),
                 implemented: into()
                     .any(|k| matches!(k, LinkKind::Implements | LinkKind::Satisfies)),
                 verified: into().any(|k| k == LinkKind::Verifies),
@@ -363,7 +416,7 @@ mod tests {
         let project = load_project(&root).unwrap();
         assert!(project.problems.is_empty(), "{:?}", project.problems);
         let model = &project.model;
-        let found = coverage(model, &project.graph);
+        let found = coverage(model, &project.graph, &project.top_level);
         let summary: Vec<(String, bool, bool, bool)> = (found.requirements.iter())
             .map(|r| {
                 let name = model.qualified_name(r.requirement);
@@ -406,12 +459,86 @@ traced to no requirement
             "package Links {\n    part p;\n    #refinement dependency Reqs::lone to p;\n}\n";
         let root = project("parent", &[("model/links.sysml", links.as_bytes())]);
         let project = load_project(&root).unwrap();
-        let found = coverage(&project.model, &project.graph);
+        let found = coverage(&project.model, &project.graph, &project.top_level);
         assert!(!found.requirements[3].has_parent);
         // The part is traced all the same: a requirement refines it.
         let p = project.model.find("Links::p").unwrap();
         assert!(!found.untraced.contains(&p));
         assert_eq!(found.untraced.len(), 2);
+    }
+
+    /// Sets `top_level_definitions` in the project's `trace.toml`, on line 10.
+    fn set_top_level(root: &Path, list: &str) {
+        let path = root.join("trace.toml");
+        let text = fs::read_to_string(&path).unwrap().replace(
+            "max_scope_lines = 200\n",
+            &format!("max_scope_lines = 200\ntop_level_definitions = {list}\n"),
+        );
+        fs::write(path, text).unwrap();
+    }
+
+    // @verifies CT-TRC-004, CT-DEV-003
+    #[test]
+    fn requirements_of_a_top_level_definition_need_no_parent() {
+        let top = "package Top {
+    requirement def Product;
+    requirement def Special :> Product;
+    requirement def Loop1 :> Loop2;
+    requirement def Loop2 :> Loop1;
+    requirement <'CT-TRC-005'> a : Product;
+    requirement <'CT-TRC-006'> b : Special;
+    requirement <'CT-TRC-007'> c : Reqs::Req;
+    requirement <'CT-TRC-008'> d : Loop1;
+}
+";
+        let root = project("top-level", &[("model/top.sysml", top.as_bytes())]);
+        let parents = |root: &Path| {
+            let project = load_project(root).unwrap();
+            assert!(project.problems.is_empty(), "{:?}", project.problems);
+            let found = coverage(&project.model, &project.graph, &project.top_level);
+            (found.requirements.iter())
+                .filter(|r| r.has_parent)
+                .map(|r| project.model.qualified_name(r.requirement))
+                .collect::<Vec<String>>()
+        };
+        assert_eq!(parents(&root), ["Reqs::child", "Reqs::child::nested"]);
+        set_top_level(&root, "[\"Top::Product\"]");
+        assert_eq!(
+            parents(&root),
+            ["Reqs::child", "Reqs::child::nested", "Top::a", "Top::b"]
+        );
+    }
+
+    // @verifies CT-TRC-004, CT-USE-007
+    #[test]
+    fn top_level_entries_must_be_requirement_definitions() {
+        let cases = [
+            (
+                "[\"Reqs::Missing\"]",
+                "`Reqs::Missing` names no element in the model",
+            ),
+            (
+                "[\"Design::Engine\"]",
+                "`Design::Engine` is not a requirement definition",
+            ),
+            (
+                "[\"Reqs::top\"]",
+                "`Reqs::top` is not a requirement definition",
+            ),
+        ];
+        for (list, problem) in cases {
+            let root = project("top-level-errors", &[]);
+            set_top_level(&root, list);
+            let err = load_project(&root).err().unwrap();
+            assert_eq!(
+                err.to_string(),
+                format!(
+                    "trace.toml:10: `top_level_definitions` entry {problem}\n  help: list the \
+                     qualified names of requirement definitions, such as \
+                     `Requirements::TopLevelRequirement`"
+                )
+            );
+        }
     }
 
     // @verifies CT-TRC-005

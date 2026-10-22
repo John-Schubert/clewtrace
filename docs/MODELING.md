@@ -48,7 +48,7 @@ under the root and the tags in the code under the source roots in `trace.toml`.
 `clew report coverage` lists:
 
 - requirements without a parent: they neither derive from nor refine another requirement,
-  and are not nested in one;
+  are not nested in one, and are not top level (see below);
 - requirements without an implementation: no code implements them and no element satisfies
   them;
 - requirements without a verification: no test or element verifies them;
@@ -56,6 +56,19 @@ under the root and the tags in the code under the source roots in `trace.toml`.
   other links, to a requirement. An element also counts as traced when an element that owns
   it, or one it owns, is linked. Packages, metadata definitions, and the features of a
   requirement are not listed.
+
+Top-level requirements, such as product requirements, have no parent by design. List
+their requirement definitions under `[coverage]` in `trace.toml`:
+
+```toml
+top_level_definitions = ["ClewtraceRequirements::ProductRequirement"]
+```
+
+Each entry is the qualified name of a requirement definition. A requirement typed by one of
+them, or by a definition that specializes one, counts as having a parent. Every other
+requirement still needs one. An entry that names no element, or names something other than a
+requirement definition, stops the report with exit 2 and the `trace.toml` line. The key is
+optional; without it every requirement needs a parent.
 
 `clew impact <element>` takes a requirement ID such as `CT-TRC-005` or a qualified name
 such as `Design::Engine`. It lists every element and code scope reachable upstream (what the
