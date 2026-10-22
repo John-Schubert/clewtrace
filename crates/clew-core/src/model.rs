@@ -545,7 +545,11 @@ impl<'m> Resolver<'m> {
         }
         self.state[index] = State::Busy;
         let r = &self.model.references[index];
+        // The reference resolves from its own scope, whatever namespaces the lookup that
+        // needs it has open; `Busy` already ends cycles of references.
+        let open = std::mem::take(&mut self.open);
         let target = self.resolve(r.scope, &r.name.segments, r.skip).ok();
+        self.open = open;
         self.state[index] = State::Done(target);
         target
     }
@@ -887,6 +891,23 @@ mod tests {
             .map(|e| (e.error.line, e.error.column))
             .collect();
         assert_eq!(lines, [(3, 35), (5, 28)]);
+    }
+
+    // @verifies CT-MOD-002
+    #[test]
+    fn references_needed_mid_lookup_resolve_from_their_own_scope() {
+        // Finding `wheels` searches M, then Car through the import. Car's members include
+        // those it inherits from Vehicle, a name that resolves in M, which is being searched.
+        let m = one(
+            "package M {\n  private import Parts::Car::*;\n  part w2 :> wheels;\n  \
+                     part def Vehicle { part wheels; }\n  \
+                     package Parts { part def Car :> Vehicle; }\n}\n",
+        );
+        assert!(m.errors.is_empty(), "{:?}", rendered(&m));
+        assert_eq!(
+            target(&m, Role::Subsets, "wheels"),
+            Some("M::Vehicle::wheels".into())
+        );
     }
 
     // @verifies CT-MOD-002
