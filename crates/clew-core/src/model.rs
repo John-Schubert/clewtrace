@@ -11,7 +11,7 @@
 //! namespace the search covers owned members, members inherited from what the namespace
 //! specializes, is typed by, subsets, or redefines, and imported members. Later segments of
 //! a qualified name see only public members. A built-in `ScalarValues` package stands in for
-//! the standard library.
+//! the standard library, next to the built-in `Clewtrace` package of trace link metadata.
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -38,8 +38,13 @@ const LIBRARY: &str = "package ScalarValues {
 }
 ";
 
+// @implements CT-MOD-002, CT-TRC-002
+/// The metadata of the Clewtrace trace links, also published as `library/Clewtrace.sysml`
+/// for other SysML v2 tools.
+const CLEWTRACE_LIBRARY: &str = include_str!("../../../library/Clewtrace.sysml");
+
 // @implements CT-MOD-002
-/// The file name the built-in library is listed under in `Model::files`.
+/// The file name each built-in library file is listed under in `Model::files`.
 pub const LIBRARY_PATH: &str = "<built-in library>";
 
 // @implements CT-MOD-002
@@ -200,14 +205,15 @@ impl Model {
 
     /// Builds the model of parsed files, given as `(path, members)`, and resolves its names.
     pub fn build(files: &[(&str, &[Member])]) -> Model {
-        let library = parser::parse(LIBRARY);
         let mut model = Model {
             files: Vec::new(),
             elements: vec![Element::new(ElementKind::Root, None, 0, Pos::default())],
             references: Vec::new(),
             errors: Vec::new(),
         };
-        model.add_file(LIBRARY_PATH, &library.members);
+        for library in [LIBRARY, CLEWTRACE_LIBRARY] {
+            model.add_file(LIBRARY_PATH, &parser::parse(library).members);
+        }
         for (path, members) in files {
             model.add_file(path, members);
         }
@@ -749,7 +755,7 @@ mod tests {
             target(&m, Role::Type, "String"),
             Some("ScalarValues::String".into())
         );
-        assert_eq!(m.files, [LIBRARY_PATH, "m.sysml"]);
+        assert_eq!(m.files, [LIBRARY_PATH, LIBRARY_PATH, "m.sysml"]);
     }
 
     // @verifies CT-MOD-002
@@ -768,7 +774,7 @@ mod tests {
         assert_eq!(e.visibility, Visibility::Private);
         assert_eq!(
             (e.owner, e.file, e.pos),
-            (Some(p), 1, Pos { line: 2, column: 3 })
+            (Some(p), 2, Pos { line: 2, column: 3 })
         );
         assert_eq!(m.element(m.element(p).members[1]).kind, ElementKind::Verify);
         let r = m.find("P::R").unwrap();
@@ -787,7 +793,7 @@ mod tests {
                      part b : T;\n  part c : Q::T;\n}\n",
         );
         let types: Vec<String> = (m.references.iter())
-            .filter(|r| r.file == 1)
+            .filter(|r| r.file == 2)
             .map(|r| m.qualified_name(r.target.unwrap()))
             .collect();
         assert_eq!(types, ["P::Q::T", "P::T", "P::Q::T"]);
@@ -1046,7 +1052,7 @@ mod tests {
         assert_eq!(m.find(""), None);
         assert_eq!(m.qualified_name(Model::ROOT), "");
         let unnamed = one("part { part y; }\n");
-        let outer = unnamed.element(Model::ROOT).members[1];
+        let outer = unnamed.element(Model::ROOT).members[2];
         let y = unnamed.element(outer).members[0];
         assert_eq!(unnamed.qualified_name(y), "(unnamed)::y");
     }
@@ -1061,5 +1067,29 @@ mod tests {
         let positive = m.find("ScalarValues::Positive").unwrap();
         assert_eq!(m.element(positive).file, 0);
         assert!(m.references.iter().all(|r| r.target.is_some()));
+    }
+
+    // @verifies CT-MOD-002, CT-TRC-002
+    #[test]
+    fn the_built_in_clewtrace_library_defines_the_link_metadata() {
+        let parsed = parse(CLEWTRACE_LIBRARY);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let m = one("");
+        for (qualified, short) in [
+            ("Clewtrace::Derivation", "derivation"),
+            ("Clewtrace::Evidence", "evidence"),
+        ] {
+            let id = m.find(qualified).unwrap();
+            let element = m.element(id);
+            assert_eq!(element.kind, ElementKind::Definition(Kind::Metadata));
+            assert_eq!(element.short_name.as_deref(), Some(short));
+            assert_eq!(m.files[element.file], LIBRARY_PATH);
+        }
+        assert_eq!(
+            m.find("Clewtrace::derivation"),
+            m.find("Clewtrace::Derivation")
+        );
+        assert!(CLEWTRACE_LIBRARY.contains("private import Clewtrace::*;"));
+        assert!(CLEWTRACE_LIBRARY.contains("ModelingMetadata"));
     }
 }

@@ -133,13 +133,15 @@ pub struct Comment {
 }
 
 // @implements CT-MOD-002
-/// The element kinds that have both a definition and a usage form.
+/// The element kinds that have both a definition and a usage form. Clewtrace reads only
+/// the definition form of metadata, `metadata def <derivation> Derivation;`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Part,
     Attribute,
     Port,
     Requirement,
+    Metadata,
 }
 
 // @implements CT-MOD-002

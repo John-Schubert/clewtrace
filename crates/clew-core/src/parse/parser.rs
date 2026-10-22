@@ -81,8 +81,8 @@ pub fn parse(src: &str) -> Parsed {
 
 // @implements CT-MOD-002, CT-USE-007
 const SUPPORTED: &str = "Clewtrace reads packages, imports, comments and doc, part, attribute, \
-port, and requirement definitions and usages, subject, satisfy, verify, and \
-`#derivation`, `#refinement`, and `#evidence` dependencies";
+port, and requirement definitions and usages, metadata definitions, subject, satisfy, verify, \
+and `#derivation`, `#refinement`, and `#evidence` dependencies";
 
 // @implements CT-TRC-002, CT-USE-007
 const DEPENDENCY_HELP: &str = "write `#derivation dependency a to b;` (a is derived from b), \
@@ -101,6 +101,7 @@ const MEMBER_START: &[&str] = &[
     "import",
     "in",
     "inout",
+    "metadata",
     "out",
     "package",
     "part",
@@ -464,6 +465,7 @@ impl Parser<'_> {
             "attribute" => Some(Kind::Attribute),
             "port" => Some(Kind::Port),
             "requirement" => Some(Kind::Requirement),
+            "metadata" => Some(Kind::Metadata),
             _ => None,
         };
         let is_def = kind.is_some() && self.peek_at(1).is("def", self.src);
@@ -505,6 +507,12 @@ impl Parser<'_> {
             }
             _ => match kind {
                 Some(kind) if is_def => Some(self.definition(pos, visibility, is_abstract, kind)),
+                Some(Kind::Metadata) => {
+                    let message = "`metadata` is supported only in `metadata def`".to_string();
+                    self.error(token, message, SUPPORTED);
+                    self.skip_member();
+                    None
+                }
                 Some(kind) => {
                     Some(self.usage(pos, visibility, direction, is_abstract, UsageKind::Of(kind)))
                 }
@@ -1364,6 +1372,45 @@ mod tests {
         };
         assert_eq!(root.name.as_deref(), Some("ClewtraceRequirements"));
         assert!(matches!(root.members[1], Member::Import(_)));
+    }
+
+    // @verifies CT-MOD-002, CT-TRC-002
+    #[test]
+    fn parses_metadata_definitions_with_an_optional_short_name() {
+        let src = "metadata def <derivation> Derivation;\n\
+                   metadata def Plain { doc /* d */ }";
+        let defs: Vec<Definition> = parse_ok(src)
+            .into_iter()
+            .map(|m| match m {
+                Member::Definition(d) => d,
+                other => panic!("expected a definition, got {other:?}"),
+            })
+            .collect();
+        assert!(defs.iter().all(|d| d.kind == Kind::Metadata));
+        assert_eq!(defs[0].short_name.as_deref(), Some("derivation"));
+        assert_eq!(defs[0].name.as_deref(), Some("Derivation"));
+        assert_eq!(defs[1].short_name, None);
+        assert_eq!(defs[1].members.len(), 1);
+    }
+
+    // @verifies CT-MOD-002, CT-USE-007
+    #[test]
+    fn reports_metadata_usages_as_unsupported_and_recovers() {
+        let parsed = parse("metadata m : Derivation about x;\npart ok;\n");
+        let found: Vec<(u32, u32, &str, &str)> = (parsed.errors.iter())
+            .map(|e| (e.line, e.column, e.message.as_str(), e.help))
+            .collect();
+        assert_eq!(
+            found,
+            [(
+                1,
+                1,
+                "`metadata` is supported only in `metadata def`",
+                SUPPORTED
+            )]
+        );
+        assert_eq!(parsed.members.len(), 1);
+        assert!(matches!(&parsed.members[0], Member::Usage(u) if u.name.as_deref() == Some("ok")));
     }
 
     // @verifies CT-USE-007

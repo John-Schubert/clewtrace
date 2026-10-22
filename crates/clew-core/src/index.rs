@@ -435,6 +435,7 @@ fn definition_kind(kind: Kind) -> &'static str {
         Kind::Attribute => "attribute def",
         Kind::Port => "port def",
         Kind::Requirement => "requirement def",
+        Kind::Metadata => "metadata def",
     }
 }
 
@@ -445,6 +446,7 @@ fn usage_kind(kind: UsageKind) -> &'static str {
         UsageKind::Of(Kind::Attribute) => "attribute",
         UsageKind::Of(Kind::Port) => "port",
         UsageKind::Of(Kind::Requirement) => "requirement",
+        UsageKind::Of(Kind::Metadata) => "metadata",
         UsageKind::Subject => "subject",
     }
 }
@@ -604,6 +606,24 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].kind, "dependency");
         assert_eq!(hits[0].qualified_name, "Links::engineRefines");
+    }
+
+    // @verifies CT-MOD-001, CT-TRC-002
+    #[test]
+    fn indexes_metadata_definitions() {
+        let root = project("metadata");
+        fs::write(
+            root.join("model/meta.sysml"),
+            "package Meta {\n    metadata def <evidence> Evidence;\n}\n",
+        )
+        .unwrap();
+        let mut index = Index::open(&root).unwrap();
+        assert!(index.update().unwrap().problems.is_empty());
+        let hits = index.search("evidence", 10, 0).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].kind, "metadata def");
+        assert_eq!(hits[0].qualified_name, "Meta::Evidence");
+        assert_eq!(usage_kind(UsageKind::Of(Kind::Metadata)), "metadata");
     }
 
     // @verifies CT-EFF-006
