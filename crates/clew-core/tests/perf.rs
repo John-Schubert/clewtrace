@@ -3,7 +3,8 @@
 //!
 //! `cargo test` runs the generator at a small size. The full-size run is ignored by default;
 //! the `perf` CI job runs it in release mode, limited to 4 GB of RAM and 2 CPUs:
-//! `cargo test --release -p clew-core --test perf -- --ignored --nocapture`.
+//! `cargo test --release -p clew-core --test perf -- --ignored --nocapture`. The job also
+//! runs a canary that writes 5 GiB under the same limits and must be killed.
 //! A budget fails the run only when its requirement's phase has started (`current_phase`
 //! in `trace.toml`); later budgets are measured and printed as not due yet.
 
@@ -381,4 +382,22 @@ fn budgets_hold_at_10000_requirements_and_50000_links() {
     let (table, ok) = judge(&budgets(&m), phase_of, config.current_phase);
     println!("{table}");
     assert!(ok, "a due CT-EFF budget is exceeded:\n{table}");
+}
+
+// @verifies CT-EFF-009
+/// The canary for the perf job's limits. It writes 5 GiB, more than the job's 4 GB with no
+/// swap, so the kernel must kill it; the job fails if it finishes. It does nothing unless
+/// `CLEW_PERF_CANARY` is set, so `--ignored` on a machine without the limits is safe.
+#[test]
+#[ignore = "run by the perf CI job under its limits, where it must be killed"]
+fn canary_writes_more_than_the_memory_limit() {
+    if std::env::var_os("CLEW_PERF_CANARY").is_none() {
+        return;
+    }
+    let mut blocks = Vec::new();
+    for _ in 0..5 * 1024 {
+        // Nonzero bytes, so every page is written, not just reserved.
+        blocks.push(std::hint::black_box(vec![1u8; 1 << 20]));
+    }
+    println!("wrote {} MiB and was not killed", blocks.len());
 }

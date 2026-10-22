@@ -195,18 +195,31 @@ jobs:
 
       # The test prints each budget, what it measured, and whether it is due. systemd-run runs
       # as root under the system manager: a user manager (--user) may lack the memory and
-      # cpuset controllers and drop the limits without an error. The script reads the limits
-      # back from its own cgroup and stops if any is missing.
+      # cpuset controllers and drop the limits without an error. `limited` reads the limits
+      # back from its own cgroup and stops if any is missing. Then a canary writes 5 GiB under
+      # the same limits and must be killed (exit 137, SIGKILL), or the job fails.
       - name: Performance budgets
         run: |
-          sudo systemd-run --scope --quiet \
-            -p MemoryMax=4G -p MemorySwapMax=0 -p AllowedCPUs=0-1 \
-            -- sh -c '
-              cg="/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)"
-              max=$(cat "$cg/memory.max") swap=$(cat "$cg/memory.swap.max")
-              echo "memory.max $max bytes, memory.swap.max $swap, $(nproc) CPUs"
-              if [ "$max" != 4294967296 ] || [ "$swap" != 0 ] || [ "$(nproc)" != 2 ]; then
-                echo "the 4 GB, no swap, and 2 CPU limits are not applied" >&2; exit 1
-              fi
-              exec "$0" --ignored --nocapture
-            ' "$(cat "$RUNNER_TEMP/perf-bin")"
+          bin=$(cat "$RUNNER_TEMP/perf-bin")
+          limited() {
+            sudo systemd-run --scope --quiet \
+              -p MemoryMax=4G -p MemorySwapMax=0 -p AllowedCPUs=0-1 \
+              -- sh -c '
+                cg="/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)"
+                max=$(cat "$cg/memory.max") swap=$(cat "$cg/memory.swap.max")
+                echo "memory.max $max bytes, memory.swap.max $swap, $(nproc) CPUs"
+                if [ "$max" != 4294967296 ] || [ "$swap" != 0 ] || [ "$(nproc)" != 2 ]; then
+                  echo "the 4 GB, no swap, and 2 CPU limits are not applied" >&2; exit 1
+                fi
+                exec "$@"
+              ' sh "$@"
+          }
+          limited "$bin" --ignored --nocapture --skip canary
+          status=0
+          limited env CLEW_PERF_CANARY=1 "$bin" --ignored --nocapture \
+            --exact canary_writes_more_than_the_memory_limit || status=$?
+          if [ "$status" != 137 ]; then
+            echo "the 5 GiB canary exited with $status instead of being killed, so the 4 GB limit is not enforced" >&2
+            exit 1
+          fi
+          echo "the 5 GiB canary was killed: the 4 GB limit is enforced"
