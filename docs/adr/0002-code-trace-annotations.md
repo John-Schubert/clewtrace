@@ -43,7 +43,10 @@ Full grammar: `docs/TRACEABILITY.md`.
   hook.
 - Inspection and Demonstration requirements may be verified by a checklist in
   `docs/verification/` with an `@verifies` tag in its first comment.
-- The phase-aware requirement coverage check is not on yet; it is task 1.9.
+- The phase-aware requirement coverage check is on since task 1.9: `clew check --self`
+  fails on a requirement due in a started phase that has no implementation or no
+  verification and no waiver. The rules, including Markdown documents that implement,
+  workflow steps that verify, and waivers, are in `docs/TRACEABILITY.md`.
 
 ## Consequences
 

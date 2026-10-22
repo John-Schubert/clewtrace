@@ -362,10 +362,12 @@ requirement is implemented and verified or formally waived.
       (the release workflow's Installer size step for CT-EFF-001 and CT-PLT-001). A waiver
       may name a `part`, which excuses no gap. Final waivers: one, approved by John on
       2026-10-22, for the ARM64 part of CT-PLT-001 until phase 2. No proposed waivers.
-      Follow-ups: ADR-0002 still says the coverage check is not on (needs John); `check
-      --self` reads the project twice, once for line tags and once for coverage; a phase
-      set only as a default on a requirement definition is not read, so such requirements
-      count as having no phase and are always due.
+      ADR-0002 now says the coverage check is on (John's decision 3 on PR #25).
+      Follow-ups: `check --self` reads the project twice, once for line tags and once for
+      coverage; a phase set only as a default on a requirement definition is not read, so
+      such requirements count as having no phase and are always due; `clew impact` does not
+      show document `@implements` links, since they are not in the trace graph; the
+      Scanner impl in `scan.rs` is still over max_scope_lines (a warning before this task).
 - [ ] **Gate 1 check.** `clew check --self` shows 100% line coverage and no uncovered phase 0
       or phase 1 requirements. Set `current_phase = 2`.
 
