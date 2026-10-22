@@ -85,7 +85,7 @@ Requirements without a verification (1):
 Waived requirements (0):
 Elements traced to no requirement (1):
   Loose  model/design.sysml:4
-clew report coverage: 2 requirements, 1 with a parent, 1 implemented, 1 verified, 0 waived, \
+clew report coverage: 2 requirements, 1 with a parent, 1 implemented, 1 verified, 0 waived, 0 partly waived, \
 1 elements traced to no requirement
 "
     );

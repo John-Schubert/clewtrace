@@ -52,6 +52,7 @@ requirement = "CT-PLT-001"
 # status = "approved"
 # approved_by = "John Schubert"
 # date = "2026-11-01"
+# part = "Optional: the part of the requirement it covers. A part waiver excuses no gap"
 
 # Proposed by Claude Code in task 1.9, not approved. John approves or drops each one.
 [[waiver]]

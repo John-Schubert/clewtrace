@@ -727,8 +727,9 @@ impl Checker {
                 .and_then(|e| coverage.requirements.iter().find(|r| r.requirement == e));
             let implemented = row.is_some_and(|r| r.implemented);
             let verified = row.is_some_and(|r| r.verified);
+            // A waiver for part of a requirement excuses nothing and is never needless.
             let waiver = (self.config.waivers.iter())
-                .find(|w| w.id == req.id)
+                .find(|w| w.id == req.id && w.part.is_none())
                 .map(|w| w.line);
             if let Some(line) = waiver.filter(|_| implemented && verified) {
                 let message = format!(
@@ -810,6 +811,13 @@ impl Checker {
                     self,
                     format!("{} has more than one waiver", w.id),
                     "keep one [[waiver]] per requirement",
+                );
+            }
+            if w.part.as_deref().is_some_and(|p| p.trim().is_empty()) {
+                error(
+                    self,
+                    format!("waiver for {} has an empty part", w.id),
+                    "name the part of the requirement it covers, or remove `part`",
                 );
             }
             if w.reason.trim().is_empty() {
@@ -1385,6 +1393,47 @@ mod tests {
                  workflow step's `- name:` line\n  help: put `# @verifies IDs` in the comment \
                  directly above the step's `- name:` line",
             ]
+        );
+    }
+
+    // @verifies CT-DEV-003, CT-DEV-004, CT-USE-007
+    #[test]
+    fn a_waiver_for_part_of_a_requirement_excuses_nothing() {
+        let reqs = model(&[
+            ("CT-DEV-002", "covered", Some(0), "Test"),
+            ("CT-DEV-004", "bare", Some(0), "Test"),
+            ("CT-DEV-008", "later", Some(1), "Test"),
+        ]);
+        let approved = |id: &str, part: &str| {
+            waiver(id, "ARM64 later", "approved", "John Schubert", "2026-10-22")
+                + &format!("part = \"{part}\"\n")
+        };
+        let waivers = approved("CT-DEV-002", "ARM64 installers")
+            + &approved("CT-DEV-004", "ARM64 installers")
+            + &approved("CT-DEV-008", " ");
+        let root = project(
+            "part",
+            &waivers,
+            &[
+                ("model/req.sysml", reqs.as_str()),
+                (
+                    "src/a.rs",
+                    "// @implements CT-DEV-002\nfn a() {}\n// @verifies CT-DEV-002\n#[test]\nfn t() {}\n",
+                ),
+            ],
+        );
+        let report = check_project(&root).unwrap();
+        let text: Vec<String> = report.findings.iter().map(|f| f.to_string()).collect();
+        let first_lines: Vec<&str> = text.iter().map(|t| t.lines().next().unwrap()).collect();
+        assert_eq!(
+            first_lines,
+            [
+                "model/req.sysml:3: error: CT-DEV-004 (phase 0) is due at current_phase 0 but has no implementation and no verification",
+                "trace.toml:24: error: waiver for CT-DEV-008 has an empty part",
+            ]
+        );
+        assert!(
+            text[1].ends_with("help: name the part of the requirement it covers, or remove `part`")
         );
     }
 

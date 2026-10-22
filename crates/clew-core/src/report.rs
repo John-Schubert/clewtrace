@@ -437,10 +437,10 @@ pub fn coverage_text(model: &Model, coverage: &Coverage) -> String {
     let sections: [(&str, Test); 3] = [
         ("Requirements without a parent", |r| !r.has_parent),
         ("Requirements without an implementation", |r| {
-            !r.implemented && r.waiver.is_none()
+            !r.implemented && !fully_waived(r)
         }),
         ("Requirements without a verification", |r| {
-            !r.verified && r.waiver.is_none()
+            !r.verified && !fully_waived(r)
         }),
     ];
     let mut out = String::new();
@@ -456,10 +456,13 @@ pub fn coverage_text(model: &Model, coverage: &Coverage) -> String {
         .collect();
     out.push_str(&format!("Waived requirements ({}):\n", waived.len()));
     for (row, waiver) in &waived {
-        let approval = match waiver.status.as_str() {
+        let mut approval = match waiver.status.as_str() {
             "approved" => format!("approved by {} on {}", waiver.approved_by, waiver.date),
             status => format!("{status} on {}, not approved", waiver.date),
         };
+        if let Some(part) = &waiver.part {
+            approval = format!("partly waived ({part}), {approval}");
+        }
         out.push_str(&format!(
             "  {}\n    {approval}: {}\n",
             located(model, row.requirement),
@@ -477,14 +480,22 @@ pub fn coverage_text(model: &Model, coverage: &Coverage) -> String {
     let count = |test: Test| coverage.requirements.iter().filter(|r| test(r)).count();
     out.push_str(&format!(
         "clew report coverage: {total} requirements, {} with a parent, {} implemented, \
-         {} verified, {} waived, {} elements traced to no requirement\n",
+         {} verified, {} waived, {} partly waived, {} elements traced to no requirement\n",
         count(|r| r.has_parent),
         count(|r| r.implemented),
         count(|r| r.verified),
-        waived.len(),
+        count(fully_waived),
+        waived.len() - count(fully_waived),
         untraced.len()
     ));
     out
+}
+
+// @implements CT-DEV-003, CT-TRC-004
+/// Whether a requirement has a waiver for the whole of it, which leaves it out of the
+/// implementation and verification gaps. A waiver with a `part` does not.
+fn fully_waived(row: &RequirementCoverage) -> bool {
+    row.waiver.as_ref().is_some_and(|w| w.part.is_none())
 }
 
 // @implements CT-TRC-004, CT-TRC-008
@@ -661,7 +672,7 @@ Waived requirements (0):
 Elements traced to no requirement (2):
   Design::Loose  model/design.sysml:10
   Design::Loose::inner  model/design.sysml:11
-clew report coverage: 4 requirements, 2 with a parent, 2 implemented, 2 verified, 0 waived, \
+clew report coverage: 4 requirements, 2 with a parent, 2 implemented, 2 verified, 0 waived, 0 partly waived, \
 2 elements traced to no requirement
 "
         );
@@ -883,10 +894,38 @@ Waived requirements (2):
         assert!(
             text.ends_with(
                 "clew report coverage: 7 requirements, 2 with a parent, 2 implemented, \
-                            4 verified, 2 waived, 2 elements traced to no requirement\n"
+                            4 verified, 2 waived, 0 partly waived, 2 elements traced to no requirement\n"
             ),
             "{text}"
         );
+    }
+
+    // @verifies CT-DEV-003, CT-TRC-004
+    #[test]
+    fn a_waiver_for_part_of_a_requirement_is_listed_as_partly_waived() {
+        let root = project("part", &[]);
+        let config = fs::read_to_string(root.join("trace.toml")).unwrap()
+            + "[[waiver]]\nid = \"CT-TRC-004\"\nreason = \"Phase 2\"\nstatus = \"approved\"\n\
+               approved_by = \"John Schubert\"\ndate = \"2026-10-22\"\npart = \"ARM64 installers\"\n\
+               [[waiver]]\nid = \"CT-TRC-001\"\nreason = \"Later\"\nstatus = \"proposed\"\n\
+               approved_by = \"\"\ndate = \"2026-10-23\"\npart = \"Docs\"\n";
+        fs::write(root.join("trace.toml"), config).unwrap();
+        let project = load_project(&root).unwrap();
+        let text = coverage_text(&project.model, &project_coverage(&project));
+        let want = "Requirements without an implementation (2):
+  CT-TRC-003 Reqs::child::nested  model/reqs.sysml:5
+  CT-TRC-004 Reqs::lone  model/reqs.sysml:7
+Requirements without a verification (2):
+  CT-TRC-003 Reqs::child::nested  model/reqs.sysml:5
+  CT-TRC-004 Reqs::lone  model/reqs.sysml:7
+Waived requirements (2):
+  CT-TRC-001 Reqs::top  model/reqs.sysml:3
+    partly waived (Docs), proposed on 2026-10-23, not approved: Later
+  CT-TRC-004 Reqs::lone  model/reqs.sysml:7
+    partly waived (ARM64 installers), approved by John Schubert on 2026-10-22: Phase 2
+";
+        assert!(text.contains(want), "{text}");
+        assert!(text.contains(" 0 waived, 2 partly waived, "), "{text}");
     }
 
     // @verifies CT-TRC-004
