@@ -26,6 +26,7 @@ Tags live in ordinary comments in the language of the file (`//`, `#`, or `<!-- 
 | `@verifies IDs` | Directly above a test function or test block. In TypeScript a call statement such as `describe(...)` is a test block | That test; creates a verifies link |
 | `@begin IDs` ... `@end` | Around module-level code that is not an item | Every line between the markers |
 | `@file IDs` | In the first comment of a file type listed in `trace.toml` under `file_level_allowed` (config, CI, scripts) | The whole file |
+| `@verifies IDs` in a workflow | In the comment directly above a step's `- name:` line in a `.yml` or `.yaml` file in `.github/workflows` (see below) | That step; creates a verifies link |
 
 Rules:
 
@@ -87,13 +88,40 @@ YAML (CI), allowed at file level:
 name: ci
 ```
 
+## Workflow steps that verify
+
+A step in a GitHub Actions workflow may carry `@verifies` only if a failure in that step
+fails the build. Use it for a check that cannot run as a test, such as the size of the
+release installers.
+
+```yaml
+      # Fails if any installer is over 20 MB.
+      # @verifies CT-EFF-001
+      - name: Installer size
+        run: ...
+```
+
+- The tag goes in the comment directly above the step's `- name:` line, with no blank line
+  between. `name` must be the step's first key. A workflow `@verifies` anywhere else is an
+  error.
+- The step's script must exit non-zero on the failure it checks. Confirm this from the
+  script before tagging the step, and say so in the pull request. The checker cannot read
+  the script.
+- A step whose `continue-on-error` is set to anything but `false`, or whose job sets it, is
+  an error if it carries `@verifies`, since its failure would not fail the build.
+- The file still needs its `@file` tag, and `@implements` is still not allowed in it.
+- A tagged step only verifies when its workflow runs. Steps in `release.yml` run on each
+  release tag, not on every pull request, so a change that breaks them shows up at the next
+  release. The release check in `docs/verification/release.md` looks at their results
+  before each release is published.
+
 ## Requirement coverage
 
 - Each requirement whose `phase` is less than or equal to `current_phase` in `trace.toml` needs
   an implementation and a verification, or a `[[waiver]]` in `trace.toml` (see below). A
   requirement with no `phase` is always due. An implementation is an `@implements` scope, a
   model element that satisfies it, or a document (below). A verification is an `@verifies`
-  test, a model element that verifies it, a checklist, or a workflow step (below).
+  test, a model element that verifies it, a checklist, or a workflow step (above).
   `clew check --self` uses the same coverage as `clew report coverage`.
 - Each requirement needs a parent: it derives from or refines another requirement, or is
   nested in one. Requirements typed by a requirement definition listed in
@@ -165,6 +193,8 @@ line. Lines starting with `#` are comments and are ignored, as in git.
 | Line outside any tagged scope | Error |
 | Unknown requirement ID in a tag, trailer, `deps.toml`, ADR, waiver, checklist, or document | Error |
 | Document whose `@implements` tag cites a requirement not verified by Inspection or Demonstration | Error |
+| Workflow `@verifies` not directly above a step's `- name:` line | Error |
+| Workflow `@verifies` on a step that sets, or whose job sets, `continue-on-error` | Error |
 | ADR in `docs/adr/` that cites no requirement | Error |
 | Requirement due in a started phase with no implementation or no verification, and no waiver | Error |
 | `[[waiver]]` with an empty reason, a bad date or status, a missing approver, an approver on a proposed waiver, or a second waiver for one requirement | Error |

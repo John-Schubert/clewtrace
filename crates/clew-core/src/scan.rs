@@ -17,15 +17,22 @@ pub enum Syntax {
     Svelte,
     /// Config, CI, and script files with `#` comments, traced by one `@file` tag.
     HashComments,
+    /// A GitHub Actions workflow in `.github/workflows`: like `HashComments`, and a step may
+    /// also carry an `@verifies` tag in the comment directly above its `- name:` line.
+    Workflow,
 }
 
 // @implements CT-DEV-002, CT-TRC-006
 impl Syntax {
     pub fn from_path(path: &Path) -> Option<Syntax> {
+        let in_workflows = path
+            .parent()
+            .is_some_and(|p| p.ends_with(".github/workflows"));
         match path.extension()?.to_str()? {
             "rs" => Some(Syntax::Rust),
             "ts" => Some(Syntax::TypeScript),
             "svelte" => Some(Syntax::Svelte),
+            "yml" | "yaml" if in_workflows => Some(Syntax::Workflow),
             "toml" | "yml" | "yaml" | "sh" | "ps1" => Some(Syntax::HashComments),
             _ => None,
         }
@@ -110,6 +117,12 @@ pub enum ProblemKind {
     EndWithoutBegin,
     MissingFileTag,
     SyntaxError,
+    /// A workflow `@verifies` tag that is not in the comment directly above a step's
+    /// `- name:` line.
+    NotAboveStep,
+    /// A workflow step tagged `@verifies` whose failure does not fail the build, because
+    /// the step or its job sets `continue-on-error` on the given 1-based line.
+    ContinueOnError(usize),
 }
 
 // @implements CT-DEV-002, CT-TRC-006
@@ -136,6 +149,16 @@ impl fmt::Display for Problem {
             ProblemKind::EndWithoutBegin => write!(f, "`@end` without a matching `@begin`"),
             ProblemKind::MissingFileTag => write!(f, "first comment has no `@file` tag"),
             ProblemKind::SyntaxError => write!(f, "syntax error, item spans may be wrong"),
+            ProblemKind::NotAboveStep => {
+                write!(
+                    f,
+                    "`@verifies` is not directly above a workflow step's `- name:` line"
+                )
+            }
+            ProblemKind::ContinueOnError(line) => write!(
+                f,
+                "`continue-on-error` on line {line} lets this step fail without failing the build"
+            ),
         }
     }
 }
@@ -156,7 +179,8 @@ pub fn scan_source(syntax: Syntax, text: &str) -> FileScan {
     match syntax {
         Syntax::Rust | Syntax::TypeScript => scan.tree(syntax, text),
         Syntax::Svelte => scan.svelte(text),
-        Syntax::HashComments => scan.hash_comments(text),
+        Syntax::HashComments => scan.hash_comments(text, false),
+        Syntax::Workflow => scan.hash_comments(text, true),
     }
     scan.finish()
 }
@@ -289,6 +313,73 @@ fn is_svelte_wrapper(line: &str) -> bool {
             rest.is_empty() || (!inner.starts_with('/') && rest.starts_with(char::is_whitespace))
         })
     })
+}
+
+/// The number of spaces before a line's first other character.
+// @implements CT-DEV-003, CT-TRC-006
+fn indent(line: &str) -> usize {
+    line.len() - line.trim_start_matches(' ').len()
+}
+
+/// Whether a YAML line is blank or holds only a comment.
+// @implements CT-DEV-003, CT-TRC-006
+fn blank_or_comment(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.is_empty() || trimmed.starts_with('#')
+}
+
+/// The last zero-based row of the YAML block that starts on `row`: the rows below it that
+/// are indented further, up to the last one holding more than a comment.
+// @implements CT-DEV-003, CT-TRC-006
+fn block_end(lines: &[&str], row: usize) -> usize {
+    let base = indent(lines[row]);
+    let mut end = row;
+    for (r, line) in lines.iter().enumerate().skip(row + 1) {
+        if blank_or_comment(line) {
+            continue;
+        }
+        if indent(line) <= base {
+            break;
+        }
+        end = r;
+    }
+    end
+}
+
+/// The row in `first..=last` of a `continue-on-error` key at `key_indent` whose value is
+/// anything but `false`.
+// @implements CT-DEV-003, CT-TRC-006
+fn continue_on_error(
+    lines: &[&str],
+    first: usize,
+    last: usize,
+    key_indent: usize,
+) -> Option<usize> {
+    (first..=last).find(|&r| {
+        let line = lines[r];
+        let value = line.trim_start().strip_prefix("continue-on-error:");
+        let value = value.map(|v| v.split(" #").next().unwrap_or_default().trim());
+        indent(line) == key_indent && value.is_some_and(|v| v != "false")
+    })
+}
+
+/// The row of a `continue-on-error` key, set to anything but `false`, on the job that holds
+/// the step whose `- name:` line is on `row`. `None` when there is none, or when the step is
+/// not in a `steps:` list.
+// @implements CT-DEV-003, CT-TRC-006
+fn job_continue_on_error(lines: &[&str], row: usize) -> Option<usize> {
+    let dash = indent(lines[row]);
+    let steps = (0..row).rev().find(|&r| {
+        !blank_or_comment(lines[r]) && (indent(lines[r]) < dash || lines[r].trim() == "steps:")
+    })?;
+    if lines[steps].trim() != "steps:" {
+        return None;
+    }
+    let keys = indent(lines[steps]);
+    let job = (0..steps)
+        .rev()
+        .find(|&r| !blank_or_comment(lines[r]) && indent(lines[r]) < keys)?;
+    continue_on_error(lines, job + 1, block_end(lines, job), keys)
 }
 
 /// Working state for one file: tags, scopes, and which lines hold code.
@@ -552,19 +643,30 @@ impl Scanner {
     }
 
     /// Config, CI, and script files: one `@file` tag in the first comment covers the file.
-    fn hash_comments(&mut self, text: &str) {
+    /// Reads a file with `#` comments. In a workflow, `@verifies` tags in the comment directly
+    /// above a step's `- name:` line make a verifies scope over that step.
+    fn hash_comments(&mut self, text: &str, workflow: bool) {
+        let lines: Vec<&str> = text.lines().collect();
         let mut in_first_comment = true;
         let mut seen_comment = false;
         let mut file_ids = None;
-        for (row, line) in text.lines().enumerate() {
+        // `@verifies` tags in the comment block being read, waiting for a step below it.
+        let mut waiting: Vec<usize> = Vec::new();
+        for (row, line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
             if trimmed.is_empty() {
                 in_first_comment &= !seen_comment;
+                self.orphan_steps(&mut waiting);
                 continue;
             }
             if !trimmed.starts_with('#') {
                 self.mark_code(row, row);
                 in_first_comment = false;
+                if !waiting.is_empty() && trimmed.starts_with("- name:") {
+                    self.step_scope(&lines, row, &waiting);
+                    waiting.clear();
+                }
+                self.orphan_steps(&mut waiting);
                 continue;
             }
             if row == 0 && trimmed.starts_with("#!") {
@@ -575,11 +677,14 @@ impl Scanner {
                 let tag = &self.tags[index];
                 if tag.kind == TagKind::File && in_first_comment && file_ids.is_none() {
                     file_ids = Some(tag.ids.clone());
+                } else if workflow && tag.kind == TagKind::Verifies {
+                    waiting.push(index);
                 } else {
                     self.problem(tag.line, ProblemKind::TagNotAllowed(tag.kind));
                 }
             }
         }
+        self.orphan_steps(&mut waiting);
         match file_ids {
             Some(ids) => self.scopes.push(Scope {
                 kind: ScopeKind::File,
@@ -591,6 +696,41 @@ impl Scanner {
             None if self.has_code.contains(&true) => self.problem(1, ProblemKind::MissingFileTag),
             None => {}
         }
+    }
+
+    /// Reports each waiting workflow `@verifies` tag as not above a step.
+    fn orphan_steps(&mut self, waiting: &mut Vec<usize>) {
+        for index in waiting.drain(..) {
+            self.problem(self.tags[index].line, ProblemKind::NotAboveStep);
+        }
+    }
+
+    /// Adds a verifies scope for the workflow step whose `- name:` line is on `row`, with the
+    /// IDs of the `waiting` tags, unless the step or its job sets `continue-on-error`.
+    fn step_scope(&mut self, lines: &[&str], row: usize, waiting: &[usize]) {
+        let end = block_end(lines, row);
+        let dash = indent(lines[row]);
+        let after_dash = &lines[row].trim_start()[1..];
+        let key_indent = dash + 1 + indent(after_dash);
+        let lenient = continue_on_error(lines, row + 1, end, key_indent)
+            .or_else(|| job_continue_on_error(lines, row));
+        if let Some(at) = lenient {
+            for &index in waiting {
+                let kind = ProblemKind::ContinueOnError(at + 1);
+                self.problem(self.tags[index].line, kind);
+            }
+            return;
+        }
+        self.scopes.push(Scope {
+            kind: ScopeKind::Item,
+            implements: Vec::new(),
+            verifies: waiting
+                .iter()
+                .flat_map(|&i| self.tags[i].ids.clone())
+                .collect(),
+            start_line: row + 1,
+            end_line: end + 1,
+        });
     }
 
     fn finish(mut self) -> FileScan {
@@ -1084,6 +1224,141 @@ mount();
         assert_eq!(scan.untraced_lines(), vec![2]);
     }
 
+    /// A workflow whose `build` job has the given job-level lines and steps.
+    // @verifies CT-DEV-003, CT-TRC-006
+    fn workflow(job: &str, steps: &str) -> FileScan {
+        let text = format!(
+            "# @file CT-DEV-004\nname: ci\njobs:\n  build:\n    runs-on: x\n{job}    steps:\n{steps}"
+        );
+        scan_source(Syntax::Workflow, &text)
+    }
+
+    // @verifies CT-DEV-003, CT-TRC-006
+    #[test]
+    fn workflow_verifies_tag_covers_the_step_below_it() {
+        let scan = workflow(
+            "",
+            "      - uses: x\n\
+             \x20     # Fails on a big installer.\n\
+             \x20     # @verifies CT-EFF-001, CT-PLT-001\n\
+             \x20     - name: Size\n\
+             \x20       continue-on-error: false # never\n\
+             \x20       run: |\n\
+             \x20         exit 1\n\
+             \n\
+             \x20     # Next step.\n\
+             \x20     - name: Upload\n",
+        );
+        assert!(scan.problems.is_empty(), "{:?}", scan.problems);
+        let steps: Vec<&Scope> = (scan.scopes.iter())
+            .filter(|s| s.kind == ScopeKind::Item)
+            .collect();
+        assert_eq!(
+            steps,
+            [&Scope {
+                kind: ScopeKind::Item,
+                implements: vec![],
+                verifies: vec!["CT-EFF-001".into(), "CT-PLT-001".into()],
+                start_line: 10,
+                end_line: 13,
+            }]
+        );
+        assert_eq!(
+            ids(&scan, 12),
+            vec!["CT-DEV-004", "CT-EFF-001", "CT-PLT-001"]
+        );
+    }
+
+    // @verifies CT-DEV-003, CT-TRC-006
+    #[test]
+    fn workflow_verifies_tag_must_be_directly_above_a_step() {
+        let scan = workflow(
+            "",
+            "      # @verifies CT-EFF-001\n\
+             \n\
+             \x20     - name: Gap\n\
+             \x20     # @verifies CT-EFF-001\n\
+             \x20     - uses: x\n\
+             \x20       # @implements CT-EFF-001\n\
+             \x20       with: {}\n\
+             \x20     # @verifies CT-EFF-001\n",
+        );
+        assert_eq!(
+            problem_kinds(&scan),
+            vec![
+                (7, ProblemKind::NotAboveStep),
+                (10, ProblemKind::NotAboveStep),
+                (12, ProblemKind::TagNotAllowed(TagKind::Implements)),
+                (14, ProblemKind::NotAboveStep),
+            ]
+        );
+        assert!(scan.scopes.iter().all(|s| s.kind == ScopeKind::File));
+        let other = scan_source(
+            Syntax::HashComments,
+            "# @file CT-DEV-004\n# @verifies CT-EFF-001\n- name: x\n",
+        );
+        assert_eq!(
+            problem_kinds(&other),
+            vec![(2, ProblemKind::TagNotAllowed(TagKind::Verifies))]
+        );
+    }
+
+    // @verifies CT-DEV-003, CT-TRC-006
+    #[test]
+    fn a_step_that_may_fail_cannot_verify() {
+        let tagged = "      # @verifies CT-EFF-001\n      - name: Size\n";
+        let step = format!("{tagged}        continue-on-error: true\n        run: exit 1\n");
+        let scan = workflow("", &step);
+        assert_eq!(
+            problem_kinds(&scan),
+            vec![(7, ProblemKind::ContinueOnError(9))]
+        );
+        assert!(scan.scopes.iter().all(|s| s.kind == ScopeKind::File));
+        let scan = workflow("    continue-on-error: ${{ matrix.x }}\n", tagged);
+        assert_eq!(
+            problem_kinds(&scan),
+            vec![(8, ProblemKind::ContinueOnError(6))]
+        );
+        let scan = workflow("    continue-on-error: false\n", tagged);
+        assert!(scan.problems.is_empty(), "{:?}", scan.problems);
+        // Steps listed at the indent of `steps:`, and a `- name:` outside any `steps:`.
+        let compact = "# @file CT-DEV-004\njobs:\n  a:\n    continue-on-error: true\n    steps:\n\
+                       \x20   # @verifies CT-EFF-001\n    - name: x\n";
+        let scan = scan_source(Syntax::Workflow, compact);
+        assert_eq!(
+            problem_kinds(&scan),
+            vec![(6, ProblemKind::ContinueOnError(4))]
+        );
+        let loose = "# @file CT-DEV-004\nlist:\n  # @verifies CT-EFF-001\n  - name: x\n";
+        let scan = scan_source(Syntax::Workflow, loose);
+        assert!(scan.problems.is_empty(), "{:?}", scan.problems);
+        assert_eq!(scan.scopes.len(), 2);
+        let top = "# @verifies CT-EFF-001\n- name: x\n";
+        let scan = scan_source(Syntax::Workflow, top);
+        assert_eq!(problem_kinds(&scan), vec![(1, ProblemKind::MissingFileTag)]);
+    }
+
+    // @verifies CT-DEV-003, CT-TRC-006
+    #[test]
+    fn workflow_problems_say_what_is_wrong() {
+        let not_above = Problem {
+            line: 3,
+            kind: ProblemKind::NotAboveStep,
+        };
+        assert_eq!(
+            not_above.to_string(),
+            "line 3: `@verifies` is not directly above a workflow step's `- name:` line"
+        );
+        let lenient = Problem {
+            line: 3,
+            kind: ProblemKind::ContinueOnError(5),
+        };
+        assert_eq!(
+            lenient.to_string(),
+            "line 3: `continue-on-error` on line 5 lets this step fail without failing the build"
+        );
+    }
+
     // @verifies CT-DEV-002
     #[test]
     fn picks_syntax_from_the_file_extension() {
@@ -1094,6 +1369,10 @@ mount();
             ("Cargo.toml", Some(Syntax::HashComments)),
             ("ci.yml", Some(Syntax::HashComments)),
             ("ci.yaml", Some(Syntax::HashComments)),
+            (".github/workflows/ci.yml", Some(Syntax::Workflow)),
+            ("x/.github/workflows/release.yaml", Some(Syntax::Workflow)),
+            (".github/workflows/notes.toml", Some(Syntax::HashComments)),
+            (".github/ci.yml", Some(Syntax::HashComments)),
             ("x.sh", Some(Syntax::HashComments)),
             ("x.ps1", Some(Syntax::HashComments)),
             ("README.md", None),

@@ -295,7 +295,9 @@ pub fn syntax_for(config: &TraceConfig, path: &str) -> Option<Syntax> {
         Syntax::Rust => config.languages.iter().any(|l| l == "rust"),
         Syntax::TypeScript => config.languages.iter().any(|l| l == "typescript"),
         Syntax::Svelte => config.languages.iter().any(|l| l == "svelte"),
-        Syntax::HashComments => (config.file_level_allowed.iter()).any(|g| glob_matches(g, path)),
+        Syntax::HashComments | Syntax::Workflow => {
+            (config.file_level_allowed.iter()).any(|g| glob_matches(g, path))
+        }
     };
     allowed.then_some(syntax)
 }
@@ -503,6 +505,12 @@ impl Checker {
                 ProblemKind::EndWithoutBegin => "remove the `@end` or add the missing `@begin`",
                 ProblemKind::MissingFileTag => "add `# @file CT-XXX-NNN` as the first comment",
                 ProblemKind::SyntaxError => "fix the syntax error so item spans can be found",
+                ProblemKind::NotAboveStep => {
+                    "put `# @verifies IDs` in the comment directly above the step's `- name:` line"
+                }
+                ProblemKind::ContinueOnError(_) => {
+                    "remove `continue-on-error` from the step and its job (or set it to false), or remove the `@verifies` tag"
+                }
             };
             let message = problem.to_string();
             let message = message.split_once(": ").map_or(&*message, |(_, m)| m);
@@ -1342,6 +1350,42 @@ mod tests {
             "help: implement it in code with `@implements` and a `@verifies` test, or remove it \
              from the document's `@implements` tag"
         ));
+    }
+
+    // @verifies CT-DEV-003, CT-DEV-004, CT-TRC-006, CT-USE-007
+    #[test]
+    fn workflow_steps_verify_only_when_their_failure_fails_the_build() {
+        let reqs = model(&[
+            ("CT-DEV-002", "released", Some(0), "Test"),
+            ("CT-DEV-004", "lenient", Some(1), "Test"),
+        ]);
+        let workflow = "# @file CT-DEV-002\njobs:\n  build:\n    steps:\n\
+                        \x20     # @verifies CT-DEV-002\n      - name: Size\n        run: exit 1\n\
+                        \x20     # @verifies CT-DEV-004\n      - name: Warn\n\
+                        \x20       continue-on-error: true\n\
+                        \x20     # @verifies CT-DEV-004\n";
+        let root = project(
+            "workflow",
+            "",
+            &[
+                ("model/req.sysml", reqs.as_str()),
+                ("src/a.rs", "// @implements CT-DEV-002\nfn a() {}\n"),
+                ("src/.github/workflows/release.yml", workflow),
+            ],
+        );
+        let report = check_project(&root).unwrap();
+        let text: Vec<String> = report.findings.iter().map(|f| f.to_string()).collect();
+        assert_eq!(
+            text,
+            [
+                "src/.github/workflows/release.yml:8: error: `continue-on-error` on line 10 lets \
+                 this step fail without failing the build\n  help: remove `continue-on-error` \
+                 from the step and its job (or set it to false), or remove the `@verifies` tag",
+                "src/.github/workflows/release.yml:11: error: `@verifies` is not directly above a \
+                 workflow step's `- name:` line\n  help: put `# @verifies IDs` in the comment \
+                 directly above the step's `- name:` line",
+            ]
+        );
     }
 
     // @verifies CT-DEV-003, CT-DEV-004, CT-USE-007
