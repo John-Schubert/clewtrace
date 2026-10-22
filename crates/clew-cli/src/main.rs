@@ -5,6 +5,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use clew_core::check::{self, Report, Severity};
 use clew_core::commit;
+use clew_core::index::Index;
 use clew_core::json;
 use clew_core::notices::{self, Package};
 use clew_core::reqs::{self, Requirement};
@@ -41,6 +42,14 @@ enum Command {
         /// The commit message file, for example .git/COMMIT_EDITMSG
         file: PathBuf,
     },
+    /// Index every .sysml file under the current folder into .clewtrace/index.db,
+    /// re-parsing only the files that changed. Exits 0 when clean, 1 when a file has
+    /// syntax errors or cannot be read, and 2 when the index cannot be opened or written
+    Index {
+        /// Drop the index and rebuild it from the text
+        #[arg(long)]
+        rebuild: bool,
+    },
     /// Check third-party licenses (npm tiers, recorded scopes), and with --out write the
     /// license notices file, the SBOM, and the source of each shipped MPL-2.0 crate.
     /// Runs `cargo metadata` and reads app/package-lock.json and app/node_modules.
@@ -71,7 +80,43 @@ fn main() -> ExitCode {
         Command::Reqs { command } => run_reqs(command),
         Command::Check { self_check: _ } => run_check(),
         Command::CheckCommit { file } => run_check_commit(&file),
+        Command::Index { rebuild } => run_index(rebuild),
         Command::Notices { out } => run_notices(out.as_deref()),
+    }
+}
+
+// @implements CT-TRC-008, CT-MOD-001, CT-EFF-007, CT-USE-007
+fn run_index(rebuild: bool) -> ExitCode {
+    let result = Index::open(Path::new(".")).and_then(|mut index| {
+        let stats = if rebuild {
+            index.rebuild()?
+        } else {
+            index.update()?
+        };
+        Ok((stats, index.element_count()?))
+    });
+    let (stats, elements) = match result {
+        Ok(done) => done,
+        Err(e) => {
+            eprintln!("clew: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    for problem in &stats.problems {
+        println!("{problem}");
+    }
+    println!(
+        "clew index: {} files, {} re-indexed, {} removed, {} elements, {} problems",
+        stats.files,
+        stats.parsed,
+        stats.removed,
+        elements,
+        stats.problems.len()
+    );
+    if stats.problems.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
     }
 }
 

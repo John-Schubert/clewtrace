@@ -9,6 +9,9 @@ pub mod commit;
 // @begin CT-DEV-002, CT-DEV-004
 pub mod config;
 // @end
+// @begin CT-MOD-001, CT-EFF-007, CT-SEC-003
+pub mod index;
+// @end
 // @begin CT-MOD-002, CT-USE-007
 pub mod model;
 // @end

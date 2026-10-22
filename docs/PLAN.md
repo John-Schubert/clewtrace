@@ -261,9 +261,18 @@ requirement is implemented and verified or formally waived.
       library is built in (as attribute defs), so other library packages report as
       unresolved; ambiguous names take the first match without a warning; filtered imports,
       aliases, and conjugation are not supported yet.
-- [ ] **1.4 Index.** SQLite (bundled) with FTS5 in `.clewtrace/index.db`; rebuild from text,
+- [x] **1.4 Index.** SQLite (bundled) with FTS5 in `.clewtrace/index.db`; rebuild from text,
       and re-index only changed files.
       Refs: CT-MOD-001, CT-EFF-007, CT-SEC-003
+      Done in `crates/clew-core/src/index.rs` and `clew index [--rebuild]`. Every `.sysml`
+      file under the project root is indexed, skipping folders that start with `.`, folders
+      with a `CACHEDIR.TAG` (such as `target`), and symbolic links. A file is re-parsed only
+      when its size or modification time changed and its SHA-256 differs. Packages,
+      definitions, and usages are stored with kind, names, qualified name, position, and doc
+      text, and `Index::search` pages through FTS5 matches. A corrupt or outdated database is
+      replaced on open. Follow-ups: rows come from each file's syntax tree alone, so links and
+      resolved names wait for the trace graph (1.5); search has no CLI or UI caller yet, and
+      its 200 ms budget (CT-EFF-006, phase 2) is for the harness in 1.8 to measure.
 - [ ] **1.5 Trace graph.** Link types derives, refines, satisfies, verifies, implements, and
       evidences, from both the model and code tags.
       Refs: CT-TRC-002, CT-TRC-006

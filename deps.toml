@@ -24,12 +24,13 @@ scope = "build-only"
 serves = ["CT-PLT-001", "CT-SEC-001"]
 why = "Build script for the app: reads tauri.conf.json and compiles the capability files. Default features off; config-json only"
 
-# [[dep]]
-# name = "rusqlite"
-# ecosystem = "cargo"
-# license = "MIT"
-# serves = ["CT-MOD-001", "CT-EFF-004", "CT-EFF-006"]
-# why = "Bundled SQLite with FTS5 for the rebuildable index and search"
+[[dep]]
+name = "rusqlite"
+ecosystem = "cargo"
+license = "MIT"
+scope = "shipped"
+serves = ["CT-MOD-001", "CT-EFF-004", "CT-EFF-006", "CT-EFF-007"]
+why = "Bundled SQLite with FTS5 for the rebuildable index and search. Default features off; bundled only"
 
 [[dep]]
 name = "tree-sitter"
@@ -55,12 +56,13 @@ scope = "shipped"
 serves = ["CT-DEV-002", "CT-TRC-006"]
 why = "TypeScript grammar for the tag scanner"
 
-# [[dep]]
-# name = "sha2"
-# ecosystem = "cargo"
-# license = "MIT OR Apache-2.0"
-# serves = ["CT-SEC-006", "CT-TRC-009", "CT-SEC-004"]
-# why = "Vetted SHA-256 for report hashes, evidence hashes, and the change log"
+[[dep]]
+name = "sha2"
+ecosystem = "cargo"
+license = "MIT OR Apache-2.0"
+scope = "shipped"
+serves = ["CT-SEC-006", "CT-TRC-009", "CT-SEC-004", "CT-EFF-007"]
+why = "Vetted SHA-256 for report hashes, evidence hashes, the change log, and the index's changed-file check. Default features off"
 
 # [[dep]]
 # name = "ed25519-dalek"
