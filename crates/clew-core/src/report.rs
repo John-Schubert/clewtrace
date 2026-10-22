@@ -14,6 +14,7 @@ use crate::index;
 use crate::model::{ElementId, ElementKind, LIBRARY_PATH, Model};
 use crate::parse::ast::{Kind, Member, UsageKind};
 use crate::parse::parser;
+use crate::reproduce;
 use crate::scan::{self, FileScan};
 use crate::trace::{End, LinkKind, Toward, TraceGraph};
 
@@ -25,7 +26,8 @@ pub struct Project {
     /// Unreadable model files, syntax errors, unresolved names, and links that could not be
     /// made, each rendered with where and how to fix it.
     pub problems: Vec<String>,
-    /// Every file read as text, `trace.toml` included, with the SHA-256 of its bytes.
+    /// Every file read as text, `trace.toml` included, with the SHA-256 of its text from
+    /// `reproduce::text_sha256`.
     pub inputs: Vec<(String, Vec<u8>)>,
 }
 
@@ -43,7 +45,8 @@ pub fn load_project(root: &Path) -> Result<Project, SetupError> {
     let mut problems = Vec::new();
     let mut hashed = Vec::new();
     if let Ok(loaded) = index::read_file(&root.join(check::TRACE_CONFIG)) {
-        hashed.push((check::TRACE_CONFIG.to_string(), loaded.sha256));
+        let sha256 = reproduce::text_sha256(&loaded.text);
+        hashed.push((check::TRACE_CONFIG.to_string(), sha256));
     }
     let mut parsed: Vec<(&str, Vec<Member>)> = Vec::new();
     for path in &paths {
@@ -52,7 +55,7 @@ pub fn load_project(root: &Path) -> Result<Project, SetupError> {
                 let result = parser::parse(&loaded.text);
                 problems.extend(result.errors.iter().map(|e| e.render(path)));
                 parsed.push((path, result.members));
-                hashed.push((path.clone(), loaded.sha256));
+                hashed.push((path.clone(), reproduce::text_sha256(&loaded.text)));
             }
             Err(message) => problems.push(index::unreadable(path, &message)),
         }
@@ -69,7 +72,7 @@ pub fn load_project(root: &Path) -> Result<Project, SetupError> {
         let loaded = syntax.and_then(|_| index::read_file(&root.join(&path)).ok());
         if let (Some(syntax), Some(loaded)) = (syntax, loaded) {
             scans.push((path.clone(), scan::scan_source(syntax, &loaded.text)));
-            hashed.push((path, loaded.sha256));
+            hashed.push((path, reproduce::text_sha256(&loaded.text)));
         }
     }
     let code: Vec<(&str, &FileScan)> = (scans.iter()).map(|(p, s)| (p.as_str(), s)).collect();
