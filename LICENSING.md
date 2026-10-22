@@ -1,3 +1,4 @@
+<!-- @implements CT-CMP-008 -->
 # Licensing in plain words
 
 Clewtrace is source-available under the Business Source License 1.1 (see `LICENSE`). This page

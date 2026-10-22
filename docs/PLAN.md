@@ -356,9 +356,12 @@ requirement is implemented and verified or formally waived.
       and `clew report coverage` lists waived requirements in their own section. Each ADR
       must cite a requirement (CT-DEV-010). New checklist `docs/verification/no-cert-claim.md`
       (CT-CMP-008). Format in `docs/TRACEABILITY.md`.
-      Proposed waivers, not approved, each a warning until John decides: CT-EFF-001 and
-      CT-PLT-001 (verified only by the release workflow), CT-CMP-008 and CT-DEV-013 (document
-      and policy requirements that no code implements).
+      With John's decisions on PR #25: a Markdown document may `@implements` an Inspection or
+      Demonstration requirement (LICENSING.md for CT-CMP-008, CONTRIBUTING.md for
+      CT-DEV-013), and a workflow step whose failure fails the build may carry `@verifies`
+      (the release workflow's Installer size step for CT-EFF-001 and CT-PLT-001). A waiver
+      may name a `part`, which excuses no gap. Final waivers: one, approved by John on
+      2026-10-22, for the ARM64 part of CT-PLT-001 until phase 2. No proposed waivers.
       Follow-ups: ADR-0002 still says the coverage check is not on (needs John); `check
       --self` reads the project twice, once for line tags and once for coverage; a phase
       set only as a default on a requirement definition is not read, so such requirements

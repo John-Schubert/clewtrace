@@ -130,7 +130,10 @@ jobs:
           npm run tauri build -- --ci --bundles ${{ matrix.bundles }} \
             --config src-tauri/tauri.release.conf.json ${{ matrix.args }}
 
-      # CT-EFF-001: each installer is 20 MB (20,000,000 bytes) or smaller.
+      # CT-EFF-001: each installer is 20 MB (20,000,000 bytes) or smaller. CT-PLT-001: each
+      # installer this matrix entry builds (x64 MSI, universal DMG, x64 deb and rpm) exists.
+      # Exits 1 if either fails, so the release fails. Runs on each release tag.
+      # @verifies CT-EFF-001, CT-PLT-001
       - name: Installer size
         shell: bash
         run: |
