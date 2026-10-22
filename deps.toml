@@ -151,6 +151,14 @@ serves = ["CT-DEV-008"]
 why = "CI check for disallowed licenses, known advisories, and unknown crate sources. Release binary pinned by SHA-256 in ci.yml"
 
 [[dep]]
+name = "cargo-llvm-cov"
+ecosystem = "ci"
+license = "Apache-2.0 OR MIT"
+scope = "build-only"
+serves = ["CT-DEV-003"]
+why = "Measures the line coverage of the clew-core and clew-cli tests in the report-only coverage CI job. Installed with cargo install --locked at the exact version in ci.yml, with the llvm-tools-preview rustup component. Its Linux dependency tree is under MIT, Apache-2.0, or Unicode-3.0, alone or as one choice of a dual license, which fits the build-only tier. Approved by John as a CI tool, 2026-10-22 (Gate 1)"
+
+[[dep]]
 name = "actions/checkout"
 ecosystem = "ci"
 license = "MIT"
