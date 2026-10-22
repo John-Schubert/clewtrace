@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use clew_core::config::TraceConfig;
 use clew_core::index::Index;
-use clew_core::report::{coverage, load_project};
+use clew_core::report::{load_project, project_coverage};
 use clew_core::reqs::read_requirements;
 
 // @verifies CT-EFF-009, CT-EFF-004
@@ -148,7 +148,7 @@ fn measure(root: &Path) -> Measured {
 
     let started = Instant::now();
     let project = load_project(root).unwrap();
-    let found = coverage(&project.model, &project.graph, &project.top_level);
+    let found = project_coverage(&project);
     let load = started.elapsed();
     assert!(
         project.problems.is_empty(),

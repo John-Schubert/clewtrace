@@ -1,7 +1,9 @@
-# @file CT-DEV-004, CT-DEV-005, CT-DEV-008, CT-DEV-014, CT-PLT-001, CT-EFF-009
+# @file CT-DEV-003, CT-DEV-004, CT-DEV-005, CT-DEV-008, CT-DEV-014, CT-PLT-001, CT-EFF-009
 # CI gate on Ubuntu, Windows, and macOS: builds the desktop app (UI and Tauri crate), then
 # format, lint, tests, the trace gate, the license notices check, the commit hook, and (on
 # Ubuntu) commit trailers, cargo-deny, and the performance budgets on 4 GB and 2 CPUs.
+# The trace gate fails on untraced lines, unknown IDs, and requirements due in a started
+# phase with no implementation, verification, or waiver.
 # Installers are built by the release workflow. Rules: docs/TRACEABILITY.md.
 name: ci
 

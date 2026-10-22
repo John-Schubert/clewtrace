@@ -82,10 +82,11 @@ Requirements without an implementation (1):
   CT-TRC-001 Reqs::top  model/reqs.sysml:2
 Requirements without a verification (1):
   CT-TRC-001 Reqs::top  model/reqs.sysml:2
+Waived requirements (0):
 Elements traced to no requirement (1):
   Loose  model/design.sysml:4
-clew report coverage: 2 requirements, 1 with a parent, 1 implemented, 1 verified, 1 elements \
-traced to no requirement
+clew report coverage: 2 requirements, 1 with a parent, 1 implemented, 1 verified, 0 waived, \
+1 elements traced to no requirement
 "
     );
 }

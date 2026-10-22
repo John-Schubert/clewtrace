@@ -5,19 +5,42 @@
 //! requirements that lack a parent, an implementation, or a verification, and the model
 //! elements traced to no requirement. Impact lists everything reachable from one element
 //! through trace links, upstream and downstream.
+//!
+//! An Inspection or Demonstration requirement also counts as verified when a checklist in
+//! `docs/verification/` cites it in an `@verifies` tag in its first comment, and a
+//! requirement with a `[[waiver]]` in `trace.toml` is listed apart from the gaps.
 
 use std::collections::HashSet;
 use std::path::Path;
 
 use crate::check::{self, SetupError};
-use crate::config::{TOP_LEVEL_DEFINITIONS, TraceConfig};
+use crate::config::{TOP_LEVEL_DEFINITIONS, TraceConfig, Waiver};
 use crate::index;
 use crate::model::{ElementId, ElementKind, LIBRARY_PATH, Model, Role};
 use crate::parse::ast::{Kind, Member, UsageKind};
 use crate::parse::parser;
 use crate::reproduce;
+use crate::reqs::{self, Requirement};
 use crate::scan::{self, FileScan};
 use crate::trace::{End, LinkKind, Toward, TraceGraph};
+
+// @implements CT-DEV-003, CT-TRC-004
+/// The folder of inspection and demonstration checklists, relative to the project root.
+pub const VERIFICATION_DIR: &str = "docs/verification";
+
+// @implements CT-DEV-003, CT-TRC-004
+/// The verification methods a checklist in `VERIFICATION_DIR` may verify.
+pub const CHECKLIST_METHODS: [&str; 2] = ["Inspection", "Demonstration"];
+
+// @implements CT-DEV-003, CT-TRC-004
+/// A checklist in `VERIFICATION_DIR` and the requirement IDs in the `@verifies` tag in its
+/// first comment, which is on `line`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Checklist {
+    pub path: String,
+    pub line: usize,
+    pub ids: Vec<String>,
+}
 
 // @implements CT-TRC-004, CT-TRC-005
 /// A project's model and trace graph, and the problems found while reading them.
@@ -32,12 +55,20 @@ pub struct Project {
     pub inputs: Vec<(String, Vec<u8>)>,
     /// The requirement definitions in `trace.toml` whose usages need no parent.
     pub top_level: Vec<ElementId>,
+    /// The requirements with an ID in every model file, with their verification method
+    /// and phase, in file order.
+    pub requirements: Vec<Requirement>,
+    /// The checklists in `VERIFICATION_DIR` that carry an `@verifies` tag.
+    pub checklists: Vec<Checklist>,
+    /// The `[[waiver]]` entries in `trace.toml`.
+    pub waivers: Vec<Waiver>,
 }
 
-// @implements CT-TRC-004, CT-TRC-005, CT-USE-007, CT-TRC-009
-/// Reads the project under `root`: its `trace.toml`, every `.sysml` file, and the tags in
-/// the code under the source roots. Code files that `clew check --self` would report as
-/// excluded, untraceable, or unreadable add no links.
+// @implements CT-TRC-004, CT-TRC-005, CT-USE-007, CT-TRC-009, CT-DEV-003
+/// Reads the project under `root`: its `trace.toml`, every `.sysml` file, the tags in
+/// the code under the source roots, and the checklists in `VERIFICATION_DIR`. Code files
+/// that `clew check --self` would report as excluded, untraceable, or unreadable add no
+/// links.
 pub fn load_project(root: &Path) -> Result<Project, SetupError> {
     let config = check::read_config(root)?;
     let paths = index::sysml_files(root).map_err(|e| SetupError {
@@ -66,6 +97,9 @@ pub fn load_project(root: &Path) -> Result<Project, SetupError> {
     let inputs: Vec<(&str, &[Member])> = (parsed.iter())
         .map(|(path, members)| (*path, members.as_slice()))
         .collect();
+    let requirements = (parsed.iter())
+        .flat_map(|(_, members)| reqs::requirements_in(members))
+        .collect();
     let model = Model::build(&inputs);
     problems.extend(model.errors.iter().map(ToString::to_string));
     let top_level = top_level_definitions(&model, &config)?;
@@ -82,13 +116,68 @@ pub fn load_project(root: &Path) -> Result<Project, SetupError> {
     let code: Vec<(&str, &FileScan)> = (scans.iter()).map(|(p, s)| (p.as_str(), s)).collect();
     let graph = TraceGraph::build(&model, &code);
     problems.extend(graph.problems.iter().map(ToString::to_string));
+    let checklists = read_checklists(root, &mut problems, &mut hashed);
     Ok(Project {
         model,
         graph,
         problems,
         inputs: hashed,
         top_level,
+        requirements,
+        checklists,
+        waivers: config.waivers,
     })
+}
+
+// @implements CT-DEV-003, CT-TRC-004, CT-TRC-009, CT-USE-007
+/// Reads the `.md` checklists in `VERIFICATION_DIR` in name order, adding each file read to
+/// `hashed` and each unreadable one to `problems`. A missing folder holds no checklists.
+fn read_checklists(
+    root: &Path,
+    problems: &mut Vec<String>,
+    hashed: &mut Vec<(String, Vec<u8>)>,
+) -> Vec<Checklist> {
+    let Ok(entries) = std::fs::read_dir(root.join(VERIFICATION_DIR)) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = (entries.filter_map(Result::ok))
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with(".md"))
+        .collect();
+    names.sort();
+    let mut found = Vec::new();
+    for name in names {
+        let path = format!("{VERIFICATION_DIR}/{name}");
+        match index::read_file(&root.join(&path)) {
+            Ok(loaded) => {
+                hashed.push((path.clone(), reproduce::text_sha256(&loaded.text)));
+                if let Some((line, ids)) = checklist_verifies(&loaded.text) {
+                    found.push(Checklist { path, line, ids });
+                }
+            }
+            Err(message) => problems.push(index::unreadable(&path, &message)),
+        }
+    }
+    found
+}
+
+// @implements CT-DEV-003, CT-TRC-004
+/// The line and IDs of the `@verifies` tag in a checklist's first comment, which must be an
+/// HTML comment (`<!-- ... -->`) at the top of the file. `None` when there is none.
+pub fn checklist_verifies(text: &str) -> Option<(usize, Vec<String>)> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let start = text.len() - text.trim_start().len();
+    let comment = text[start..].strip_prefix("<!--")?;
+    let comment = &comment[..comment.find("-->")?];
+    let at = comment.find("@verifies")?;
+    let line = 1 + text[..start + 4 + at].matches('\n').count();
+    let ids: Vec<String> = comment[at + "@verifies".len()..]
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect();
+    (!ids.is_empty()).then_some((line, ids))
 }
 
 // @implements CT-TRC-004, CT-USE-007
@@ -145,8 +234,11 @@ pub struct RequirementCoverage {
     pub has_parent: bool,
     /// Code implements it or a model element satisfies it.
     pub implemented: bool,
-    /// A test or a model element verifies it.
+    /// A test or a model element verifies it, or, for an Inspection or Demonstration
+    /// requirement, a checklist in `VERIFICATION_DIR`.
     pub verified: bool,
+    /// Its `[[waiver]]` in `trace.toml`, if any.
+    pub waiver: Option<Waiver>,
 }
 
 // @implements CT-TRC-004, CT-DEV-003
@@ -196,6 +288,7 @@ pub fn coverage(model: &Model, graph: &TraceGraph, top_level: &[ElementId]) -> C
                 implemented: into()
                     .any(|k| matches!(k, LinkKind::Implements | LinkKind::Satisfies)),
                 verified: into().any(|k| k == LinkKind::Verifies),
+                waiver: None,
             }
         })
         .collect();
@@ -235,24 +328,64 @@ pub fn coverage(model: &Model, graph: &TraceGraph, top_level: &[ElementId]) -> C
     }
 }
 
+// @implements CT-DEV-003, CT-TRC-004
+/// The coverage of a whole project: `coverage`, plus the requirements verified by a
+/// checklist and the waivers in `trace.toml`. A checklist verifies only requirements whose
+/// verification method is in `CHECKLIST_METHODS`.
+pub fn project_coverage(project: &Project) -> Coverage {
+    let mut found = coverage(&project.model, &project.graph, &project.top_level);
+    for row in &mut found.requirements {
+        let Some(id) = &project.model.element(row.requirement).short_name else {
+            continue;
+        };
+        let method = (project.requirements.iter())
+            .find(|r| &r.id == id)
+            .and_then(|r| r.verification_method.as_deref());
+        let checklisted = (project.checklists.iter()).any(|c| c.ids.contains(id));
+        if checklisted && method.is_some_and(|m| CHECKLIST_METHODS.contains(&m)) {
+            row.verified = true;
+        }
+        row.waiver = project.waivers.iter().find(|w| &w.id == id).cloned();
+    }
+    found
+}
+
 // @implements CT-TRC-004, CT-DEV-003, CT-TRC-008
-/// The coverage report as text: one section per gap, then a summary line.
+/// The coverage report as text: one section per gap, then the waived requirements, which
+/// the implementation and verification gaps leave out, then a summary line.
 pub fn coverage_text(model: &Model, coverage: &Coverage) -> String {
     type Test = fn(&RequirementCoverage) -> bool;
     let sections: [(&str, Test); 3] = [
         ("Requirements without a parent", |r| !r.has_parent),
-        ("Requirements without an implementation", |r| !r.implemented),
-        ("Requirements without a verification", |r| !r.verified),
+        ("Requirements without an implementation", |r| {
+            !r.implemented && r.waiver.is_none()
+        }),
+        ("Requirements without a verification", |r| {
+            !r.verified && r.waiver.is_none()
+        }),
     ];
     let mut out = String::new();
-    let mut lacking = Vec::new();
     for (title, test) in sections {
         let rows: Vec<ElementId> = (coverage.requirements.iter())
             .filter(|r| test(r))
             .map(|r| r.requirement)
             .collect();
         section(&mut out, model, title, &rows);
-        lacking.push(rows.len());
+    }
+    let waived: Vec<(&RequirementCoverage, &Waiver)> = (coverage.requirements.iter())
+        .filter_map(|r| Some((r, r.waiver.as_ref()?)))
+        .collect();
+    out.push_str(&format!("Waived requirements ({}):\n", waived.len()));
+    for (row, waiver) in &waived {
+        let approval = match waiver.status.as_str() {
+            "approved" => format!("approved by {} on {}", waiver.approved_by, waiver.date),
+            status => format!("{status} on {}, not approved", waiver.date),
+        };
+        out.push_str(&format!(
+            "  {}\n    {approval}: {}\n",
+            located(model, row.requirement),
+            waiver.reason
+        ));
     }
     let untraced = &coverage.untraced;
     section(
@@ -262,12 +395,14 @@ pub fn coverage_text(model: &Model, coverage: &Coverage) -> String {
         untraced,
     );
     let total = coverage.requirements.len();
+    let count = |test: Test| coverage.requirements.iter().filter(|r| test(r)).count();
     out.push_str(&format!(
         "clew report coverage: {total} requirements, {} with a parent, {} implemented, \
-         {} verified, {} elements traced to no requirement\n",
-        total - lacking[0],
-        total - lacking[1],
-        total - lacking[2],
+         {} verified, {} waived, {} elements traced to no requirement\n",
+        count(|r| r.has_parent),
+        count(|r| r.implemented),
+        count(|r| r.verified),
+        waived.len(),
         untraced.len()
     ));
     out
@@ -443,12 +578,156 @@ Requirements without an implementation (2):
 Requirements without a verification (2):
   CT-TRC-003 Reqs::child::nested  model/reqs.sysml:5
   CT-TRC-004 Reqs::lone  model/reqs.sysml:7
+Waived requirements (0):
 Elements traced to no requirement (2):
   Design::Loose  model/design.sysml:10
   Design::Loose::inner  model/design.sysml:11
-clew report coverage: 4 requirements, 2 with a parent, 2 implemented, 2 verified, 2 elements \
-traced to no requirement
+clew report coverage: 4 requirements, 2 with a parent, 2 implemented, 2 verified, 0 waived, \
+2 elements traced to no requirement
 "
+        );
+    }
+
+    // @verifies CT-DEV-003, CT-TRC-004
+    #[test]
+    fn reads_the_verifies_tag_in_a_checklists_first_comment() {
+        let cases = [
+            (
+                "<!-- @verifies CT-DEV-009, CT-DEV-013 -->\n# A\n",
+                Some(1),
+                "CT-DEV-009 CT-DEV-013",
+            ),
+            (
+                "\u{feff}\n<!--\n  Checklist\n  @verifies CT-DEV-010\n-->\n",
+                Some(4),
+                "CT-DEV-010",
+            ),
+            ("# Title\n<!-- @verifies CT-DEV-010 -->\n", None, ""),
+            (
+                "<!-- A checklist -->\n<!-- @verifies CT-DEV-010 -->\n",
+                None,
+                "",
+            ),
+            ("<!-- @verifies -->\n", None, ""),
+            ("<!-- @verifies CT-DEV-010\n", None, ""),
+        ];
+        for (text, line, ids) in cases {
+            let found = checklist_verifies(text);
+            assert_eq!(found.as_ref().map(|f| f.0), line, "{text:?}");
+            let got = found.map(|f| f.1.join(" ")).unwrap_or_default();
+            assert_eq!(got, ids, "{text:?}");
+        }
+    }
+
+    // @verifies CT-DEV-003, CT-TRC-004
+    #[test]
+    fn checklists_verify_inspections_and_waivers_are_listed_apart() {
+        let checked = "package Checked {
+    private import ScalarValues::*;
+    requirement def R { attribute verificationMethod : String; }
+    requirement <'CT-DEV-009'> inspected : R { attribute :>> verificationMethod = \"Inspection\"; }
+    requirement <'CT-DEV-010'> shown : R { attribute :>> verificationMethod = \"Demonstration\"; }
+    requirement <'CT-DEV-011'> tested : R { attribute :>> verificationMethod = \"Test\"; }
+}
+";
+        let files: &[(&str, &[u8])] = &[
+            ("model/checked.sysml", checked.as_bytes()),
+            (
+                "docs/verification/a.md",
+                b"<!-- @verifies CT-DEV-009, CT-DEV-011 -->\n# A\n",
+            ),
+            (
+                "docs/verification/b.md",
+                b"<!--\n  @verifies CT-DEV-010\n-->\n",
+            ),
+            ("docs/verification/c.md", b"# No tag\n"),
+            (
+                "docs/verification/d.md",
+                b"<!-- @verifies CT-DEV-011 \xe9 -->\n",
+            ),
+            (
+                "docs/verification/e.txt",
+                b"<!-- @verifies CT-DEV-011 -->\n",
+            ),
+            (
+                "docs/verification/f.md/x.md",
+                b"<!-- @verifies CT-DEV-011 -->\n",
+            ),
+        ];
+        let root = project("checklists", files);
+        let config = fs::read_to_string(root.join("trace.toml")).unwrap()
+            + "[[waiver]]\nid = \"CT-TRC-004\"\nreason = \"Phase 2\"\nstatus = \"approved\"\n\
+               approved_by = \"John Schubert\"\ndate = \"2026-10-22\"\n\
+               [[waiver]]\nid = \"CT-DEV-011\"\nreason = \"Release only\"\nstatus = \"proposed\"\n\
+               approved_by = \"\"\ndate = \"2026-10-23\"\n";
+        fs::write(root.join("trace.toml"), config).unwrap();
+        let project = load_project(&root).unwrap();
+        assert_eq!(
+            project.problems,
+            [
+                "docs/verification/d.md: error: the file is not UTF-8 text\n  help: save the file \
+              as UTF-8 text and make sure it is readable"
+            ]
+        );
+        let paths: Vec<(&str, usize)> = (project.checklists.iter())
+            .map(|c| (c.path.as_str(), c.line))
+            .collect();
+        assert_eq!(
+            paths,
+            [("docs/verification/a.md", 1), ("docs/verification/b.md", 2)]
+        );
+        let hashed: Vec<&str> = (project.inputs.iter())
+            .map(|(p, _)| p.as_str())
+            .filter(|p| p.starts_with("docs/"))
+            .collect();
+        assert_eq!(
+            hashed,
+            [
+                "docs/verification/a.md",
+                "docs/verification/b.md",
+                "docs/verification/c.md"
+            ]
+        );
+        let found = project_coverage(&project);
+        let rows: Vec<(String, bool, Option<&str>)> = (found.requirements.iter())
+            .map(|r| {
+                let name = project.model.qualified_name(r.requirement);
+                (
+                    name,
+                    r.verified,
+                    r.waiver.as_ref().map(|w| w.status.as_str()),
+                )
+            })
+            .collect();
+        assert_eq!(
+            [&rows[..3], &rows[6..]].concat(),
+            [
+                ("Checked::inspected".to_string(), true, None),
+                ("Checked::shown".to_string(), true, None),
+                ("Checked::tested".to_string(), false, Some("proposed")),
+                ("Reqs::lone".to_string(), false, Some("approved")),
+            ]
+        );
+        let text = coverage_text(&project.model, &found);
+        let want = "Requirements without an implementation (3):
+  CT-DEV-009 Checked::inspected  model/checked.sysml:4
+  CT-DEV-010 Checked::shown  model/checked.sysml:5
+  CT-TRC-003 Reqs::child::nested  model/reqs.sysml:5
+Requirements without a verification (1):
+  CT-TRC-003 Reqs::child::nested  model/reqs.sysml:5
+Waived requirements (2):
+  CT-DEV-011 Checked::tested  model/checked.sysml:6
+    proposed on 2026-10-23, not approved: Release only
+  CT-TRC-004 Reqs::lone  model/reqs.sysml:7
+    approved by John Schubert on 2026-10-22: Phase 2
+";
+        assert!(text.contains(want), "{text}");
+        assert!(
+            text.ends_with(
+                "clew report coverage: 7 requirements, 2 with a parent, 2 implemented, \
+                            4 verified, 2 waived, 2 elements traced to no requirement\n"
+            ),
+            "{text}"
         );
     }
 

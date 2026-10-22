@@ -143,7 +143,7 @@ pub fn generate(root: &Path, kind: &ReportKind) -> Result<Generated, GenerateErr
     let project = report::load_project(root).map_err(GenerateError::Setup)?;
     let report = match kind {
         ReportKind::Coverage => {
-            let coverage = report::coverage(&project.model, &project.graph, &project.top_level);
+            let coverage = report::project_coverage(&project);
             report::coverage_text(&project.model, &coverage)
         }
         ReportKind::Impact(name) => match report::find_element(&project, name) {

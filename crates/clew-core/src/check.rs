@@ -1,13 +1,15 @@
 //! `clew check --self`: scans the source roots in `trace.toml` and reports untraced lines,
-//! unknown requirement IDs, oversized scopes, and dependencies missing from `deps.toml`.
-//! Rules: docs/TRACEABILITY.md.
+//! unknown requirement IDs, oversized scopes, dependencies missing from `deps.toml`, ADRs
+//! that cite no requirement, and requirements due in a started phase that lack an
+//! implementation or a verification and have no waiver. Rules: docs/TRACEABILITY.md.
 
 use std::collections::BTreeSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::config::{ConfigError, TraceConfig, parse_tables};
-use crate::reqs;
+use crate::report;
+use crate::reqs::{self, Requirement};
 use crate::scan::{self, ProblemKind, ScopeKind, Syntax, TagKind};
 
 /// Where the checker finds its inputs, relative to the project root.
@@ -229,6 +231,8 @@ struct Checker {
     config: TraceConfig,
     pattern: IdPattern,
     known: BTreeSet<String>,
+    /// The requirements in the `requirements` files, each with its file.
+    requirements: Vec<(String, Requirement)>,
     report: Report,
 }
 
@@ -298,13 +302,25 @@ pub fn syntax_for(config: &TraceConfig, path: &str) -> Option<Syntax> {
 /// Reads `trace.toml`, its `id_pattern`, and the known requirement IDs under `root`.
 // @implements CT-DEV-004, CT-DEV-005, CT-USE-007
 pub fn load_ids(root: &Path) -> Result<(TraceConfig, IdPattern, BTreeSet<String>), SetupError> {
+    let (config, pattern, requirements) = load_requirements(root)?;
+    let known = requirements.into_iter().map(|(_, r)| r.id).collect();
+    Ok((config, pattern, known))
+}
+
+/// Reads `trace.toml`, its `id_pattern`, and the requirements in its `requirements` files
+/// under `root`, each with its file.
+// @implements CT-DEV-003, CT-DEV-004, CT-DEV-005, CT-USE-007
+#[allow(clippy::type_complexity)]
+fn load_requirements(
+    root: &Path,
+) -> Result<(TraceConfig, IdPattern, Vec<(String, Requirement)>), SetupError> {
     let config = read_config(root)?;
     let pattern = IdPattern::parse(&config.id_pattern).map_err(|message| SetupError {
         path: TRACE_CONFIG.to_string(),
         line: 0,
         message: format!("id_pattern: {message}"),
     })?;
-    let mut known = BTreeSet::new();
+    let mut requirements = Vec::new();
     for file in &config.requirements {
         let text = std::fs::read_to_string(root.join(file)).map_err(|e| SetupError {
             path: file.clone(),
@@ -317,26 +333,28 @@ pub fn load_ids(root: &Path) -> Result<(TraceConfig, IdPattern, BTreeSet<String>
             line: 0,
             message: e.to_string(),
         })?;
-        known.extend(all.into_iter().map(|r| r.id));
+        requirements.extend(all.into_iter().map(|r| (file.clone(), r)));
     }
-    Ok((config, pattern, known))
+    Ok((config, pattern, requirements))
 }
 
 /// Runs every check on the project rooted at `root`.
-// @implements CT-DEV-002, CT-DEV-004, CT-TRC-008
+// @implements CT-DEV-002, CT-DEV-003, CT-DEV-004, CT-TRC-008
 pub fn check_project(root: &Path) -> Result<Report, SetupError> {
-    let (config, pattern, known) = load_ids(root)?;
+    let (config, pattern, requirements) = load_requirements(root)?;
     let mut checker = Checker {
         root: root.to_path_buf(),
         config,
         pattern,
-        known,
+        known: requirements.iter().map(|(_, r)| r.id.clone()).collect(),
+        requirements,
         report: Report::default(),
     };
     checker.check_config()?;
     checker.check_sources()?;
     checker.check_deps()?;
     checker.check_adrs()?;
+    checker.check_requirements()?;
     let mut report = checker.report;
     report.findings.sort();
     Ok(report)
@@ -619,7 +637,24 @@ impl Checker {
         Ok(found)
     }
 
-    /// Checks every word in an ADR that looks like a requirement ID.
+    /// The literal text every ID starts with, used to spot IDs in prose.
+    fn id_prefix(&self) -> String {
+        self.pattern
+            .atoms
+            .iter()
+            .map_while(|(atom, count)| match atom {
+                Atom::Char(c) if *count == 1 => Some(*c),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+/// The ADR check.
+// @implements CT-DEV-004, CT-DEV-010, CT-USE-007
+impl Checker {
+    /// Checks every word in an ADR that looks like a requirement ID, and that each ADR
+    /// cites at least one requirement it serves.
     fn check_adrs(&mut self) -> Result<(), SetupError> {
         let Ok(entries) = std::fs::read_dir(self.root.join(ADR_DIR)) else {
             return Ok(());
@@ -639,26 +674,167 @@ impl Checker {
             let Ok(text) = std::fs::read_to_string(&path) else {
                 continue;
             };
+            let mut cites = false;
             for (index, line) in text.lines().enumerate() {
                 let words = line.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'));
                 for word in words.filter(|w| !prefix.is_empty() && w.starts_with(&prefix)) {
+                    cites |= self.known.contains(word);
                     self.check_id(&name, index + 1, word);
                 }
+            }
+            if !cites {
+                self.push(
+                    &name,
+                    0,
+                    Severity::Error,
+                    "ADR cites no requirement".into(),
+                    "add a `Serves:` line listing the IDs of the requirements this decision serves",
+                );
             }
         }
         Ok(())
     }
+}
 
-    /// The literal text every ID starts with, used to spot IDs in prose.
-    fn id_prefix(&self) -> String {
-        self.pattern
-            .atoms
-            .iter()
-            .map_while(|(atom, count)| match atom {
-                Atom::Char(c) if *count == 1 => Some(*c),
-                _ => None,
-            })
-            .collect()
+/// The requirement coverage gate and the waivers and checklists it reads.
+// @implements CT-DEV-003, CT-DEV-004, CT-USE-007
+impl Checker {
+    /// Reports each requirement due in a started phase, or with no phase, that has no
+    /// implementation or no verification and no waiver, using the same coverage as
+    /// `clew report coverage`. Also checks the waivers and the checklists' IDs.
+    fn check_requirements(&mut self) -> Result<(), SetupError> {
+        let project = report::load_project(&self.root)?;
+        let coverage = report::project_coverage(&project);
+        for checklist in &project.checklists {
+            for id in &checklist.ids {
+                self.check_id(&checklist.path, checklist.line, id);
+            }
+        }
+        self.check_waivers();
+        let current = self.config.current_phase;
+        for (path, req) in std::mem::take(&mut self.requirements) {
+            let row = (project.graph.requirement(&req.id))
+                .and_then(|e| coverage.requirements.iter().find(|r| r.requirement == e));
+            let implemented = row.is_some_and(|r| r.implemented);
+            let verified = row.is_some_and(|r| r.verified);
+            let waiver = (self.config.waivers.iter())
+                .find(|w| w.id == req.id)
+                .map(|w| w.line);
+            if let Some(line) = waiver.filter(|_| implemented && verified) {
+                let message = format!(
+                    "waiver for {} is not needed: it is implemented and verified",
+                    req.id
+                );
+                self.push(
+                    TRACE_CONFIG,
+                    line,
+                    Severity::Warning,
+                    message,
+                    "remove the waiver",
+                );
+            }
+            let due = req.phase.is_none_or(|p| i64::from(p) <= current);
+            if !due || waiver.is_some() || (implemented && verified) {
+                continue;
+            }
+            let missing = match (implemented, verified) {
+                (false, false) => "no implementation and no verification",
+                (false, true) => "no implementation",
+                _ => "no verification",
+            };
+            let phase = match req.phase {
+                Some(p) => format!("phase {p}"),
+                None => "no phase".to_string(),
+            };
+            self.push(
+                &path,
+                req.line,
+                Severity::Error,
+                format!("{} ({phase}) is due at current_phase {current} but has {missing}", req.id),
+                "tag code with `@implements` and a test with `@verifies`, cite an Inspection or Demonstration requirement in a docs/verification/ checklist, or propose a [[waiver]] in trace.toml for John to approve",
+            );
+        }
+        Ok(())
+    }
+
+    /// Each waiver needs a known ID, a reason, a `YYYY-MM-DD` date, and a status: `approved`
+    /// with the approver's name, or `proposed` with an empty `approved_by`. A proposed
+    /// waiver is a warning until it is approved.
+    fn check_waivers(&mut self) {
+        let mut seen = BTreeSet::new();
+        for w in self.config.waivers.clone() {
+            let line = w.line;
+            self.check_id(TRACE_CONFIG, line, &w.id);
+            let error = |checker: &mut Checker, message: String, help: &str| {
+                checker.push(TRACE_CONFIG, line, Severity::Error, message, help);
+            };
+            if !seen.insert(w.id.clone()) {
+                error(
+                    self,
+                    format!("{} has more than one waiver", w.id),
+                    "keep one [[waiver]] per requirement",
+                );
+            }
+            if w.reason.trim().is_empty() {
+                error(
+                    self,
+                    format!("waiver for {} has an empty reason", w.id),
+                    "say why the requirement cannot be met yet and when it will be",
+                );
+            }
+            if !is_date(&w.date) {
+                error(
+                    self,
+                    format!("waiver for {} has date `{}`, not YYYY-MM-DD", w.id, w.date),
+                    "write the date the waiver was approved or proposed, like 2026-10-22",
+                );
+            }
+            match (w.status.as_str(), w.approved_by.trim().is_empty()) {
+                ("approved", false) | ("proposed", true) => {}
+                ("approved", true) => error(
+                    self,
+                    format!("approved waiver for {} names no approver", w.id),
+                    "set approved_by to the person who approved it",
+                ),
+                ("proposed", false) => error(
+                    self,
+                    format!("proposed waiver for {} has an approver", w.id),
+                    "set status = \"approved\" once it is approved, or clear approved_by",
+                ),
+                (status, _) => error(
+                    self,
+                    format!("waiver for {} has unknown status `{status}`", w.id),
+                    "use status = \"approved\" or status = \"proposed\"",
+                ),
+            }
+            if w.status == "proposed" {
+                self.push(
+                    TRACE_CONFIG,
+                    line,
+                    Severity::Warning,
+                    format!("waiver for {} is proposed and not approved", w.id),
+                    "John approves it by setting status = \"approved\" and approved_by, or drops it",
+                );
+            }
+        }
+    }
+}
+
+/// Whether `text` is a date written `YYYY-MM-DD` with a month from 01 to 12 and a day
+/// from 01 to 31.
+// @implements CT-DEV-003, CT-DEV-004
+fn is_date(text: &str) -> bool {
+    let parts: Vec<&str> = text.split('-').collect();
+    let number = |s: &str, len: usize| {
+        (s.len() == len && s.bytes().all(|b| b.is_ascii_digit())).then(|| s.parse::<u32>().ok())?
+    };
+    match parts[..] {
+        [y, m, d] => {
+            number(y, 4).is_some()
+                && number(m, 2).is_some_and(|m| (1..=12).contains(&m))
+                && number(d, 2).is_some_and(|d| (1..=31).contains(&d))
+        }
+        _ => false,
     }
 }
 
@@ -872,7 +1048,9 @@ mod tests {
         fs::create_dir_all(root.join("model")).unwrap();
         fs::write(
             root.join("model/req.sysml"),
-            "requirement <'CT-DEV-002'> a : R {\n}\nrequirement <'CT-DEV-004'> b : R {\n}\nrequirement def R;\n",
+            "requirement <'CT-DEV-002'> a : R { attribute :>> phase = 1; }\n\
+             requirement <'CT-DEV-004'> b : R { attribute :>> phase = 1; }\n\
+             requirement def R { attribute phase; }\n",
         )
         .unwrap();
         let config = format!(
@@ -1004,6 +1182,190 @@ mod tests {
         assert_eq!(summary(&report), want, "{:#?}", report.findings);
     }
 
+    /// A model where every requirement is typed by `R`, which has a phase and a
+    /// verification method. Each entry is (ID, name, phase, method).
+    // @verifies CT-DEV-003
+    fn model(reqs: &[(&str, &str, Option<u8>, &str)]) -> String {
+        let mut text =
+            String::from("requirement def R { attribute phase; attribute verificationMethod; }\n");
+        for (id, name, phase, method) in reqs {
+            let phase = phase.map_or(String::new(), |p| format!(" attribute :>> phase = {p};"));
+            text.push_str(&format!(
+                "requirement <'{id}'> {name} : R {{{phase} attribute :>> verificationMethod = \"{method}\"; }}\n"
+            ));
+        }
+        text
+    }
+
+    /// A `[[waiver]]` table.
+    // @verifies CT-DEV-003
+    fn waiver(id: &str, reason: &str, status: &str, approved_by: &str, date: &str) -> String {
+        format!(
+            "[[waiver]]\nid = \"{id}\"\nreason = \"{reason}\"\nstatus = \"{status}\"\n\
+             approved_by = \"{approved_by}\"\ndate = \"{date}\"\n"
+        )
+    }
+
+    // @verifies CT-DEV-003, CT-DEV-004, CT-USE-007
+    #[test]
+    fn reports_due_requirements_without_coverage_or_waiver() {
+        let reqs = model(&[
+            ("CT-DEV-002", "covered", Some(0), "Test"),
+            ("CT-DEV-003", "untested", Some(0), "Test"),
+            ("CT-DEV-004", "bare", Some(0), "Test"),
+            ("CT-DEV-005", "later", Some(1), "Test"),
+            ("CT-DEV-008", "phaseless", None, "Test"),
+            ("CT-DEV-010", "inspected", Some(0), "Inspection"),
+            ("CT-DEV-012", "unimplemented", Some(0), "Test"),
+            ("CT-DEV-013", "waived", Some(0), "Inspection"),
+            ("CT-DEV-014", "proposed", Some(0), "Test"),
+            ("CT-DEV-009", "needless", Some(0), "Test"),
+        ]);
+        let waivers = waiver(
+            "CT-DEV-013",
+            "Policy",
+            "approved",
+            "John Schubert",
+            "2026-10-22",
+        ) + &waiver("CT-DEV-014", "Release only", "proposed", "", "2026-10-22")
+            + &waiver(
+                "CT-DEV-009",
+                "Old",
+                "approved",
+                "John Schubert",
+                "2026-10-21",
+            );
+        let root = project(
+            "gate",
+            &waivers,
+            &[
+                ("model/req.sysml", reqs.as_str()),
+                (
+                    "src/a.rs",
+                    "// @implements CT-DEV-002, CT-DEV-003, CT-DEV-010, CT-DEV-009\nfn a() {}\n\
+                     // @verifies CT-DEV-002, CT-DEV-012, CT-DEV-009\n#[test]\nfn t() {}\n",
+                ),
+                (
+                    "docs/verification/c.md",
+                    "<!-- @verifies CT-DEV-010, CT-DEV-999 -->\n# Check\n",
+                ),
+            ],
+        );
+        let report = check_project(&root).unwrap();
+        let text: Vec<String> = report.findings.iter().map(|f| f.to_string()).collect();
+        let first_lines: Vec<&str> = text.iter().map(|t| t.lines().next().unwrap()).collect();
+        assert_eq!(
+            first_lines,
+            [
+                "docs/verification/c.md:1: error: unknown requirement ID CT-DEV-999",
+                "model/req.sysml:3: error: CT-DEV-003 (phase 0) is due at current_phase 0 but has no verification",
+                "model/req.sysml:4: error: CT-DEV-004 (phase 0) is due at current_phase 0 but has no implementation and no verification",
+                "model/req.sysml:6: error: CT-DEV-008 (no phase) is due at current_phase 0 but has no implementation and no verification",
+                "model/req.sysml:8: error: CT-DEV-012 (phase 0) is due at current_phase 0 but has no implementation",
+                "trace.toml:16: warning: waiver for CT-DEV-014 is proposed and not approved",
+                "trace.toml:22: warning: waiver for CT-DEV-009 is not needed: it is implemented and verified",
+            ]
+        );
+        assert!(text[1].ends_with(
+            "help: tag code with `@implements` and a test with `@verifies`, cite an Inspection \
+             or Demonstration requirement in a docs/verification/ checklist, or propose a \
+             [[waiver]] in trace.toml for John to approve"
+        ));
+    }
+
+    // @verifies CT-DEV-003, CT-DEV-004, CT-USE-007
+    #[test]
+    fn waivers_need_a_known_id_reason_date_and_approval() {
+        let waivers = waiver(
+            "CT-DEV-999",
+            "Unknown",
+            "approved",
+            "John Schubert",
+            "2026-10-22",
+        ) + &waiver("CT-DEV-002", " ", "approved", "", "2026-13-01")
+            + &waiver(
+                "CT-DEV-002",
+                "Twice",
+                "proposed",
+                "John Schubert",
+                "22-10-2026",
+            )
+            + &waiver("CT-DEV-004", "Odd", "maybe", "", "2026-1-01");
+        let root = project("waivers", &waivers, &[]);
+        let report = check_project(&root).unwrap();
+        let text: Vec<String> = report.findings.iter().map(|f| f.to_string()).collect();
+        let first_lines: Vec<&str> = text.iter().map(|t| t.lines().next().unwrap()).collect();
+        assert_eq!(
+            first_lines,
+            [
+                "trace.toml:10: error: unknown requirement ID CT-DEV-999",
+                "trace.toml:16: error: approved waiver for CT-DEV-002 names no approver",
+                "trace.toml:16: error: waiver for CT-DEV-002 has an empty reason",
+                "trace.toml:16: error: waiver for CT-DEV-002 has date `2026-13-01`, not YYYY-MM-DD",
+                "trace.toml:22: error: CT-DEV-002 has more than one waiver",
+                "trace.toml:22: error: proposed waiver for CT-DEV-002 has an approver",
+                "trace.toml:22: error: waiver for CT-DEV-002 has date `22-10-2026`, not YYYY-MM-DD",
+                "trace.toml:22: warning: waiver for CT-DEV-002 is proposed and not approved",
+                "trace.toml:28: error: waiver for CT-DEV-004 has date `2026-1-01`, not YYYY-MM-DD",
+                "trace.toml:28: error: waiver for CT-DEV-004 has unknown status `maybe`",
+            ]
+        );
+    }
+
+    // @verifies CT-DEV-003, CT-DEV-004
+    #[test]
+    fn dates_are_year_month_day() {
+        for good in ["2026-10-22", "2000-01-01", "2026-12-31"] {
+            assert!(is_date(good), "{good}");
+        }
+        for bad in [
+            "2026-00-10",
+            "2026-10-32",
+            "2026-10-00",
+            "2026-10",
+            "2026-10-2a",
+            "+026-10-22",
+            "2026-10-22-1",
+            "",
+        ] {
+            assert!(!is_date(bad), "{bad}");
+        }
+    }
+
+    // @verifies CT-DEV-010, CT-DEV-004
+    #[test]
+    fn adrs_must_cite_a_requirement() {
+        let root = project(
+            "adrs",
+            "",
+            &[
+                (
+                    "docs/adr/0001-none.md",
+                    "# ADR 1\n\nNo requirements here.\n",
+                ),
+                (
+                    "docs/adr/0002-unknown.md",
+                    "# ADR 2\n\nServes: CT-DEV-777\n",
+                ),
+                ("docs/adr/0003-good.md", "# ADR 3\n\nServes: CT-DEV-004\n"),
+                ("docs/adr/README.txt", "Not an ADR\n"),
+            ],
+        );
+        let report = check_project(&root).unwrap();
+        let text: Vec<String> = report.findings.iter().map(|f| f.to_string()).collect();
+        assert_eq!(
+            text,
+            [
+                "docs/adr/0001-none.md: error: ADR cites no requirement\n  help: add a \
+                 `Serves:` line listing the IDs of the requirements this decision serves",
+                "docs/adr/0002-unknown.md: error: ADR cites no requirement\n  help: add a \
+                 `Serves:` line listing the IDs of the requirements this decision serves",
+                "docs/adr/0002-unknown.md:3: error: unknown requirement ID CT-DEV-777\n  help: \
+                 cite an ID from the model (`clew reqs list`), or propose a new requirement",
+            ]
+        );
+    }
+
     // @verifies CT-DEV-008
     #[test]
     fn reports_dependencies_missing_from_deps_toml() {
@@ -1102,6 +1464,13 @@ mod tests {
         let err = check_project(&root).unwrap_err();
         assert!(
             err.to_string().contains("Run clew from the project root"),
+            "{err}"
+        );
+        // The coverage gate reads the whole project, so its setup errors stop the check too.
+        let root = project("setup-gate", "top_level_definitions = [\"Nope::R\"]\n", &[]);
+        let err = check_project(&root).unwrap_err();
+        assert!(
+            err.to_string().contains("`Nope::R` names no element"),
             "{err}"
         );
     }

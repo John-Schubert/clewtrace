@@ -1,6 +1,6 @@
 # Code traceability rules
 
-Implements CT-DEV-002, CT-DEV-003, CT-DEV-004, CT-DEV-005, and CT-TRC-006.
+Implements CT-DEV-002, CT-DEV-003, CT-DEV-004, CT-DEV-005, CT-DEV-010, and CT-TRC-006.
 
 Every non-blank, non-comment line of first-party source code must sit inside a scope tagged
 with at least one valid requirement ID. `clew check --self` enforces this in CI and lists every
@@ -90,8 +90,11 @@ name: ci
 ## Requirement coverage
 
 - Each requirement whose `phase` is less than or equal to `current_phase` in `trace.toml` needs
-  at least one `@implements` scope and one `@verifies` test, or a `[[waiver]]` in `trace.toml`
-  with a reason, the approver, and a date.
+  an implementation and a verification, or a `[[waiver]]` in `trace.toml` (see below). A
+  requirement with no `phase` is always due. An implementation is an `@implements` scope or
+  a model element that satisfies it; a verification is an `@verifies` test, a model element
+  that verifies it, or a checklist (next bullet). `clew check --self` uses the same coverage
+  as `clew report coverage`.
 - Each requirement needs a parent: it derives from or refines another requirement, or is
   nested in one. Requirements typed by a requirement definition listed in
   `top_level_definitions` under `[coverage]` in `trace.toml`, or by one that specializes it,
@@ -99,6 +102,36 @@ name: ci
   `clew report coverage` lists the rest under "Requirements without a parent".
 - Requirements with verification method Inspection or Demonstration may be verified by a
   checklist file in `docs/verification/` that carries an `@verifies` tag in its first comment.
+  The first comment must be an HTML comment at the top of the `.md` file, such as
+  `<!-- @verifies CT-DEV-009, CT-DEV-013 -->`. A checklist that cites a requirement with
+  another verification method, such as Test, does not count as its verification.
+
+## Waivers
+
+A waiver records why a due requirement may lack an implementation or a verification. Only
+John approves waivers. Each one is a `[[waiver]]` table in `trace.toml`:
+
+```toml
+[[waiver]]
+id = "CT-EFF-001"
+reason = "Why it cannot be met in this phase, and when it will be"
+status = "approved"
+approved_by = "John Schubert"
+date = "2026-10-22"
+```
+
+- `id` is a requirement ID from the model. One waiver per requirement.
+- `reason` must not be empty.
+- `status` is `approved` or `proposed`. An approved waiver names its approver in
+  `approved_by`. A proposed waiver has `approved_by = ""` until John approves it; John
+  approves it by setting `status = "approved"` and his name, or drops it by deleting it.
+- `date` is the day it was approved, or proposed, written `YYYY-MM-DD`.
+- A proposed waiver keeps the gate green but is a warning on every run, so it stays
+  visible until John decides.
+- `clew report coverage` lists waived requirements in their own section, with the status,
+  approver, date, and reason, and leaves them out of the implementation and verification
+  gaps. The summary line counts them as waived, not as implemented or verified.
+- A waiver for a requirement that is implemented and verified is a warning: remove it.
 
 ## Commits
 
@@ -121,8 +154,12 @@ line. Lines starting with `#` are comments and are ignored, as in git.
 | Finding | Severity |
 | --- | --- |
 | Line outside any tagged scope | Error |
-| Unknown requirement ID in a tag, trailer, `deps.toml`, or ADR | Error |
+| Unknown requirement ID in a tag, trailer, `deps.toml`, ADR, waiver, or checklist | Error |
+| ADR in `docs/adr/` that cites no requirement | Error |
 | Requirement due in a started phase with no implementation or no verification, and no waiver | Error |
+| `[[waiver]]` with an empty reason, a bad date or status, a missing approver, an approver on a proposed waiver, or a second waiver for one requirement | Error |
+| Proposed `[[waiver]]`, not yet approved | Warning |
+| `[[waiver]]` for a requirement that is implemented and verified | Warning |
 | Commit without a `Refs:` trailer | Error |
 | File under a source root whose type cannot be traced, and no `[[exclude]]` | Error |
 | `[[exclude]]` with an empty reason or an unknown requirement | Error |
@@ -135,4 +172,4 @@ Each finding prints as `path:line: severity: message` with a `help:` line saying
 it, then a one-line summary. `clew check --self` runs from the repository root and exits 0
 when there are no errors, 1 when there is at least one error, and 2 when it cannot run, for
 example when `trace.toml` is missing or malformed. Commit trailers are checked by
-`clew check-commit`, and requirement coverage is checked from task 1.9.
+`clew check-commit`.

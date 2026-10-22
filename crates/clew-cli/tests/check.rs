@@ -13,7 +13,8 @@ fn clew_in(dir: &Path, args: &[&str]) -> Output {
         .expect("clew runs")
 }
 
-/// Writes a small project with one untraced line, one unknown ID, and one oversized scope.
+/// Writes a small project with one untraced line, one unknown ID, one oversized scope, and
+/// one due requirement with no verification.
 // @verifies CT-DEV-002, CT-DEV-004
 fn fixture(name: &str, max_scope_lines: usize) -> PathBuf {
     let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
@@ -43,7 +44,7 @@ fn fixture(name: &str, max_scope_lines: usize) -> PathBuf {
     root
 }
 
-// @verifies CT-DEV-002, CT-DEV-004, CT-TRC-008, CT-USE-007
+// @verifies CT-DEV-002, CT-DEV-003, CT-DEV-004, CT-TRC-008, CT-USE-007
 #[test]
 fn reports_findings_with_file_and_line_and_exits_nonzero() {
     let root = fixture("check-findings", 2);
@@ -62,8 +63,15 @@ fn reports_findings_with_file_and_line_and_exits_nonzero() {
         stdout.contains("src/lib.rs:2: warning: scope is 3 lines long"),
         "{stdout}"
     );
+    assert!(
+        stdout.contains(
+            "model/requirements.sysml:2: error: CT-DEV-002 (no phase) is due at current_phase 0 \
+             but has no verification"
+        ),
+        "{stdout}"
+    );
     assert!(stdout.contains("help: "), "{stdout}");
-    assert!(stdout.contains("2 errors, 1 warning"), "{stdout}");
+    assert!(stdout.contains("3 errors, 1 warning"), "{stdout}");
 }
 
 // @verifies CT-DEV-004, CT-TRC-008, CT-USE-007
