@@ -248,9 +248,19 @@ requirement is implemented and verified or formally waived.
       expression text, so a real expression parser is needed when calculations arrive;
       `assert` / `not satisfy`, `locale`, metadata, and other SysML members are reported as
       not supported yet; `subject` is parsed because requirement bodies use it.
-- [ ] **1.3 Model and name resolution.** Resolve qualified names and report unresolved
+- [x] **1.3 Model and name resolution.** Resolve qualified names and report unresolved
       references with file, line, and column.
       Refs: CT-MOD-002, CT-USE-007
+      Done in `crates/clew-core/src/model.rs`. `Model::build` puts every file under one root
+      namespace and resolves import targets, specializations, types, subsets, redefines,
+      satisfy, verify, and comment `about` names. Lookup searches owned, inherited, and
+      imported members, then each enclosing namespace, and honors public, protected, and
+      private visibility and public versus private imports. `reqs.rs` now resolves names when
+      a file has no syntax errors, so `clew reqs` and `clew check --self` report unresolved
+      names in the requirements model. Follow-ups: only `ScalarValues` of the standard
+      library is built in (as attribute defs), so other library packages report as
+      unresolved; ambiguous names take the first match without a warning; filtered imports,
+      aliases, and conjugation are not supported yet.
 - [ ] **1.4 Index.** SQLite (bundled) with FTS5 in `.clewtrace/index.db`; rebuild from text,
       and re-index only changed files.
       Refs: CT-MOD-001, CT-EFF-007, CT-SEC-003

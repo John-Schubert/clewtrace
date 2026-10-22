@@ -870,7 +870,7 @@ mod tests {
         fs::create_dir_all(root.join("model")).unwrap();
         fs::write(
             root.join("model/req.sysml"),
-            "requirement <'CT-DEV-002'> a : R {\n}\nrequirement <'CT-DEV-004'> b : R {\n}\n",
+            "requirement <'CT-DEV-002'> a : R {\n}\nrequirement <'CT-DEV-004'> b : R {\n}\nrequirement def R;\n",
         )
         .unwrap();
         let config = format!(
