@@ -64,6 +64,12 @@ under the root and the tags in the code under the source roots in `trace.toml`.
   it, or one it owns, is linked. Packages, metadata definitions, and the features of a
   requirement are not listed.
 
+`clew check --self` uses the same implementation and verification gaps as its coverage
+gate, by phase: a gap in a requirement from a finished phase (`phase` less than
+`current_phase` in `trace.toml`) or with no phase is an error, a gap in a current-phase
+requirement is a warning, and later phases are not checked. The rules are in
+[TRACEABILITY.md](TRACEABILITY.md#requirement-coverage).
+
 Top-level requirements, such as product requirements, have no parent by design. List
 their requirement definitions under `[coverage]` in `trace.toml`:
 
