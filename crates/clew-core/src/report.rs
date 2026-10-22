@@ -7,7 +7,6 @@
 //! through trace links, upstream and downstream.
 
 use std::collections::HashSet;
-use std::fs;
 use std::path::Path;
 
 use crate::check::{self, SetupError};
@@ -26,9 +25,11 @@ pub struct Project {
     /// Unreadable model files, syntax errors, unresolved names, and links that could not be
     /// made, each rendered with where and how to fix it.
     pub problems: Vec<String>,
+    /// Every file read as text, `trace.toml` included, with the SHA-256 of its bytes.
+    pub inputs: Vec<(String, Vec<u8>)>,
 }
 
-// @implements CT-TRC-004, CT-TRC-005, CT-USE-007
+// @implements CT-TRC-004, CT-TRC-005, CT-USE-007, CT-TRC-009
 /// Reads the project under `root`: its `trace.toml`, every `.sysml` file, and the tags in
 /// the code under the source roots. Code files that `clew check --self` would report as
 /// excluded, untraceable, or unreadable add no links.
@@ -40,6 +41,10 @@ pub fn load_project(root: &Path) -> Result<Project, SetupError> {
         message: e.to_string(),
     })?;
     let mut problems = Vec::new();
+    let mut hashed = Vec::new();
+    if let Ok(loaded) = index::read_file(&root.join(check::TRACE_CONFIG)) {
+        hashed.push((check::TRACE_CONFIG.to_string(), loaded.sha256));
+    }
     let mut parsed: Vec<(&str, Vec<Member>)> = Vec::new();
     for path in &paths {
         match index::read_file(&root.join(path)) {
@@ -47,6 +52,7 @@ pub fn load_project(root: &Path) -> Result<Project, SetupError> {
                 let result = parser::parse(&loaded.text);
                 problems.extend(result.errors.iter().map(|e| e.render(path)));
                 parsed.push((path, result.members));
+                hashed.push((path.clone(), loaded.sha256));
             }
             Err(message) => problems.push(index::unreadable(path, &message)),
         }
@@ -60,9 +66,10 @@ pub fn load_project(root: &Path) -> Result<Project, SetupError> {
     for path in check::source_files(root, &config)? {
         let excluded = (config.excludes.iter()).any(|e| check::glob_matches(&e.path, &path));
         let syntax = check::syntax_for(&config, &path).filter(|_| !excluded);
-        let text = syntax.and_then(|_| fs::read_to_string(root.join(&path)).ok());
-        if let (Some(syntax), Some(text)) = (syntax, text) {
-            scans.push((path, scan::scan_source(syntax, &text)));
+        let loaded = syntax.and_then(|_| index::read_file(&root.join(&path)).ok());
+        if let (Some(syntax), Some(loaded)) = (syntax, loaded) {
+            scans.push((path.clone(), scan::scan_source(syntax, &loaded.text)));
+            hashed.push((path, loaded.sha256));
         }
     }
     let code: Vec<(&str, &FileScan)> = (scans.iter()).map(|(p, s)| (p.as_str(), s)).collect();
@@ -72,6 +79,7 @@ pub fn load_project(root: &Path) -> Result<Project, SetupError> {
         model,
         graph,
         problems,
+        inputs: hashed,
     })
 }
 
@@ -284,6 +292,7 @@ fn end_label(model: &Model, end: &End) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::path::PathBuf;
 
     const REQS: &str = "package Reqs {

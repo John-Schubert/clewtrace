@@ -25,6 +25,9 @@ pub mod parse;
 // @begin CT-TRC-004, CT-TRC-005
 pub mod report;
 // @end
+// @begin CT-TRC-009
+pub mod reproduce;
+// @end
 // @begin CT-DEV-001, CT-TRC-001
 pub mod reqs;
 // @end

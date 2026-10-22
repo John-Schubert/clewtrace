@@ -62,5 +62,40 @@ such as `Design::Engine`. It lists every element and code scope reachable upstre
 element traces to) and downstream (what traces to it), each with the link that reached it
 and how many links away it is.
 
-Both print any problems in the files first, such as syntax errors, and then exit 1. They
-exit 2 when they cannot run, for example when `trace.toml` is missing.
+Both print a header first (see below), then any problems in the files, such as syntax
+errors, and then exit 1. They exit 2 when they cannot run, for example when `trace.toml` is
+missing.
+
+## Reproducible reports
+
+Every report from `clew report coverage` and `clew impact` starts with four lines and a
+blank line:
+
+```
+Report: clew report coverage
+Commit: 5d94dee0c1f3a2b4e6d8f0a1b3c5d7e9f1a3b5c7
+Tool: clew 0.1.0
+Inputs: sha256 9f2c...e41a over 42 files
+```
+
+- `Report` is the command that made it.
+- `Commit` is the Git commit of the project, followed by `, with uncommitted changes` when
+  the work tree differs from it, untracked files included. It is `none` outside a Git
+  repository or when Git is not installed. Add `.clewtrace/` to `.gitignore` so the index
+  does not count as a change.
+- `Tool` is the clew version, which also fixes the built-in libraries.
+- `Inputs` is a SHA-256 over every file the report read as text: `trace.toml`, the `.sysml`
+  files, and the code files scanned for tags. The hash is taken over a manifest with one
+  line per file, sorted by path, in the form `sha256sum` prints: the file's SHA-256 in
+  lowercase hex, two spaces, and its path relative to the project root with `/` separators.
+
+Save a report to a file, for example `clew report coverage > coverage.txt`. To check it
+later, run `clew report verify coverage.txt` from the same project root. It makes the
+report again from the files there and compares the tool version, the inputs hash, and every
+line after the header. A different commit with the same inputs is only a note. A byte order
+mark and Windows line endings in the saved file are ignored. It exits 0 when the report
+matches, 1 when it differs, with each difference and a `help:` line, and 2 when it cannot
+compare, for example when the file is not a clew report or `trace.toml` is missing.
+
+To reproduce a report from another machine, check out the recorded commit, install the
+recorded clew version, and run `clew report verify`.

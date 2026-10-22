@@ -307,9 +307,20 @@ requirement is implemented and verified or formally waived.
       `docs/verification/` is not read yet; the model is parsed from the text on each run,
       not read from the index; the `sysml_files` error path in `load_project` has no test,
       since it needs a folder that cannot be read.
-- [ ] **1.7 Reproducible reports.** Every report records the Git commit, tool version, and a
+- [x] **1.7 Reproducible reports.** Every report records the Git commit, tool version, and a
       SHA-256 of its inputs; `clew report verify` regenerates and compares.
       Refs: CT-TRC-009, CT-SEC-006
+      Done in `crates/clew-core/src/reproduce.rs`. `clew report coverage` and `clew impact`
+      start with `Report`, `Commit`, `Tool`, and `Inputs` lines and a blank line, then the
+      file problems and the report. The commit comes from running `git rev-parse HEAD` and
+      `git status --porcelain`, and is `none` without Git. The inputs hash is the SHA-256
+      (sha2) of a `sha256sum`-style manifest of every file the report read as text.
+      `clew report verify <file>` makes the report again and compares the tool, the inputs
+      hash, and every line after the header; a different commit is only a note. Exits 0, 1,
+      and 2 as usual. Docs in `docs/MODELING.md`.
+      Follow-ups: the report records only the combined inputs hash, so verify cannot say
+      which file changed; a file that is not UTF-8 is reported as a problem but its bytes
+      are not hashed; the built-in libraries are fixed by the tool version, not hashed.
 - [ ] **1.8 Performance harness.** A generator for a 10,000-requirement, 50,000-link test
       project and a CI job running in a container limited to 4 GB RAM and 2 CPUs that checks
       the budgets due so far.
