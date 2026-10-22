@@ -4,7 +4,7 @@
 //! recreates it from the text, and a missing, corrupt, or outdated database is rebuilt on
 //! open. `update` re-parses only the files whose content changed since the last run.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -26,7 +26,7 @@ pub const INDEX_FILE: &str = "index.db";
 
 // @implements CT-MOD-001
 /// Stored in `PRAGMA user_version`. A database with another version is rebuilt.
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 // @implements CT-MOD-001, CT-EFF-007
 const SCHEMA: &str = "
@@ -48,6 +48,12 @@ CREATE TABLE elements (
     doc TEXT NOT NULL
 );
 CREATE INDEX elements_file ON elements (file);
+CREATE TABLE problems (
+    file TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    PRIMARY KEY (file, seq)
+);
 CREATE VIRTUAL TABLE elements_fts USING fts5 (
     name, short_name, qualified_name, doc,
     content = 'elements', content_rowid = 'id'
@@ -92,8 +98,9 @@ pub struct UpdateStats {
     pub parsed: usize,
     /// Files dropped from the index because they no longer exist.
     pub removed: usize,
-    /// Syntax errors in the parsed files and files that could not be read, each rendered
-    /// as `path:line:column: error: ...` or `path: error: ...` with a `help:` line.
+    /// Syntax errors in every indexed file, whether parsed on this run or not, and files
+    /// that could not be read, each rendered as `path:line:column: error: ...` or
+    /// `path: error: ...` with a `help:` line, sorted by path.
     pub problems: Vec<String>,
 }
 
@@ -178,7 +185,7 @@ impl Index {
     pub fn rebuild(&mut self) -> Result<UpdateStats, IndexError> {
         let db = self.db_path();
         self.conn
-            .execute_batch("DELETE FROM elements; DELETE FROM files;")
+            .execute_batch("DELETE FROM elements; DELETE FROM problems; DELETE FROM files;")
             .map_err(|e| sql_error(&db, e))?;
         self.update()
     }
@@ -238,7 +245,7 @@ fn open_schema(db: &Path) -> rusqlite::Result<Connection> {
     if version != SCHEMA_VERSION {
         conn.execute_batch(
             "DROP TABLE IF EXISTS elements_fts; DROP TABLE IF EXISTS elements;
-             DROP TABLE IF EXISTS files;",
+             DROP TABLE IF EXISTS problems; DROP TABLE IF EXISTS files;",
         )?;
         conn.execute_batch(SCHEMA)?;
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -266,6 +273,8 @@ fn update_files(
         files: found.len(),
         ..UpdateStats::default()
     };
+    // Problems by path, so stored and fresh ones come out in one sorted list.
+    let mut problems: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for rel in found {
         let abs = root.join(rel);
         let (size, mtime) = fs::metadata(&abs).map_or((-1, -1), |m| stamp(&m));
@@ -278,7 +287,7 @@ fn update_files(
         let loaded = match read_file(&abs) {
             Ok(loaded) => loaded,
             Err(message) => {
-                stats.problems.push(format!(
+                problems.entry(rel.clone()).or_default().push(format!(
                     "{rel}: error: {message}\n  help: save the file as UTF-8 text and make sure it is readable"
                 ));
                 forget(tx, rel)?;
@@ -294,14 +303,16 @@ fn update_files(
             continue;
         }
         let parsed = parser::parse(&loaded.text);
-        stats
-            .problems
-            .extend(parsed.errors.iter().map(|e| e.render(rel)));
         forget(tx, rel)?;
         tx.execute(
             "INSERT INTO files (path, size, mtime_ns, sha256) VALUES (?1, ?2, ?3, ?4)",
             params![rel, size, mtime, loaded.sha256],
         )?;
+        let mut insert =
+            tx.prepare("INSERT INTO problems (file, seq, text) VALUES (?1, ?2, ?3)")?;
+        for (seq, error) in (0_i64..).zip(&parsed.errors) {
+            insert.execute(params![rel, seq, error.render(rel)])?;
+        }
         let mut rows = Vec::new();
         collect_rows(&parsed.members, "", &mut rows);
         let mut insert = tx.prepare(
@@ -326,13 +337,22 @@ fn update_files(
         forget(tx, rel)?;
         stats.removed += 1;
     }
+    // Every indexed file's syntax errors, so an unchanged broken file is still reported.
+    let mut stmt = tx.prepare("SELECT file, text FROM problems ORDER BY file, seq")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get(1)?)))?;
+    for row in rows {
+        let (rel, text) = row?;
+        problems.entry(rel).or_default().push(text);
+    }
+    stats.problems = problems.into_values().flatten().collect();
     Ok(stats)
 }
 
 // @implements CT-EFF-007
-/// Removes a file and its elements from the index.
+/// Removes a file, its elements, and its problems from the index.
 fn forget(tx: &Transaction<'_>, rel: &str) -> rusqlite::Result<()> {
     tx.execute("DELETE FROM elements WHERE file = ?1", [rel])?;
+    tx.execute("DELETE FROM problems WHERE file = ?1", [rel])?;
     tx.execute("DELETE FROM files WHERE path = ?1", [rel])?;
     Ok(())
 }
@@ -693,6 +713,35 @@ mod tests {
         );
         // What parsed is still indexed, so a typo does not hide the rest of the file.
         assert_eq!(index.search("Ok", 10, 0).unwrap().len(), 1);
+    }
+
+    // @verifies CT-USE-007, CT-EFF-007
+    #[test]
+    fn reports_the_same_problems_when_a_broken_file_is_unchanged() {
+        let root = project("problems-kept");
+        fs::write(
+            root.join("model/broken.sysml"),
+            "part def 42;\npart def Ok;\n",
+        )
+        .unwrap();
+        fs::write(root.join("model/latin1.sysml"), b"part def Caf\xe9;\n").unwrap();
+        let mut index = Index::open(&root).unwrap();
+        let first = index.update().unwrap();
+        let second = index.update().unwrap();
+        assert_eq!(second.parsed, 0);
+        assert_eq!(second.problems, first.problems);
+        assert_eq!(second.problems.len(), 2);
+
+        // A touched file with the same content keeps its problems too.
+        set_mtime(&root.join("model/broken.sysml"), 1_000_000);
+        assert_eq!(index.update().unwrap().problems, first.problems);
+
+        // Fixing the file clears them, and a rebuild reports what is left.
+        fs::write(root.join("model/broken.sysml"), "part def Ok;\n").unwrap();
+        assert_eq!(index.update().unwrap().problems.len(), 1);
+        assert_eq!(index.rebuild().unwrap().problems.len(), 1);
+        fs::remove_file(root.join("model/latin1.sysml")).unwrap();
+        assert!(index.update().unwrap().problems.is_empty());
     }
 
     // @verifies CT-EFF-007
