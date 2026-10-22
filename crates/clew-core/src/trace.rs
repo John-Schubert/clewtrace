@@ -7,7 +7,7 @@
 //! Code tags give implements links from `@implements` scopes and verifies links from
 //! `@verifies` scopes, each pointing at the requirement whose short name the tag cites.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 
 use crate::model::{ElementId, ElementKind, Model, Role};
@@ -43,7 +43,7 @@ impl LinkKind {
 
 // @implements CT-TRC-002, CT-TRC-006
 /// One end of a link: a model element, or the lines of a tagged code scope.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum End {
     Element(ElementId),
     Code {
@@ -83,6 +83,27 @@ impl fmt::Display for TraceProblem {
             self.path, self.line, self.message, self.help
         )
     }
+}
+
+// @implements CT-TRC-005
+/// Which way to follow links. Every link points upstream, from the element that derives
+/// from, refines, satisfies, verifies, implements, or evidences, to the element it traces to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Toward {
+    /// To what the start traces to, such as the requirement a part satisfies.
+    Upstream,
+    /// To what traces to the start, such as the code that implements a requirement.
+    Downstream,
+}
+
+// @implements CT-TRC-005
+/// An end reached by following links, the link that reached it, and how many links away
+/// from the start it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reached<'a> {
+    pub end: &'a End,
+    pub link: &'a Link,
+    pub depth: usize,
 }
 
 // @implements CT-TRC-002, CT-TRC-006
@@ -290,7 +311,43 @@ impl TraceGraph {
     }
 }
 
-// @verifies CT-TRC-002, CT-TRC-006, CT-USE-007
+// @implements CT-TRC-005
+/// Impact analysis: following links from a set of elements.
+impl TraceGraph {
+    /// Every end reachable from the starts by following links one way, each once, breadth
+    /// first, so each end comes with a shortest path's last link. The starts are not listed.
+    pub fn reachable(&self, starts: &[ElementId], toward: Toward) -> Vec<Reached<'_>> {
+        let by = match toward {
+            Toward::Upstream => &self.outgoing,
+            Toward::Downstream => &self.incoming,
+        };
+        let mut seen: HashSet<End> = starts.iter().map(|&s| End::Element(s)).collect();
+        let mut queue: VecDeque<(ElementId, usize)> = starts.iter().map(|&s| (s, 0)).collect();
+        let mut found = Vec::new();
+        while let Some((at, depth)) = queue.pop_front() {
+            for link in self.lookup(by, at) {
+                let end = match toward {
+                    Toward::Upstream => &link.to,
+                    Toward::Downstream => &link.from,
+                };
+                if !seen.insert(end.clone()) {
+                    continue;
+                }
+                if let End::Element(next) = end {
+                    queue.push_back((*next, depth + 1));
+                }
+                found.push(Reached {
+                    end,
+                    link,
+                    depth: depth + 1,
+                });
+            }
+        }
+        found
+    }
+}
+
+// @verifies CT-TRC-002, CT-TRC-006, CT-TRC-005, CT-USE-007
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -500,6 +557,61 @@ mod tests {
         let all: Vec<&Link> = graph.links.iter().collect();
         assert_eq!(described(&model, &all), ["P::p evidences -> P::r"]);
         assert!(graph.problems.is_empty());
+    }
+
+    /// Each reached end as `depth: link`, in the order found.
+    fn walked(model: &Model, reached: &[Reached<'_>]) -> Vec<String> {
+        (reached.iter())
+            .map(|r| format!("{}: {}", r.depth, described(model, &[r.link])[0]))
+            .collect()
+    }
+
+    // @verifies CT-TRC-005
+    #[test]
+    fn walks_links_upstream_and_downstream_breadth_first() {
+        let code = "// @implements R3\nfn a() {}\n";
+        let (model, graph) = graph(
+            &[("reqs.sysml", REQS), ("design.sysml", DESIGN)],
+            &[("a.rs", code)],
+        );
+        let child = model.find("Reqs::child").unwrap();
+        let up = graph.reachable(&[child], Toward::Upstream);
+        assert_eq!(walked(&model, &up), ["1: Reqs::child derives -> Reqs::top"]);
+        assert_eq!(up[0].end, &End::Element(model.find("Reqs::top").unwrap()));
+        let down = graph.reachable(&[child], Toward::Downstream);
+        assert_eq!(
+            walked(&model, &down),
+            [
+                "1: Design::car::engine satisfies -> Reqs::child",
+                "1: Reqs::detail refines -> Reqs::child",
+                "2: a.rs:2-2 implements -> Reqs::detail",
+            ]
+        );
+        let detail = model.find("Reqs::detail").unwrap();
+        let up = graph.reachable(&[detail], Toward::Upstream);
+        // Reqs::top is reached once, through the shorter path.
+        assert_eq!(
+            walked(&model, &up),
+            [
+                "1: Reqs::detail refines -> Reqs::child",
+                "1: Reqs::detail refines -> Reqs::top",
+            ]
+        );
+    }
+
+    // @verifies CT-TRC-005
+    #[test]
+    fn walks_cycles_once_and_never_returns_to_the_start() {
+        let src = "package P {\n  part a;\n  part b;\n  #derivation dependency a to b;\n  \
+                   #derivation dependency b to a;\n}\n";
+        let (model, graph) = graph(&[("p.sysml", src)], &[]);
+        let a = model.find("P::a").unwrap();
+        let up = graph.reachable(&[a], Toward::Upstream);
+        assert_eq!(walked(&model, &up), ["1: P::a derives -> P::b"]);
+        let down = graph.reachable(&[a], Toward::Downstream);
+        assert_eq!(walked(&model, &down), ["1: P::b derives -> P::a"]);
+        let b = model.find("P::b").unwrap();
+        assert!(graph.reachable(&[a, b], Toward::Upstream).is_empty());
     }
 
     // @verifies CT-TRC-002
