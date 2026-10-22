@@ -1,7 +1,8 @@
-# @file CT-DEV-004, CT-DEV-005, CT-DEV-008, CT-DEV-014, CT-PLT-001
+# @file CT-DEV-004, CT-DEV-005, CT-DEV-008, CT-DEV-014, CT-PLT-001, CT-EFF-009
 # CI gate on Ubuntu, Windows, and macOS: builds the desktop app (UI and Tauri crate), then
 # format, lint, tests, the trace gate, the license notices check, the commit hook, and (on
-# Ubuntu) commit trailers and cargo-deny. Installers are built by the release workflow. Rules: docs/TRACEABILITY.md.
+# Ubuntu) commit trailers, cargo-deny, and the performance budgets on 4 GB and 2 CPUs.
+# Installers are built by the release workflow. Rules: docs/TRACEABILITY.md.
 name: ci
 
 on:
@@ -162,3 +163,46 @@ jobs:
 
       - name: Licenses, advisories, bans, and sources
         run: cargo deny --locked check
+
+  # CT-EFF-009: the performance tests on the reference machine, 4 GB of RAM with no swap and
+  # 2 CPUs. systemd-run puts them in their own cgroup with those limits, the kernel feature
+  # containers are built on, so no container image is needed. They fail when a CT-EFF budget
+  # whose phase has started is exceeded (crates/clew-core/tests/perf.rs).
+  perf:
+    name: perf (4 GB, 2 CPUs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-perf-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-perf-${{ runner.os }}-
+
+      # Built outside the limits, in release mode like the shipped binaries.
+      - name: Build the performance tests
+        run: |
+          cargo test --locked --release -p clew-core --test perf --no-run --message-format=json \
+            | grep -o '"executable":"[^"]*"' | grep '/perf-' | cut -d'"' -f4 > "$RUNNER_TEMP/perf-bin"
+          test -x "$(cat "$RUNNER_TEMP/perf-bin")"
+
+      # The test prints each budget, what it measured, and whether it is due.
+      - name: Performance budgets
+        run: |
+          sudo systemd-run --scope --quiet \
+            -p MemoryMax=4G -p MemorySwapMax=0 -p AllowedCPUs=0-1 \
+            -- sh -c '
+              cg="/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)"
+              echo "memory.max $(cat "$cg/memory.max") bytes, $(nproc) CPUs"
+              if [ "$(cat "$cg/memory.max")" != 4294967296 ] || [ "$(nproc)" != 2 ]; then
+                echo "the 4 GB and 2 CPU limits are not applied" >&2; exit 1
+              fi
+              exec "$0" --ignored --nocapture
+            ' "$(cat "$RUNNER_TEMP/perf-bin")"
