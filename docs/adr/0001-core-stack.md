@@ -72,7 +72,7 @@ The Rust toolchain is pinned in `rust-toolchain.toml`.
 - The job reads the limits back from its cgroup, then runs a canary that writes 5 GiB and
   must be killed. It fails if either check does not hold.
 - This covers the core and CLI budgets on Linux. The desktop app on a 4 GB Windows machine
-  is still checked on John's laptop at each gate.
+  is still checked on John's laptop at each gate that changes the desktop app.
 
 ## Development environment
 
