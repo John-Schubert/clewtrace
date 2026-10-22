@@ -322,23 +322,26 @@ requirement is implemented and verified or formally waived.
       which file changed; a file that is not UTF-8 is reported as a problem but its bytes
       are not hashed; the built-in libraries are fixed by the tool version, not hashed.
 - [x] **1.8 Performance harness.** A generator for a 10,000-requirement, 50,000-link test
-      project and a CI job running in a container limited to 4 GB RAM and 2 CPUs that checks
-      the budgets due so far.
+      project and a CI job, limited by `systemd-run` to 4 GB RAM with no swap and 2 CPU cores,
+      that checks the budgets due so far. (Was "a container"; changed by John, 2026-10-22,
+      see ADR-0001.)
       Refs: CT-EFF-009, CT-EFF-004, CT-EFF-007
       Done in `crates/clew-core/tests/perf.rs`. The generator writes 100 requirements per
       file, one in ten top level, each satisfied, verified, implemented, and tested, with the
       rest of the links as derivations. `cargo test` runs it at 205 requirements; the full
       size is an ignored test that the new `perf (4 GB, 2 CPUs)` CI job runs in release mode
       under `systemd-run` with MemoryMax=4G, no swap, and AllowedCPUs=0-1, after checking the
-      limits applied. A budget fails the job only when its requirement's phase has started;
+      limits applied, and a 5 GiB canary run under the same limits must be killed. A budget
+      fails the job only when its requirement's phase has started;
       the rest print as not due. First local run (2 CPUs): full index 896 ms, incremental
       10 ms with 1 file re-parsed (CT-EFF-007), load and coverage 450 ms (CT-EFF-004, 3 s),
       search 8 ms (CT-EFF-006, 200 ms), peak 132 MB (CT-EFF-004, 400 MB).
       Also in this PR: `top_level_definitions` in trace.toml (John, PR #22), so this repo's
       coverage report lists 0 requirements without a parent, and the duplicate-ID check in
       `parse_requirements` uses a map instead of comparing every pair.
-      Follow-ups: the limit is a cgroup on the runner, not a container image (needs John);
-      `perf (4 GB, 2 CPUs)` is not a required check yet; CT-EFF-004 is measured on the core
+      John approved `systemd-run` instead of a container and the new CT-EFF-009 text
+      (2026-10-22, ADR-0001).
+      Follow-ups: `perf (4 GB, 2 CPUs)` is not a required check yet; CT-EFF-004 is measured on the core
       library only, since the app does not open projects until phase 2; peak memory is read
       only on Linux.
 - [ ] **1.9 Requirement coverage gate.** Turn on the phase-aware requirement coverage check

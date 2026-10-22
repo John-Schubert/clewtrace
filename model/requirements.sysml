@@ -69,7 +69,7 @@ package ClewtraceRequirements {
         }
 
         requirement <'CT-EFF-009'> perfGate : ProductRequirement {
-            doc /* CI shall run the performance tests on a VM limited to 4 GB RAM and 2 cores and fail the build when any EFF budget is exceeded. */
+            doc /* CI shall run the performance tests in an environment limited by the operating system to 4 GB RAM and 2 CPU cores, with no swap, and fail the build when any EFF budget is exceeded. */
             attribute :>> verificationMethod = "Inspection";
             attribute :>> phase = 1;
         }
