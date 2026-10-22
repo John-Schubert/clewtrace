@@ -22,6 +22,9 @@ pub mod notices;
 // @begin CT-MOD-002, CT-USE-007
 pub mod parse;
 // @end
+// @begin CT-TRC-004, CT-TRC-005
+pub mod report;
+// @end
 // @begin CT-DEV-001, CT-TRC-001
 pub mod reqs;
 // @end

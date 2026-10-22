@@ -129,11 +129,11 @@ struct Row {
     doc: String,
 }
 
-// @implements CT-EFF-007
+// @implements CT-EFF-007, CT-TRC-004
 /// A file's content hash and text, read in one go.
-struct Loaded {
+pub(crate) struct Loaded {
     sha256: Vec<u8>,
-    text: String,
+    pub(crate) text: String,
 }
 
 // @implements CT-MOD-001, CT-EFF-007, CT-SEC-003
@@ -287,9 +287,7 @@ fn update_files(
         let loaded = match read_file(&abs) {
             Ok(loaded) => loaded,
             Err(message) => {
-                problems.entry(rel.clone()).or_default().push(format!(
-                    "{rel}: error: {message}\n  help: save the file as UTF-8 text and make sure it is readable"
-                ));
+                (problems.entry(rel.clone()).or_default()).push(unreadable(rel, &message));
                 forget(tx, rel)?;
                 continue;
             }
@@ -368,13 +366,21 @@ fn stamp(meta: &fs::Metadata) -> (i64, i64) {
     (i64::try_from(meta.len()).unwrap_or(i64::MAX), mtime)
 }
 
-// @implements CT-EFF-007, CT-USE-007
+// @implements CT-EFF-007, CT-USE-007, CT-TRC-004
 /// Reads a file, hashes it with SHA-256, and decodes it as UTF-8.
-fn read_file(abs: &Path) -> Result<Loaded, String> {
+pub(crate) fn read_file(abs: &Path) -> Result<Loaded, String> {
     let bytes = fs::read(abs).map_err(|e| format!("cannot read the file: {e}"))?;
     let sha256 = Sha256::digest(&bytes).to_vec();
     let text = String::from_utf8(bytes).map_err(|_| "the file is not UTF-8 text".to_string())?;
     Ok(Loaded { sha256, text })
+}
+
+// @implements CT-USE-007, CT-TRC-004
+/// The problem for a `.sysml` file that `read_file` could not read.
+pub(crate) fn unreadable(rel: &str, message: &str) -> String {
+    format!(
+        "{rel}: error: {message}\n  help: save the file as UTF-8 text and make sure it is readable"
+    )
 }
 
 // @implements CT-MOD-001

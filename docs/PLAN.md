@@ -290,8 +290,23 @@ requirement is implemented and verified or formally waived.
       targets of satisfy and verify are not checked to be requirements; a short name used by
       two requirements links to the first; links are not stored in the index yet, and the
       graph has no CLI caller until 1.6.
-- [ ] **1.6 Coverage and impact.** `clew report coverage` and `clew impact <ID>`.
+- [x] **1.6 Coverage and impact.** `clew report coverage` and `clew impact <ID>`.
       Refs: CT-TRC-004, CT-TRC-005, CT-DEV-003
+      Done in `crates/clew-core/src/report.rs`, with `TraceGraph::reachable` in `trace.rs`.
+      Both commands read every `.sysml` file and the code tags under the source roots, and
+      print file problems first (exit 1). The coverage report lists requirements without a
+      parent (derives from or refines a requirement, or nested in one), an implementation
+      (implements or satisfies), or a verification, and definitions and usages linked to no
+      requirement in either direction, counting an owner's or member's link. Impact walks
+      links breadth first, upstream and downstream, and shows each link that reached an
+      element. John approved the link syntax (PR #21): the `Clewtrace` library defines
+      `#derivation` and `#evidence` as `metadata def`, is built in next to `ScalarValues`,
+      and is published as `library/Clewtrace.sysml`; docs in `docs/MODELING.md`.
+      Follow-ups: waivers and phase filtering wait for the gate in 1.9, and the report counts
+      model `satisfy` and `verify` as well as code tags; checklist verification in
+      `docs/verification/` is not read yet; the model is parsed from the text on each run,
+      not read from the index; the `sysml_files` error path in `load_project` has no test,
+      since it needs a folder that cannot be read.
 - [ ] **1.7 Reproducible reports.** Every report records the Git commit, tool version, and a
       SHA-256 of its inputs; `clew report verify` regenerates and compares.
       Refs: CT-TRC-009, CT-SEC-006

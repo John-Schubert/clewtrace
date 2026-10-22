@@ -232,9 +232,9 @@ struct Checker {
     report: Report,
 }
 
-/// Reads `trace.toml`, its `id_pattern`, and the known requirement IDs under `root`.
-// @implements CT-DEV-004, CT-DEV-005, CT-USE-007
-pub fn load_ids(root: &Path) -> Result<(TraceConfig, IdPattern, BTreeSet<String>), SetupError> {
+/// Reads `trace.toml` under `root`.
+// @implements CT-DEV-004, CT-TRC-004, CT-USE-007
+pub fn read_config(root: &Path) -> Result<TraceConfig, SetupError> {
     let config_path = root.join(TRACE_CONFIG);
     if !config_path.is_file() {
         return Err(SetupError {
@@ -243,7 +243,62 @@ pub fn load_ids(root: &Path) -> Result<(TraceConfig, IdPattern, BTreeSet<String>
             message: "not found. Run clew from the project root, where trace.toml lives".into(),
         });
     }
-    let config = TraceConfig::read(&config_path).map_err(|e| setup_error(TRACE_CONFIG, e))?;
+    TraceConfig::read(&config_path).map_err(|e| setup_error(TRACE_CONFIG, e))
+}
+
+/// Every file under the config's source roots, as sorted `/`-separated paths relative to
+/// `root`.
+// @implements CT-DEV-002, CT-TRC-004
+pub fn source_files(root: &Path, config: &TraceConfig) -> Result<Vec<String>, SetupError> {
+    let mut files = Vec::new();
+    let mut dirs: Vec<PathBuf> = (config.source_roots.iter())
+        .map(|r| root.join(r))
+        .filter(|p| p.is_dir())
+        .collect();
+    while let Some(dir) = dirs.pop() {
+        let io = |e: std::io::Error| SetupError {
+            path: dir.display().to_string(),
+            line: 0,
+            message: e.to_string(),
+        };
+        for entry in std::fs::read_dir(&dir).map_err(io)? {
+            let entry = entry.map_err(io)?;
+            let kind = entry.file_type().map_err(io)?;
+            if kind.is_dir() {
+                dirs.push(entry.path());
+            } else if kind.is_file() {
+                let relative = entry.path();
+                let relative = relative.strip_prefix(root).unwrap_or(&relative);
+                let parts: Vec<_> = relative
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy())
+                    .collect();
+                files.push(parts.join("/"));
+            }
+        }
+    }
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+/// The syntax to scan a file with, or `None` when the config does not trace its type.
+// @implements CT-DEV-002, CT-TRC-004
+pub fn syntax_for(config: &TraceConfig, path: &str) -> Option<Syntax> {
+    let syntax = Syntax::from_path(Path::new(path))?;
+    let allowed = match syntax {
+        Syntax::Rust => config.languages.iter().any(|l| l == "rust"),
+        Syntax::TypeScript => config.languages.iter().any(|l| l == "typescript"),
+        Syntax::Svelte => config.languages.iter().any(|l| l == "svelte"),
+        Syntax::HashComments => (config.file_level_allowed.iter()).any(|g| glob_matches(g, path)),
+    };
+    allowed.then_some(syntax)
+}
+
+/// Reads `trace.toml`, its `id_pattern`, and the known requirement IDs under `root`.
+// @implements CT-DEV-004, CT-DEV-005, CT-USE-007
+pub fn load_ids(root: &Path) -> Result<(TraceConfig, IdPattern, BTreeSet<String>), SetupError> {
+    let config = read_config(root)?;
     let pattern = IdPattern::parse(&config.id_pattern).map_err(|message| SetupError {
         path: TRACE_CONFIG.to_string(),
         line: 0,
@@ -352,61 +407,8 @@ impl Checker {
         Ok(())
     }
 
-    /// Every file under the source roots, as `/`-separated paths relative to the root.
-    fn source_files(&self) -> Result<Vec<String>, SetupError> {
-        let mut files = Vec::new();
-        let mut dirs: Vec<PathBuf> = self
-            .config
-            .source_roots
-            .iter()
-            .map(|r| self.root.join(r))
-            .filter(|p| p.is_dir())
-            .collect();
-        while let Some(dir) = dirs.pop() {
-            let io = |e: std::io::Error| SetupError {
-                path: dir.display().to_string(),
-                line: 0,
-                message: e.to_string(),
-            };
-            for entry in std::fs::read_dir(&dir).map_err(io)? {
-                let entry = entry.map_err(io)?;
-                let kind = entry.file_type().map_err(io)?;
-                if kind.is_dir() {
-                    dirs.push(entry.path());
-                } else if kind.is_file() {
-                    let relative = entry.path();
-                    let relative = relative.strip_prefix(&self.root).unwrap_or(&relative);
-                    let parts: Vec<_> = relative
-                        .components()
-                        .map(|c| c.as_os_str().to_string_lossy())
-                        .collect();
-                    files.push(parts.join("/"));
-                }
-            }
-        }
-        files.sort();
-        files.dedup();
-        Ok(files)
-    }
-
-    /// The syntax to scan a file with, or `None` when the file cannot be traced.
-    fn syntax_for(&self, path: &str) -> Option<Syntax> {
-        let syntax = Syntax::from_path(Path::new(path))?;
-        let allowed = match syntax {
-            Syntax::Rust => self.config.languages.iter().any(|l| l == "rust"),
-            Syntax::TypeScript => self.config.languages.iter().any(|l| l == "typescript"),
-            Syntax::Svelte => self.config.languages.iter().any(|l| l == "svelte"),
-            Syntax::HashComments => self
-                .config
-                .file_level_allowed
-                .iter()
-                .any(|g| glob_matches(g, path)),
-        };
-        allowed.then_some(syntax)
-    }
-
     fn check_sources(&mut self) -> Result<(), SetupError> {
-        let files = self.source_files()?;
+        let files = source_files(&self.root, &self.config)?;
         let mut used = vec![false; self.config.excludes.len()];
         for path in files {
             let excluded = self
@@ -419,7 +421,7 @@ impl Checker {
                 continue;
             }
             self.report.files += 1;
-            let Some(syntax) = self.syntax_for(&path) else {
+            let Some(syntax) = syntax_for(&self.config, &path) else {
                 self.push(
                     &path,
                     0,

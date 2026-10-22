@@ -8,6 +8,7 @@ use clew_core::commit;
 use clew_core::index::Index;
 use clew_core::json;
 use clew_core::notices::{self, Package};
+use clew_core::report::{self, Project};
 use clew_core::reqs::{self, Requirement};
 
 // @implements CT-DEV-001
@@ -50,6 +51,18 @@ enum Command {
         #[arg(long)]
         rebuild: bool,
     },
+    /// Report on the trace graph of the model and code under the current folder
+    Report {
+        #[command(subcommand)]
+        command: ReportCommand,
+    },
+    /// List every element and code scope reachable from one element through trace links,
+    /// upstream (what it traces to) and downstream (what traces to it). Exits 0 when clean,
+    /// 1 when the element is not found or files have problems, and 2 when it cannot run
+    Impact {
+        /// A requirement ID such as CT-TRC-005, or a qualified name such as Design::Engine
+        element: String,
+    },
     /// Check third-party licenses (npm tiers, recorded scopes), and with --out write the
     /// license notices file, the SBOM, and the source of each shipped MPL-2.0 crate.
     /// Runs `cargo metadata` and reads app/package-lock.json and app/node_modules.
@@ -73,6 +86,15 @@ enum ReqsCommand {
     },
 }
 
+// @implements CT-TRC-008, CT-TRC-004
+#[derive(Subcommand)]
+enum ReportCommand {
+    /// Requirements lacking a parent, an implementation, or a verification, and model
+    /// elements traced to no requirement. Exits 0 when clean, 1 when files have problems,
+    /// and 2 when the report cannot run
+    Coverage,
+}
+
 // @implements CT-TRC-008
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -81,8 +103,69 @@ fn main() -> ExitCode {
         Command::Check { self_check: _ } => run_check(),
         Command::CheckCommit { file } => run_check_commit(&file),
         Command::Index { rebuild } => run_index(rebuild),
+        Command::Report { command } => run_report(command),
+        Command::Impact { element } => run_impact(&element),
         Command::Notices { out } => run_notices(out.as_deref()),
     }
+}
+
+// @implements CT-TRC-008, CT-TRC-004, CT-TRC-005, CT-USE-007
+/// Reads the project under the current folder and prints its problems, or the exit code
+/// when it cannot be read.
+fn load_project() -> Result<Project, ExitCode> {
+    match report::load_project(Path::new(".")) {
+        Ok(project) => {
+            for problem in &project.problems {
+                println!("{problem}");
+            }
+            Ok(project)
+        }
+        Err(e) => {
+            eprintln!("clew: {e}");
+            Err(ExitCode::from(2))
+        }
+    }
+}
+
+// @implements CT-TRC-008, CT-TRC-004, CT-TRC-005
+fn problems_code(project: &Project) -> ExitCode {
+    if project.problems.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+// @implements CT-TRC-008, CT-TRC-004, CT-DEV-003
+fn run_report(command: ReportCommand) -> ExitCode {
+    let ReportCommand::Coverage = command;
+    let project = match load_project() {
+        Ok(project) => project,
+        Err(code) => return code,
+    };
+    let coverage = report::coverage(&project.model, &project.graph);
+    print!("{}", report::coverage_text(&project.model, &coverage));
+    problems_code(&project)
+}
+
+// @implements CT-TRC-008, CT-TRC-005, CT-USE-007
+fn run_impact(name: &str) -> ExitCode {
+    let project = match load_project() {
+        Ok(project) => project,
+        Err(code) => return code,
+    };
+    let Some(element) = report::find_element(&project, name) else {
+        eprintln!(
+            "clew: no element named {name}\n  help: give a requirement ID such as CT-TRC-005, \
+             or a qualified name such as Design::Engine"
+        );
+        return ExitCode::FAILURE;
+    };
+    print!(
+        "{}",
+        report::impact_text(&project.model, &project.graph, element)
+    );
+    problems_code(&project)
 }
 
 // @implements CT-TRC-008, CT-MOD-001, CT-EFF-007, CT-USE-007

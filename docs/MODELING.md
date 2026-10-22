@@ -1,6 +1,6 @@
-# Trace links in model files
+# Trace links and reports
 
-Implements CT-TRC-002, CT-MOD-002.
+Implements CT-TRC-002, CT-MOD-002, CT-TRC-004, and CT-TRC-005.
 
 Clewtrace reads SysML v2 text. Besides `satisfy` and `verify`, a model states three kinds of
 trace link with a marked dependency:
@@ -39,3 +39,28 @@ private import ModelingMetadata::*;
 The standard `RequirementDerivation` library also defines a metadata with the short name
 `derivation`, for derivation connections. Do not import both `RequirementDerivation::*` and
 `Clewtrace::*` into the same package, or `#derivation` is ambiguous in other tools.
+
+## Coverage and impact
+
+Run these from the project root, where `trace.toml` lives. Both read every `.sysml` file
+under the root and the tags in the code under the source roots in `trace.toml`.
+
+`clew report coverage` lists:
+
+- requirements without a parent: they neither derive from nor refine another requirement,
+  and are not nested in one;
+- requirements without an implementation: no code implements them and no element satisfies
+  them;
+- requirements without a verification: no test or element verifies them;
+- elements traced to no requirement: definitions and usages with no link, direct or through
+  other links, to a requirement. An element also counts as traced when an element that owns
+  it, or one it owns, is linked. Packages, metadata definitions, and the features of a
+  requirement are not listed.
+
+`clew impact <element>` takes a requirement ID such as `CT-TRC-005` or a qualified name
+such as `Design::Engine`. It lists every element and code scope reachable upstream (what the
+element traces to) and downstream (what traces to it), each with the link that reached it
+and how many links away it is.
+
+Both print any problems in the files first, such as syntax errors, and then exit 1. They
+exit 2 when they cannot run, for example when `trace.toml` is missing.
