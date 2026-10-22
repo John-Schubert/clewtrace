@@ -108,6 +108,15 @@ pub fn parse_requirements(text: &str, path: &str) -> Result<Vec<Requirement>, Re
     })
 }
 
+/// The requirements in parsed members, at any depth, in file order. Bad attribute values
+/// are skipped: the model reader and `clew check --self` report them.
+// @implements CT-DEV-003, CT-TRC-004
+pub fn requirements_in(members: &[Member]) -> Vec<Requirement> {
+    let mut found = Vec::new();
+    collect(members, &mut found, &mut Vec::new());
+    found.into_iter().map(|(req, _)| req).collect()
+}
+
 /// Collects requirement usages with a short name, at any depth, in file order.
 // @implements CT-DEV-001, CT-TRC-001
 fn collect(members: &[Member], found: &mut Vec<(Requirement, Pos)>, errors: &mut Vec<SyntaxError>) {
@@ -231,6 +240,22 @@ mod tests {
             (reqs[2].verification_method.clone(), reqs[2].phase),
             (None, None)
         );
+    }
+
+    // @verifies CT-DEV-003, CT-TRC-004
+    #[test]
+    fn requirements_in_skips_bad_values() {
+        let text = "requirement <'CT-EFF-001'> a : R {\n    attribute :>> phase = \"one\";\n}\n";
+        let parsed = parser::parse(text);
+        let found = requirements_in(&parsed.members);
+        assert_eq!(found.len(), 1);
+        assert_eq!((found[0].id.as_str(), found[0].phase), ("CT-EFF-001", None));
+        let parsed = parser::parse(FIXTURE);
+        let ids: Vec<String> = requirements_in(&parsed.members)
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(ids, ["CT-EFF-001", "CT-USE-002", "CT-DEV-001"]);
     }
 
     // @verifies CT-DEV-001, CT-TRC-001, CT-USE-007

@@ -50,8 +50,12 @@ under the root and the tags in the code under the source roots in `trace.toml`.
 - requirements without a parent: they neither derive from nor refine another requirement,
   are not nested in one, and are not top level (see below);
 - requirements without an implementation: no code implements them and no element satisfies
-  them;
-- requirements without a verification: no test or element verifies them;
+  them, and they have no waiver;
+- requirements without a verification: no test or element verifies them, and, for an
+  Inspection or Demonstration requirement, no checklist in `docs/verification/` cites it;
+- waived requirements: each requirement with a `[[waiver]]` in `trace.toml`, with its
+  status, approver, date, and reason. They are left out of the implementation and
+  verification lists above. The format is in [TRACEABILITY.md](TRACEABILITY.md#waivers);
 - elements traced to no requirement: definitions and usages with no link, direct or through
   other links, to a requirement. An element also counts as traced when an element that owns
   it, or one it owns, is linked. Packages, metadata definitions, and the features of a

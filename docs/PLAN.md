@@ -344,9 +344,25 @@ requirement is implemented and verified or formally waived.
       Follow-ups: `perf (4 GB, 2 CPUs)` is not a required check yet; CT-EFF-004 is measured on the core
       library only, since the app does not open projects until phase 2; peak memory is read
       only on Linux.
-- [ ] **1.9 Requirement coverage gate.** Turn on the phase-aware requirement coverage check
+- [x] **1.9 Requirement coverage gate.** Turn on the phase-aware requirement coverage check
       in CI and add waivers only with John's approval.
       Refs: CT-DEV-003, CT-DEV-004
+      Done in `crates/clew-core/src/check.rs` and `report.rs`. `clew check --self`, which CI
+      already runs, now fails on each requirement due in a started phase (or with no phase)
+      that has no implementation or no verification and no waiver, using the same coverage
+      as `clew report coverage`. Inspection and Demonstration requirements are verified by
+      `docs/verification/` checklists. `[[waiver]]` in `trace.toml` records the ID, reason,
+      status (`approved` or `proposed`), approver, and date; a proposed waiver is a warning,
+      and `clew report coverage` lists waived requirements in their own section. Each ADR
+      must cite a requirement (CT-DEV-010). New checklist `docs/verification/no-cert-claim.md`
+      (CT-CMP-008). Format in `docs/TRACEABILITY.md`.
+      Proposed waivers, not approved, each a warning until John decides: CT-EFF-001 and
+      CT-PLT-001 (verified only by the release workflow), CT-CMP-008 and CT-DEV-013 (document
+      and policy requirements that no code implements).
+      Follow-ups: ADR-0002 still says the coverage check is not on (needs John); `check
+      --self` reads the project twice, once for line tags and once for coverage; a phase
+      set only as a default on a requirement definition is not read, so such requirements
+      count as having no phase and are always due.
 - [ ] **Gate 1 check.** `clew check --self` shows 100% line coverage and no uncovered phase 0
       or phase 1 requirements. Set `current_phase = 2`.
 

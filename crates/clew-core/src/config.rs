@@ -237,6 +237,20 @@ pub struct Exclude {
     pub line: usize,
 }
 
+/// A `[[waiver]]` in `trace.toml`: why a due requirement may lack an implementation or a
+/// verification, who approved that, and when. `status` is `approved` or `proposed`; a
+/// proposed waiver has an empty `approved_by` until John approves it.
+// @implements CT-DEV-003, CT-DEV-004
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Waiver {
+    pub id: String,
+    pub reason: String,
+    pub status: String,
+    pub approved_by: String,
+    pub date: String,
+    pub line: usize,
+}
+
 /// The settings in `trace.toml` that `clew check --self` and `clew report` use.
 // @implements CT-DEV-002, CT-DEV-004, CT-TRC-004
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -254,9 +268,10 @@ pub struct TraceConfig {
     /// The line of `top_level_definitions`, or 0 if it is not set.
     pub top_level_line: usize,
     pub excludes: Vec<Exclude>,
+    pub waivers: Vec<Waiver>,
 }
 
-// @implements CT-DEV-002, CT-DEV-004, CT-USE-007, CT-TRC-004
+// @implements CT-DEV-002, CT-DEV-003, CT-DEV-004, CT-USE-007, CT-TRC-004
 impl TraceConfig {
     pub fn parse(text: &str) -> Result<TraceConfig, ConfigError> {
         let tables = parse_tables(text)?;
@@ -293,6 +308,17 @@ impl TraceConfig {
                 line: t.line,
             });
         }
+        let mut waivers = Vec::new();
+        for t in tables.iter().filter(|t| t.array && t.name == "waiver") {
+            waivers.push(Waiver {
+                id: t.string("id")?.to_string(),
+                reason: t.string("reason")?.to_string(),
+                status: t.string("status")?.to_string(),
+                approved_by: t.string("approved_by")?.to_string(),
+                date: t.string("date")?.to_string(),
+                line: t.line,
+            });
+        }
         Ok(TraceConfig {
             requirements: project.list("requirements")?.to_vec(),
             id_pattern: project.string("id_pattern")?.to_string(),
@@ -304,6 +330,7 @@ impl TraceConfig {
             top_level_definitions,
             top_level_line,
             excludes,
+            waivers,
         })
     }
 
@@ -403,6 +430,33 @@ name = \"two\"
         assert_eq!(
             err.message,
             "`top_level_definitions` must be an array of strings"
+        );
+    }
+
+    // @verifies CT-DEV-003, CT-DEV-004, CT-USE-007
+    #[test]
+    fn reads_waivers_and_names_missing_keys() {
+        let text = "[project]\nrequirements = []\nid_pattern = \"x\"\ncurrent_phase = 0\n\
+                    [coverage]\nsource_roots = []\nlanguages = []\nfile_level_allowed = []\n\
+                    max_scope_lines = 5\n[[waiver]]\nid = \"CT-DEV-003\"\nreason = \"Later\"\n\
+                    status = \"approved\"\napproved_by = \"John Schubert\"\ndate = \"2026-10-22\"\n";
+        let config = TraceConfig::parse(text).unwrap();
+        assert_eq!(
+            config.waivers,
+            [Waiver {
+                id: "CT-DEV-003".into(),
+                reason: "Later".into(),
+                status: "approved".into(),
+                approved_by: "John Schubert".into(),
+                date: "2026-10-22".into(),
+                line: 10,
+            }]
+        );
+        let err = TraceConfig::parse(&text.replace("date = \"2026-10-22\"\n", "")).unwrap_err();
+        assert_eq!(err.line, 10);
+        assert_eq!(
+            err.message,
+            "[[waiver]] has no `date`. Add `date = ...` to it"
         );
     }
 

@@ -44,9 +44,12 @@ reason = "App icons Tauri needs to build the window and installers. Binary asset
 requirement = "CT-PLT-001"
 
 # A waiver records why a due requirement has no implementation or verification yet.
+# Only John approves waivers. A proposed waiver has status = "proposed" and an empty
+# approved_by, and is a warning until John approves or drops it. Format: docs/TRACEABILITY.md
 # [[waiver]]
 # id = "CT-XXX-NNN"
-# reason = "..."
+# reason = "Why it cannot be met in this phase, and when it will be"
+# status = "approved"
 # approved_by = "John Schubert"
 # date = "2026-11-01"
 
