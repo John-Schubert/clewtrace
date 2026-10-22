@@ -368,8 +368,29 @@ requirement is implemented and verified or formally waived.
       such requirements count as having no phase and are always due; `clew impact` does not
       show document `@implements` links, since they are not in the trace graph; the
       Scanner impl in `scan.rs` is still over max_scope_lines (a warning before this task).
-- [ ] **Gate 1 check.** `clew check --self` shows 100% line coverage and no uncovered phase 0
+- [x] **Gate 1 check.** `clew check --self` shows 100% line coverage and no uncovered phase 0
       or phase 1 requirements. Set `current_phase = 2`.
+      Passed on 2026-10-22. At `current_phase = 1`, `clew check --self` reported 36 files
+      checked, 0 errors (so 0 untraced lines), 0 phase 1 coverage warnings, and 2 other
+      warnings (the oversized Scanner impl in `scan.rs` and the `app/src-tauri/gen/**`
+      exclude that matches no file in a clean checkout). `clew report coverage` listed 75
+      requirements, 75 with a parent, and 1 partly waived (the ARM64 part of CT-PLT-001); every
+      requirement it lists without an implementation or verification is from phase 2 or
+      later. Then `current_phase = 2`: 0 errors and 28 phase 2 coverage warnings. The
+      performance budgets due in phase 2 pass. Test coverage of clew-core and clew-cli
+      (cargo-llvm-cov 0.9.1, report only): 96.24% of lines.
+      John's decisions for Gate 1 (2026-10-22):
+      1. Phase rule: a coverage gap in a requirement from a finished phase, or with no phase,
+         is an error; a gap in a current-phase requirement is a warning; a Gate N check
+         needs zero such warnings before `current_phase` is raised. Performance budgets stay
+         enforced from the start of their phase.
+      2. "100% line coverage" means trace coverage, as `clew check --self` enforces. Test
+         coverage is measured by cargo-llvm-cov in the `coverage (report only)` CI job, and
+         is report-only until John sets a minimum, which then only goes up.
+      3. No laptop test at Gate 1, since it does not change the desktop app. ADR-0001 now
+         says the laptop check runs at each gate that changes the desktop app.
+      Follow-ups: the CT-PLT-001 ARM64 waiver says "until phase 2", which is now; ADR-0002
+      still says the gate fails on any requirement due in a started phase.
 
 ## Before the first business pilot
 

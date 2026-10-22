@@ -8,7 +8,7 @@ id_pattern = "CT-(EFF|USE|TRC|MOD|XCH|CMP|SEC|PLT|DEV)-[0-9]{3}"
 # no phase, is an error; a gap with phase == current_phase is a warning until the gate check
 # for that phase; later phases are not checked. Performance budgets are enforced for
 # phase <= current_phase.
-current_phase = 1
+current_phase = 2
 
 [coverage]
 source_roots = ["crates", "app/src", "app/src-tauri", "scripts", ".github/workflows"]
