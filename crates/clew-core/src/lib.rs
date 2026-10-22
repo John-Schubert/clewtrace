@@ -28,3 +28,6 @@ pub mod reqs;
 // @begin CT-DEV-002, CT-TRC-006
 pub mod scan;
 // @end
+// @begin CT-TRC-002, CT-TRC-006
+pub mod trace;
+// @end

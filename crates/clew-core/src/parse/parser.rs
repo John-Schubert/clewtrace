@@ -8,8 +8,8 @@
 use std::fmt;
 
 use super::ast::{
-    Comment, Definition, Direction, Import, ImportKind, Kind, Member, Package, Pos, QualifiedName,
-    Satisfy, Usage, UsageKind, Value, ValueKind, Verify, Visibility,
+    Comment, Definition, Dependency, DependencyKind, Direction, Import, ImportKind, Kind, Member,
+    Package, Pos, QualifiedName, Satisfy, Usage, UsageKind, Value, ValueKind, Verify, Visibility,
 };
 use super::lexer::{self, LexError, Token, TokenKind};
 
@@ -81,7 +81,13 @@ pub fn parse(src: &str) -> Parsed {
 
 // @implements CT-MOD-002, CT-USE-007
 const SUPPORTED: &str = "Clewtrace reads packages, imports, comments and doc, part, attribute, \
-port, and requirement definitions and usages, subject, satisfy, and verify";
+port, and requirement definitions and usages, subject, satisfy, verify, and \
+`#derivation`, `#refinement`, and `#evidence` dependencies";
+
+// @implements CT-TRC-002, CT-USE-007
+const DEPENDENCY_HELP: &str = "write `#derivation dependency a to b;` (a is derived from b), \
+`#refinement dependency a to b;` (a refines b), or `#evidence dependency a to b;` (a is evidence \
+for b)";
 
 // @implements CT-MOD-002, CT-USE-007
 /// Keywords that start a member. Recovery stops before them so one missing `;` does not
@@ -90,6 +96,7 @@ const MEMBER_START: &[&str] = &[
     "abstract",
     "attribute",
     "comment",
+    "dependency",
     "doc",
     "import",
     "in",
@@ -169,8 +176,10 @@ impl<'a> Parser<'a> {
         token.text(self.src)
     }
 
+    /// A member keyword, or the `#` of a dependency's metadata.
     fn is_member_start(&self, token: Token) -> bool {
-        token.kind == TokenKind::Keyword && MEMBER_START.contains(&self.text(token))
+        (token.kind == TokenKind::Keyword && MEMBER_START.contains(&self.text(token)))
+            || token.is("#", self.src)
     }
 
     /// How a token reads in a message.
@@ -472,12 +481,25 @@ impl Parser<'_> {
             );
         }
         let pos = pos(start);
+        if token.is("#", self.src) {
+            return self.dependency(pos, visibility);
+        }
         match word {
             "package" => Some(self.package(pos, visibility)),
             "import" => self.import(pos, visibility),
             "doc" | "comment" => self.comment(pos),
             "satisfy" => self.satisfy(pos),
             "verify" => self.verify(pos),
+            "dependency" => {
+                self.error(
+                    token,
+                    "a dependency needs `#derivation`, `#refinement`, or `#evidence` before it"
+                        .to_string(),
+                    DEPENDENCY_HELP,
+                );
+                self.skip_member();
+                None
+            }
             "subject" => {
                 Some(self.usage(pos, visibility, direction, is_abstract, UsageKind::Subject))
             }
@@ -812,6 +834,92 @@ impl Parser<'_> {
     }
 }
 
+// @implements CT-TRC-002, CT-USE-007
+/// Dependencies that carry trace links.
+impl Parser<'_> {
+    /// `#kind dependency [<'id'> name from] a, b to c, d` and a body, starting at `#`.
+    fn dependency(&mut self, pos: Pos, visibility: Option<Visibility>) -> Option<Member> {
+        self.bump();
+        let token = self.peek();
+        let Some(meta) = self.name() else {
+            let found = self.describe(token);
+            self.error(
+                token,
+                format!("expected a metadata name after `#`, found {found}"),
+                DEPENDENCY_HELP,
+            );
+            self.recover();
+            return None;
+        };
+        let kind = match meta.as_str() {
+            "derivation" => DependencyKind::Derivation,
+            "refinement" => DependencyKind::Refinement,
+            "evidence" => DependencyKind::Evidence,
+            _ => {
+                self.error(
+                    token,
+                    format!("`#{meta}` is not supported"),
+                    DEPENDENCY_HELP,
+                );
+                self.skip_member();
+                return None;
+            }
+        };
+        let keyword = self.peek();
+        if !keyword.is("dependency", self.src) {
+            let found = self.describe(keyword);
+            self.error(
+                keyword,
+                format!("expected `dependency` after `#{meta}`, found {found}"),
+                DEPENDENCY_HELP,
+            );
+            self.recover();
+            return None;
+        }
+        let mut after = self.bump();
+        let (mut short_name, mut name) = (None, None);
+        if self.is("<") || (self.at_name(0) && self.peek_at(1).is("from", self.src)) {
+            (short_name, name) = self.identification();
+        }
+        if self.is("from") {
+            after = self.bump();
+        }
+        let clients = self.name_list(after);
+        if clients.is_empty() {
+            self.recover();
+            return None;
+        }
+        if !self.is("to") {
+            let token = self.peek();
+            let found = self.describe(token);
+            self.error(
+                token,
+                format!("expected `to` after the dependency's sources, found {found}"),
+                DEPENDENCY_HELP,
+            );
+            self.recover();
+            return None;
+        }
+        let to = self.bump();
+        let suppliers = self.name_list(to);
+        if suppliers.is_empty() {
+            self.recover();
+            return None;
+        }
+        let members = self.body("the dependency");
+        Some(Member::Dependency(Dependency {
+            pos,
+            visibility,
+            kind,
+            short_name,
+            name,
+            clients,
+            suppliers,
+            members,
+        }))
+    }
+}
+
 // @implements CT-MOD-002, CT-USE-007
 fn pos(token: Token) -> Pos {
     Pos {
@@ -1127,13 +1235,122 @@ mod tests {
         assert!(members[1].members().len() == 1 && members[0].members().is_empty());
     }
 
+    // @verifies CT-TRC-002
+    #[test]
+    fn parses_derivation_refinement_and_evidence_dependencies() {
+        let src = "#derivation dependency child to parent;\n\
+                   #refinement dependency <'D1'> design from a, P::b to spec, other { doc /* why */ }\n\
+                   #evidence dependency from report to r1;";
+        let members = parse_ok(src);
+        let Member::Dependency(d1) = &members[0] else {
+            panic!("expected a dependency")
+        };
+        assert_eq!(d1.kind, DependencyKind::Derivation);
+        assert_eq!((d1.short_name.as_deref(), d1.name.as_deref()), (None, None));
+        assert_eq!(names(&d1.clients), ["child"]);
+        assert_eq!(names(&d1.suppliers), ["parent"]);
+        assert_eq!(members[0].pos(), Pos { line: 1, column: 1 });
+        let Member::Dependency(d2) = &members[1] else {
+            panic!("expected a dependency")
+        };
+        assert_eq!(d2.kind, DependencyKind::Refinement);
+        assert_eq!(d2.short_name.as_deref(), Some("D1"));
+        assert_eq!(d2.name.as_deref(), Some("design"));
+        assert_eq!(names(&d2.clients), ["a", "P::b"]);
+        assert_eq!(names(&d2.suppliers), ["spec", "other"]);
+        assert_eq!(members[1].members().len(), 1);
+        let Member::Dependency(d3) = &members[2] else {
+            panic!("expected a dependency")
+        };
+        assert_eq!(d3.kind, DependencyKind::Evidence);
+        assert_eq!(names(&d3.clients), ["report"]);
+        assert_eq!(d3.name, None);
+    }
+
+    // @verifies CT-TRC-002, CT-USE-007
+    #[test]
+    fn reports_dependencies_without_a_supported_kind_or_ends() {
+        assert_eq!(
+            errors("dependency a to b;\npart ok;"),
+            [(
+                1,
+                1,
+                "a dependency needs `#derivation`, `#refinement`, or `#evidence` before it"
+                    .to_string()
+            )]
+        );
+        assert_eq!(
+            errors("#trace dependency a to b;"),
+            [(1, 2, "`#trace` is not supported".to_string())]
+        );
+        assert_eq!(
+            errors("#refinement part a;"),
+            [(
+                1,
+                13,
+                "expected `dependency` after `#refinement`, found `part`".to_string()
+            )]
+        );
+        assert_eq!(
+            errors("# dependency a to b;"),
+            [(
+                1,
+                3,
+                "expected a metadata name after `#`, found `dependency`".to_string()
+            )]
+        );
+        assert_eq!(
+            errors("#evidence dependency a b;"),
+            [(
+                1,
+                24,
+                "expected `to` after the dependency's sources, found `b`".to_string()
+            )]
+        );
+        assert_eq!(
+            errors("#evidence dependency a to;"),
+            [(1, 26, "expected a name after `to`, found `;`".to_string())]
+        );
+        assert_eq!(
+            errors("#evidence dependency to b;"),
+            [(
+                1,
+                22,
+                "expected a name after `dependency`, found `to`".to_string()
+            )]
+        );
+        assert_eq!(
+            errors("#evidence dependency d from to b;"),
+            [(
+                1,
+                29,
+                "expected a name after `from`, found `to`".to_string()
+            )]
+        );
+        assert_eq!(
+            errors("#evidence dependency a to b\npart c;"),
+            [(
+                2,
+                1,
+                "expected `;` or `{` after the dependency, found `part`".to_string()
+            )]
+        );
+        let parsed = parse("#trace dependency a to b;\npart ok;");
+        assert_eq!(parsed.members.len(), 1);
+        // A missing `;` before a dependency does not hide it.
+        let parsed = parse("part a\n#evidence dependency x to y;");
+        assert_eq!(parsed.errors.len(), 1);
+        assert!(matches!(parsed.members[1], Member::Dependency(_)));
+    }
+
     // @verifies CT-MOD-002
     #[test]
     fn member_accessors_cover_every_kind() {
-        let src = "package P; import A; doc /* d */ part def D; part u; satisfy r; verify r;";
+        let src = "package P; import A; doc /* d */ part def D; part u; satisfy r; verify r; \
+                   #evidence dependency a to b;";
         let members = parse_ok(src);
         let columns: Vec<u32> = members.iter().map(|m| m.pos().column).collect();
-        assert_eq!(columns, [1, 12, 22, 34, 46, 54, 65]);
+        assert_eq!(columns, [1, 12, 22, 34, 46, 54, 65, 75]);
         assert!(members.iter().all(|m| m.members().is_empty()));
     }
 
