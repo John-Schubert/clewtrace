@@ -49,3 +49,18 @@ requirement = "CT-PLT-001"
 # reason = "..."
 # approved_by = "John Schubert"
 # date = "2026-11-01"
+
+# Proposed by Claude Code in task 1.9, not approved. John approves or drops each one.
+[[waiver]]
+id = "CT-EFF-001"
+reason = "Verified by the release workflow, not by a test the gate can read: its Installer size step fails if any installer is over 20,000,000 bytes, and it passed for v0.1.0. Installers take too long to build in cargo test. Waived until John decides how a release workflow check counts as verification."
+status = "proposed"
+approved_by = ""
+date = "2026-10-22"
+
+[[waiver]]
+id = "CT-PLT-001"
+reason = "Verified by the release workflow, not by a test the gate can read: its build job fails if an MSI, DMG, deb, or rpm is missing, and it passed for v0.1.0. ARM64 installers are not built yet. Waived until John decides how a release workflow check counts as verification."
+status = "proposed"
+approved_by = ""
+date = "2026-10-22"
