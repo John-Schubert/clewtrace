@@ -2,9 +2,10 @@
 
 - Status: Accepted
 - Date: 2026-10-20
-- Updated: 2026-10-21 (task 0.10, reviewed against what was built in phase 0)
+- Updated: 2026-10-21 (task 0.10, reviewed against what was built in phase 0);
+  2026-10-22 (task 1.8, performance gate)
 - Serves: CT-EFF-001, CT-EFF-002, CT-EFF-004, CT-EFF-008, CT-PLT-001, CT-PLT-005, CT-MOD-001,
-  CT-TRC-008, CT-USE-004, CT-SEC-001, CT-SEC-006, CT-DEV-012, CT-DEV-014
+  CT-TRC-008, CT-USE-004, CT-SEC-001, CT-SEC-006, CT-DEV-012, CT-DEV-014, CT-EFF-009
 
 ## Context
 
@@ -58,6 +59,20 @@ The Rust toolchain is pinned in `rust-toolchain.toml`.
   (`docs/PLAN.md`). Until then installers are unsigned and Windows SmartScreen and macOS
   Gatekeeper will warn.
 - ARM64 installers for Windows and Linux are not built yet.
+
+## Performance gate (John, 2026-10-22, task 1.8)
+
+- The `perf (4 GB, 2 CPUs)` CI job runs the performance tests under
+  `sudo systemd-run --scope -p MemoryMax=4G -p MemorySwapMax=0 -p AllowedCPUs=0-1`, not in a
+  container. Containers set their limits through the same kernel control groups, so the
+  limits are the same, and there is no container image to pin, download, or audit.
+- It runs as root under the system manager, because a user manager may lack the memory
+  and cpuset controllers and ignore the limits without an error. `AllowedCPUs` pins the
+  tests to 2 cores, so they also see 2 cores; `CPUQuota` would only cap CPU time.
+- The job reads the limits back from its cgroup, then runs a canary that writes 5 GiB and
+  must be killed. It fails if either check does not hold.
+- This covers the core and CLI budgets on Linux. The desktop app on a 4 GB Windows machine
+  is still checked on John's laptop at each gate.
 
 ## Development environment
 
