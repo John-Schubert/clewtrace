@@ -155,6 +155,23 @@ release installers.
   error. The document still needs a checklist or another verification. Documents with an
   `@implements` tag are hashed into report inputs, like checklists.
 
+## Test coverage
+
+"100% line coverage" in a gate means trace coverage: every non-blank, non-comment line of
+first-party code lies in a scope tagged with a requirement, as `clew check --self` enforces
+(John, 2026-10-22). Test coverage, the share of lines the tests run, is measured
+separately.
+
+- The `coverage (report only)` CI job runs cargo-llvm-cov on the clew-core and clew-cli
+  tests (not the desktop app crate). It prints the total line coverage and writes it, with
+  a per-file table, to the job summary.
+- The number is report-only until John sets a minimum: the job never fails on it. Once John
+  sets a minimum, it only goes up, never down.
+- Still give every new error path and branch a test in the task that adds it.
+- To measure it locally: `cargo install cargo-llvm-cov --locked --version 0.9.1`,
+  `rustup component add llvm-tools-preview`, then
+  `cargo llvm-cov -p clew-core -p clew-cli --summary-only`.
+
 ## Waivers
 
 A waiver records why a due requirement may lack an implementation or a verification. Only

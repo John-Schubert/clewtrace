@@ -1,7 +1,8 @@
 # @file CT-DEV-003, CT-DEV-004, CT-DEV-005, CT-DEV-008, CT-DEV-014, CT-PLT-001, CT-EFF-009
 # CI gate on Ubuntu, Windows, and macOS: builds the desktop app (UI and Tauri crate), then
 # format, lint, tests, the trace gate, the license notices check, the commit hook, and (on
-# Ubuntu) commit trailers, cargo-deny, and the performance budgets on 4 GB and 2 CPUs.
+# Ubuntu) commit trailers, cargo-deny, the performance budgets on 4 GB and 2 CPUs, and a
+# report-only test coverage summary.
 # The trace gate fails on untraced lines, unknown IDs, and requirements from a finished
 # phase with no implementation, verification, or waiver (current-phase gaps are warnings).
 # Installers are built by the release workflow. Rules: docs/TRACEABILITY.md.
@@ -225,3 +226,58 @@ jobs:
             exit 1
           fi
           echo "the 5 GiB canary was killed: the 4 GB limit is enforced"
+
+  # Test coverage of clew-core and clew-cli, measured by cargo-llvm-cov. Report only: the
+  # job prints the total line coverage and writes it with a per-file table to the job
+  # summary, and never fails on the number (docs/TRACEABILITY.md). It fails only when the
+  # tests or the tool fail. Not a required check.
+  coverage:
+    name: coverage (report only)
+    runs-on: ubuntu-latest
+    env:
+      LLVM_COV_VERSION: 0.9.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      # The cargo registry, target/, and the cargo-llvm-cov binary. Instrumented builds go
+      # to target/llvm-cov-target, apart from the other jobs' builds.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.cargo/bin/cargo-llvm-cov
+            target
+          key: cargo-cov-${{ runner.os }}-${{ env.LLVM_COV_VERSION }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-cov-${{ runner.os }}-${{ env.LLVM_COV_VERSION }}-
+
+      # The exact version from crates.io with its own Cargo.lock, unless the cache has it.
+      - name: Install cargo-llvm-cov
+        run: |
+          rustup component add llvm-tools-preview
+          if ! cargo llvm-cov --version 2>/dev/null | grep -qx "cargo-llvm-cov $LLVM_COV_VERSION"; then
+            cargo install cargo-llvm-cov --locked --version "$LLVM_COV_VERSION" --force
+          fi
+          cargo llvm-cov --version
+
+      # bash with pipefail, so a failed test run still fails the step through tee.
+      - name: Test coverage
+        shell: bash
+        run: |
+          cargo llvm-cov --locked -p clew-core -p clew-cli --summary-only \
+            | tee "$RUNNER_TEMP/coverage.txt"
+          lines=$(awk '$1 == "TOTAL" { print $10 }' "$RUNNER_TEMP/coverage.txt")
+          echo "Total line coverage (clew-core and clew-cli): ${lines:-unknown}"
+          {
+            echo "## Test coverage (report only)"
+            echo
+            echo "Total line coverage of clew-core and clew-cli: **${lines:-unknown}**."
+            echo "Measured by cargo-llvm-cov $LLVM_COV_VERSION. No minimum is set yet."
+            echo
+            echo '```'
+            grep -E '^(Filename|-{10}|clew-|TOTAL)' "$RUNNER_TEMP/coverage.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
