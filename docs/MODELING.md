@@ -56,7 +56,9 @@ under the root and the tags in the code under the source roots in `trace.toml`.
   Inspection or Demonstration requirement, no checklist in `docs/verification/` cites it;
 - waived requirements: each requirement with a `[[waiver]]` in `trace.toml`, with its
   status, approver, date, and reason. They are left out of the implementation and
-  verification lists above. The format is in [TRACEABILITY.md](TRACEABILITY.md#waivers);
+  verification lists above, except a waiver with a `part`, which is listed as partly waived
+  with the part named and excuses no gap. The format is in
+  [TRACEABILITY.md](TRACEABILITY.md#waivers);
 - elements traced to no requirement: definitions and usages with no link, direct or through
   other links, to a requirement. An element also counts as traced when an element that owns
   it, or one it owns, is linked. Packages, metadata definitions, and the features of a

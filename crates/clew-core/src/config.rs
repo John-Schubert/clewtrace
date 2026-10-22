@@ -239,7 +239,9 @@ pub struct Exclude {
 
 /// A `[[waiver]]` in `trace.toml`: why a due requirement may lack an implementation or a
 /// verification, who approved that, and when. `status` is `approved` or `proposed`; a
-/// proposed waiver has an empty `approved_by` until John approves it.
+/// proposed waiver has an empty `approved_by` until John approves it. A waiver with a `part`
+/// covers only that part of the requirement, and never excuses a missing implementation or
+/// verification.
 // @implements CT-DEV-003, CT-DEV-004
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Waiver {
@@ -248,6 +250,7 @@ pub struct Waiver {
     pub status: String,
     pub approved_by: String,
     pub date: String,
+    pub part: Option<String>,
     pub line: usize,
 }
 
@@ -316,6 +319,10 @@ impl TraceConfig {
                 status: t.string("status")?.to_string(),
                 approved_by: t.string("approved_by")?.to_string(),
                 date: t.string("date")?.to_string(),
+                part: match t.get("part") {
+                    Some(_) => Some(t.string("part")?.to_string()),
+                    None => None,
+                },
                 line: t.line,
             });
         }
@@ -449,9 +456,14 @@ name = \"two\"
                 status: "approved".into(),
                 approved_by: "John Schubert".into(),
                 date: "2026-10-22".into(),
+                part: None,
                 line: 10,
             }]
         );
+        let part = TraceConfig::parse(&format!("{text}part = \"ARM64\"\n")).unwrap();
+        assert_eq!(part.waivers[0].part.as_deref(), Some("ARM64"));
+        let err = TraceConfig::parse(&format!("{text}part = 1\n")).unwrap_err();
+        assert_eq!(err.line, 16);
         let err = TraceConfig::parse(&text.replace("date = \"2026-10-22\"\n", "")).unwrap_err();
         assert_eq!(err.line, 10);
         assert_eq!(

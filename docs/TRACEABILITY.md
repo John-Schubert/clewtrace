@@ -169,6 +169,13 @@ date = "2026-10-22"
   approver, date, and reason, and leaves them out of the implementation and verification
   gaps. The summary line counts them as waived, not as implemented or verified.
 - A waiver for a requirement that is implemented and verified is a warning: remove it.
+- `part` is optional. It names the part of the requirement the waiver covers, such as
+  `part = "ARM64 installers"`, and must not be empty. A waiver with a `part` never excuses a
+  missing implementation or verification: the rest of the requirement must still be
+  implemented and verified. It is not reported as not needed. `clew report coverage` lists
+  it under "Waived requirements" as partly waived, with the part named, keeps the
+  requirement in the gap lists if it has a gap, and counts it as partly waived in the
+  summary line.
 
 ## Commits
 
@@ -197,9 +204,9 @@ line. Lines starting with `#` are comments and are ignored, as in git.
 | Workflow `@verifies` on a step that sets, or whose job sets, `continue-on-error` | Error |
 | ADR in `docs/adr/` that cites no requirement | Error |
 | Requirement due in a started phase with no implementation or no verification, and no waiver | Error |
-| `[[waiver]]` with an empty reason, a bad date or status, a missing approver, an approver on a proposed waiver, or a second waiver for one requirement | Error |
+| `[[waiver]]` with an empty reason or part, a bad date or status, a missing approver, an approver on a proposed waiver, or a second waiver for one requirement | Error |
 | Proposed `[[waiver]]`, not yet approved | Warning |
-| `[[waiver]]` for a requirement that is implemented and verified | Warning |
+| `[[waiver]]` with no `part` for a requirement that is implemented and verified | Warning |
 | Commit without a `Refs:` trailer | Error |
 | File under a source root whose type cannot be traced, and no `[[exclude]]` | Error |
 | `[[exclude]]` with an empty reason or an unknown requirement | Error |
