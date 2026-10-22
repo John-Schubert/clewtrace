@@ -64,6 +64,8 @@ in `model/requirements.sysml` are the authority once code exists.
 ## Commands
 
 - Build and test core: `cargo build`, `cargo test`
+- Perf tests (10,000 requirements, 50,000 links):
+  `cargo test --release -p clew-core --test perf -- --ignored --nocapture`
 - Trace gate: `cargo run -p clew-cli -- check --self` (alias `clew check --self` once installed)
 - Commit message check: `cargo run -p clew-cli -- check-commit .git/COMMIT_EDITMSG`
 - App dev: `cd app && npm install && npm run tauri dev`
