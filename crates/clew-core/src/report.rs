@@ -7,8 +7,10 @@
 //! through trace links, upstream and downstream.
 //!
 //! An Inspection or Demonstration requirement also counts as verified when a checklist in
-//! `docs/verification/` cites it in an `@verifies` tag in its first comment, and a
-//! requirement with a `[[waiver]]` in `trace.toml` is listed apart from the gaps.
+//! `docs/verification/` cites it in an `@verifies` tag in its first comment, and counts as
+//! implemented when a Markdown document at the root or elsewhere under `docs/` cites it in an
+//! `@implements` tag in its first comment. A requirement with a `[[waiver]]` in `trace.toml`
+//! is listed apart from the gaps.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -21,7 +23,7 @@ use crate::parse::ast::{Kind, Member, UsageKind};
 use crate::parse::parser;
 use crate::reproduce;
 use crate::reqs::{self, Requirement};
-use crate::scan::{self, FileScan};
+use crate::scan::{self, FileScan, TagKind};
 use crate::trace::{End, LinkKind, Toward, TraceGraph};
 
 // @implements CT-DEV-003, CT-TRC-004
@@ -29,7 +31,13 @@ use crate::trace::{End, LinkKind, Toward, TraceGraph};
 pub const VERIFICATION_DIR: &str = "docs/verification";
 
 // @implements CT-DEV-003, CT-TRC-004
-/// The verification methods a checklist in `VERIFICATION_DIR` may verify.
+/// The folder of documents that may implement a requirement, besides the Markdown files at
+/// the project root. `VERIFICATION_DIR` inside it holds checklists instead.
+pub const DOCS_DIR: &str = "docs";
+
+// @implements CT-DEV-003, CT-TRC-004
+/// The verification methods a checklist in `VERIFICATION_DIR` may verify, and the only ones a
+/// document may implement.
 pub const CHECKLIST_METHODS: [&str; 2] = ["Inspection", "Demonstration"];
 
 // @implements CT-DEV-003, CT-TRC-004
@@ -37,6 +45,16 @@ pub const CHECKLIST_METHODS: [&str; 2] = ["Inspection", "Demonstration"];
 /// first comment, which is on `line`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Checklist {
+    pub path: String,
+    pub line: usize,
+    pub ids: Vec<String>,
+}
+
+// @implements CT-DEV-003, CT-TRC-004
+/// A Markdown document at the project root or under `DOCS_DIR`, outside `VERIFICATION_DIR`,
+/// and the requirement IDs in the `@implements` tag in its first comment, which is on `line`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Document {
     pub path: String,
     pub line: usize,
     pub ids: Vec<String>,
@@ -60,13 +78,16 @@ pub struct Project {
     pub requirements: Vec<Requirement>,
     /// The checklists in `VERIFICATION_DIR` that carry an `@verifies` tag.
     pub checklists: Vec<Checklist>,
+    /// The Markdown documents that carry an `@implements` tag.
+    pub documents: Vec<Document>,
     /// The `[[waiver]]` entries in `trace.toml`.
     pub waivers: Vec<Waiver>,
 }
 
 // @implements CT-TRC-004, CT-TRC-005, CT-USE-007, CT-TRC-009, CT-DEV-003
 /// Reads the project under `root`: its `trace.toml`, every `.sysml` file, the tags in
-/// the code under the source roots, and the checklists in `VERIFICATION_DIR`. Code files
+/// the code under the source roots, the checklists in `VERIFICATION_DIR`, and the Markdown
+/// documents at the root and under `DOCS_DIR`. Code files
 /// that `clew check --self` would report as excluded, untraceable, or unreadable add no
 /// links.
 pub fn load_project(root: &Path) -> Result<Project, SetupError> {
@@ -117,6 +138,7 @@ pub fn load_project(root: &Path) -> Result<Project, SetupError> {
     let graph = TraceGraph::build(&model, &code);
     problems.extend(graph.problems.iter().map(ToString::to_string));
     let checklists = read_checklists(root, &mut problems, &mut hashed);
+    let documents = read_documents(root, &mut problems, &mut hashed);
     Ok(Project {
         model,
         graph,
@@ -125,6 +147,7 @@ pub fn load_project(root: &Path) -> Result<Project, SetupError> {
         top_level,
         requirements,
         checklists,
+        documents,
         waivers: config.waivers,
     })
 }
@@ -152,7 +175,7 @@ fn read_checklists(
         match index::read_file(&root.join(&path)) {
             Ok(loaded) => {
                 hashed.push((path.clone(), reproduce::text_sha256(&loaded.text)));
-                if let Some((line, ids)) = checklist_verifies(&loaded.text) {
+                if let Some((line, ids)) = first_comment_tag(&loaded.text, TagKind::Verifies) {
                     found.push(Checklist { path, line, ids });
                 }
             }
@@ -162,17 +185,69 @@ fn read_checklists(
     found
 }
 
+// @implements CT-DEV-003, CT-TRC-004, CT-TRC-009, CT-USE-007
+/// Reads the Markdown files at the root and, at any depth, under `DOCS_DIR`, except those in
+/// `VERIFICATION_DIR`, in path order. Each one with an `@implements` tag in its first comment
+/// is a document, and is added to `hashed`. Each unreadable one is added to `problems`.
+fn read_documents(
+    root: &Path,
+    problems: &mut Vec<String>,
+    hashed: &mut Vec<(String, Vec<u8>)>,
+) -> Vec<Document> {
+    let mut paths = Vec::new();
+    markdown_files(root, "", &mut paths);
+    markdown_files(root, DOCS_DIR, &mut paths);
+    paths.sort();
+    let mut found = Vec::new();
+    for path in paths {
+        match index::read_file(&root.join(&path)) {
+            Ok(loaded) => {
+                if let Some((line, ids)) = first_comment_tag(&loaded.text, TagKind::Implements) {
+                    hashed.push((path.clone(), reproduce::text_sha256(&loaded.text)));
+                    found.push(Document { path, line, ids });
+                }
+            }
+            Err(message) => problems.push(index::unreadable(&path, &message)),
+        }
+    }
+    found
+}
+
 // @implements CT-DEV-003, CT-TRC-004
-/// The line and IDs of the `@verifies` tag in a checklist's first comment, which must be an
-/// HTML comment (`<!-- ... -->`) at the top of the file. `None` when there is none.
-pub fn checklist_verifies(text: &str) -> Option<(usize, Vec<String>)> {
+/// Adds the `.md` files in `dir`, relative to `root`, to `found`. Below the root it also
+/// walks the folders inside `dir`, except `VERIFICATION_DIR`. A missing folder adds nothing.
+fn markdown_files(root: &Path, dir: &str, found: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(root.join(dir)) else {
+        return;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let path = match dir {
+            "" => name.clone(),
+            dir => format!("{dir}/{name}"),
+        };
+        let kind = entry.file_type().ok();
+        if kind.is_some_and(|k| k.is_file()) && name.ends_with(".md") {
+            found.push(path);
+        } else if kind.is_some_and(|k| k.is_dir()) && !dir.is_empty() && path != VERIFICATION_DIR {
+            markdown_files(root, &path, found);
+        }
+    }
+}
+
+// @implements CT-DEV-003, CT-TRC-004
+/// The line and IDs of the `kind` tag (`@verifies` in a checklist, `@implements` in a
+/// document) in a Markdown file's first comment, which must be an HTML comment
+/// (`<!-- ... -->`) at the top of the file. `None` when there is none.
+pub fn first_comment_tag(text: &str, kind: TagKind) -> Option<(usize, Vec<String>)> {
+    let keyword = kind.keyword();
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let start = text.len() - text.trim_start().len();
     let comment = text[start..].strip_prefix("<!--")?;
     let comment = &comment[..comment.find("-->")?];
-    let at = comment.find("@verifies")?;
+    let at = comment.find(keyword)?;
     let line = 1 + text[..start + 4 + at].matches('\n').count();
-    let ids: Vec<String> = comment[at + "@verifies".len()..]
+    let ids: Vec<String> = comment[at + keyword.len()..]
         .split(|c: char| c == ',' || c.is_whitespace())
         .filter(|id| !id.is_empty())
         .map(str::to_string)
@@ -330,8 +405,9 @@ pub fn coverage(model: &Model, graph: &TraceGraph, top_level: &[ElementId]) -> C
 
 // @implements CT-DEV-003, CT-TRC-004
 /// The coverage of a whole project: `coverage`, plus the requirements verified by a
-/// checklist and the waivers in `trace.toml`. A checklist verifies only requirements whose
-/// verification method is in `CHECKLIST_METHODS`.
+/// checklist or implemented by a document, and the waivers in `trace.toml`. A checklist
+/// verifies, and a document implements, only requirements whose verification method is in
+/// `CHECKLIST_METHODS`. `clew check --self` reports a document that cites any other.
 pub fn project_coverage(project: &Project) -> Coverage {
     let mut found = coverage(&project.model, &project.graph, &project.top_level);
     for row in &mut found.requirements {
@@ -341,9 +417,12 @@ pub fn project_coverage(project: &Project) -> Coverage {
         let method = (project.requirements.iter())
             .find(|r| &r.id == id)
             .and_then(|r| r.verification_method.as_deref());
-        let checklisted = (project.checklists.iter()).any(|c| c.ids.contains(id));
-        if checklisted && method.is_some_and(|m| CHECKLIST_METHODS.contains(&m)) {
+        let allowed = method.is_some_and(|m| CHECKLIST_METHODS.contains(&m));
+        if allowed && (project.checklists.iter()).any(|c| c.ids.contains(id)) {
             row.verified = true;
+        }
+        if allowed && (project.documents.iter()).any(|d| d.ids.contains(id)) {
+            row.implemented = true;
         }
         row.waiver = project.waivers.iter().find(|w| &w.id == id).cloned();
     }
@@ -612,11 +691,90 @@ clew report coverage: 4 requirements, 2 with a parent, 2 implemented, 2 verified
             ("<!-- @verifies CT-DEV-010\n", None, ""),
         ];
         for (text, line, ids) in cases {
-            let found = checklist_verifies(text);
+            let found = first_comment_tag(text, TagKind::Verifies);
             assert_eq!(found.as_ref().map(|f| f.0), line, "{text:?}");
             let got = found.map(|f| f.1.join(" ")).unwrap_or_default();
             assert_eq!(got, ids, "{text:?}");
         }
+    }
+
+    // @verifies CT-DEV-003, CT-TRC-004
+    #[test]
+    fn reads_the_implements_tag_in_a_documents_first_comment() {
+        let found = first_comment_tag(
+            "<!--\n  @implements CT-CMP-008\n-->\n# L\n",
+            TagKind::Implements,
+        );
+        assert_eq!(found, Some((2, vec!["CT-CMP-008".to_string()])));
+        assert_eq!(
+            first_comment_tag("<!-- @verifies CT-CMP-008 -->\n", TagKind::Implements),
+            None
+        );
+    }
+
+    // @verifies CT-DEV-003, CT-TRC-004, CT-TRC-009
+    #[test]
+    fn documents_implement_inspections_and_demonstrations_only() {
+        let checked = "package Checked {
+    private import ScalarValues::*;
+    requirement def R { attribute verificationMethod : String; }
+    requirement <'CT-DEV-009'> inspected : R { attribute :>> verificationMethod = \"Inspection\"; }
+    requirement <'CT-DEV-010'> shown : R { attribute :>> verificationMethod = \"Demonstration\"; }
+    requirement <'CT-DEV-011'> tested : R { attribute :>> verificationMethod = \"Test\"; }
+}
+";
+        let files: &[(&str, &[u8])] = &[
+            ("model/checked.sysml", checked.as_bytes()),
+            ("README.md", b"<!-- @implements CT-DEV-009 -->\n# Readme\n"),
+            ("NOTES.txt", b"<!-- @implements CT-DEV-011 -->\n"),
+            ("model/x.md", b"<!-- @implements CT-DEV-011 -->\n"),
+            ("docs/a.md", b"# Plain\n"),
+            (
+                "docs/adr/b.md",
+                b"\n<!-- @implements CT-DEV-010, CT-DEV-011 -->\n",
+            ),
+            ("docs/bad.md", b"<!-- @implements CT-DEV-011 \xe9 -->\n"),
+            (
+                "docs/verification/c.md",
+                b"<!-- @implements CT-DEV-011 -->\n",
+            ),
+        ];
+        let root = project("documents", files);
+        let project = load_project(&root).unwrap();
+        assert_eq!(
+            project.problems,
+            [
+                "docs/bad.md: error: the file is not UTF-8 text\n  help: save the file as UTF-8 \
+                 text and make sure it is readable"
+            ]
+        );
+        let documents: Vec<(&str, usize, String)> = (project.documents.iter())
+            .map(|d| (d.path.as_str(), d.line, d.ids.join(" ")))
+            .collect();
+        assert_eq!(
+            documents,
+            [
+                ("README.md", 1, "CT-DEV-009".to_string()),
+                ("docs/adr/b.md", 2, "CT-DEV-010 CT-DEV-011".to_string()),
+            ]
+        );
+        let hashed: Vec<&str> = (project.inputs.iter())
+            .map(|(p, _)| p.as_str())
+            .filter(|p| p.ends_with(".md") && !p.starts_with(VERIFICATION_DIR))
+            .collect();
+        assert_eq!(hashed, ["README.md", "docs/adr/b.md"]);
+        let found = project_coverage(&project);
+        let rows: Vec<(String, bool)> = (found.requirements.iter().take(3))
+            .map(|r| (project.model.qualified_name(r.requirement), r.implemented))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("Checked::inspected".to_string(), true),
+                ("Checked::shown".to_string(), true),
+                ("Checked::tested".to_string(), false),
+            ]
+        );
     }
 
     // @verifies CT-DEV-003, CT-TRC-004

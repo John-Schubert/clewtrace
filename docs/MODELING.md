@@ -49,8 +49,9 @@ under the root and the tags in the code under the source roots in `trace.toml`.
 
 - requirements without a parent: they neither derive from nor refine another requirement,
   are not nested in one, and are not top level (see below);
-- requirements without an implementation: no code implements them and no element satisfies
-  them, and they have no waiver;
+- requirements without an implementation: no code implements them, no element satisfies
+  them, and, for an Inspection or Demonstration requirement, no Markdown document cites it in
+  an `@implements` tag, and they have no waiver;
 - requirements without a verification: no test or element verifies them, and, for an
   Inspection or Demonstration requirement, no checklist in `docs/verification/` cites it;
 - waived requirements: each requirement with a `[[waiver]]` in `trace.toml`, with its

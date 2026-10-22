@@ -91,10 +91,10 @@ name: ci
 
 - Each requirement whose `phase` is less than or equal to `current_phase` in `trace.toml` needs
   an implementation and a verification, or a `[[waiver]]` in `trace.toml` (see below). A
-  requirement with no `phase` is always due. An implementation is an `@implements` scope or
-  a model element that satisfies it; a verification is an `@verifies` test, a model element
-  that verifies it, or a checklist (next bullet). `clew check --self` uses the same coverage
-  as `clew report coverage`.
+  requirement with no `phase` is always due. An implementation is an `@implements` scope, a
+  model element that satisfies it, or a document (below). A verification is an `@verifies`
+  test, a model element that verifies it, a checklist, or a workflow step (below).
+  `clew check --self` uses the same coverage as `clew report coverage`.
 - Each requirement needs a parent: it derives from or refines another requirement, or is
   nested in one. Requirements typed by a requirement definition listed in
   `top_level_definitions` under `[coverage]` in `trace.toml`, or by one that specializes it,
@@ -105,6 +105,15 @@ name: ci
   The first comment must be an HTML comment at the top of the `.md` file, such as
   `<!-- @verifies CT-DEV-009, CT-DEV-013 -->`. A checklist that cites a requirement with
   another verification method, such as Test, does not count as its verification.
+- Requirements with verification method Inspection or Demonstration may be implemented by a
+  Markdown document that carries an `@implements` tag in its first comment, in the same form
+  as a checklist: `<!-- @implements CT-CMP-008 -->`. Use it for a rule that a document
+  carries out, such as a disclaimer or a project policy, not for behavior. Documents are the
+  `.md` files at the repository root and, at any depth, under `docs/`, except
+  `docs/verification/`, which holds checklists. A document that cites an unknown ID, or a
+  requirement whose verification method is anything else (Test, Analysis, or not set), is an
+  error. The document still needs a checklist or another verification. Documents with an
+  `@implements` tag are hashed into report inputs, like checklists.
 
 ## Waivers
 
@@ -154,7 +163,8 @@ line. Lines starting with `#` are comments and are ignored, as in git.
 | Finding | Severity |
 | --- | --- |
 | Line outside any tagged scope | Error |
-| Unknown requirement ID in a tag, trailer, `deps.toml`, ADR, waiver, or checklist | Error |
+| Unknown requirement ID in a tag, trailer, `deps.toml`, ADR, waiver, checklist, or document | Error |
+| Document whose `@implements` tag cites a requirement not verified by Inspection or Demonstration | Error |
 | ADR in `docs/adr/` that cites no requirement | Error |
 | Requirement due in a started phase with no implementation or no verification, and no waiver | Error |
 | `[[waiver]]` with an empty reason, a bad date or status, a missing approver, an approver on a proposed waiver, or a second waiver for one requirement | Error |

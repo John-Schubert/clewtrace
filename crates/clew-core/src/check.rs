@@ -1,6 +1,7 @@
 //! `clew check --self`: scans the source roots in `trace.toml` and reports untraced lines,
 //! unknown requirement IDs, oversized scopes, dependencies missing from `deps.toml`, ADRs
-//! that cite no requirement, and requirements due in a started phase that lack an
+//! that cite no requirement, Markdown documents that implement a requirement not verified by
+//! Inspection or Demonstration, and requirements due in a started phase that lack an
 //! implementation or a verification and have no waiver. Rules: docs/TRACEABILITY.md.
 
 use std::collections::BTreeSet;
@@ -710,6 +711,7 @@ impl Checker {
                 self.check_id(&checklist.path, checklist.line, id);
             }
         }
+        self.check_documents(&project.documents);
         self.check_waivers();
         let current = self.config.current_phase;
         for (path, req) in std::mem::take(&mut self.requirements) {
@@ -751,10 +753,37 @@ impl Checker {
                 req.line,
                 Severity::Error,
                 format!("{} ({phase}) is due at current_phase {current} but has {missing}", req.id),
-                "tag code with `@implements` and a test with `@verifies`, cite an Inspection or Demonstration requirement in a docs/verification/ checklist, or propose a [[waiver]] in trace.toml for John to approve",
+                "tag code with `@implements` and a test with `@verifies` (an Inspection or Demonstration requirement may instead be cited by a Markdown document's `@implements` tag and a docs/verification/ checklist), or propose a [[waiver]] in trace.toml for John to approve",
             );
         }
         Ok(())
+    }
+
+    /// A Markdown document may implement only known requirements whose verification method
+    /// is Inspection or Demonstration.
+    fn check_documents(&mut self, documents: &[report::Document]) {
+        for document in documents {
+            for id in &document.ids {
+                self.check_id(&document.path, document.line, id);
+                let Some((_, req)) = self.requirements.iter().find(|(_, r)| &r.id == id) else {
+                    continue;
+                };
+                let method = req.verification_method.as_deref();
+                if method.is_some_and(|m| report::CHECKLIST_METHODS.contains(&m)) {
+                    continue;
+                }
+                let method = method.map_or("not set".to_string(), |m| format!("`{m}`"));
+                self.push(
+                    &document.path,
+                    document.line,
+                    Severity::Error,
+                    format!(
+                        "document implements {id}, whose verification method is {method}, not Inspection or Demonstration"
+                    ),
+                    "implement it in code with `@implements` and a `@verifies` test, or remove it from the document's `@implements` tag",
+                );
+            }
+        }
     }
 
     /// Each waiver needs a known ID, a reason, a `YYYY-MM-DD` date, and a status: `approved`
@@ -1267,9 +1296,51 @@ mod tests {
             ]
         );
         assert!(text[1].ends_with(
-            "help: tag code with `@implements` and a test with `@verifies`, cite an Inspection \
-             or Demonstration requirement in a docs/verification/ checklist, or propose a \
-             [[waiver]] in trace.toml for John to approve"
+            "help: tag code with `@implements` and a test with `@verifies` (an Inspection or \
+             Demonstration requirement may instead be cited by a Markdown document's \
+             `@implements` tag and a docs/verification/ checklist), or propose a [[waiver]] in \
+             trace.toml for John to approve"
+        ));
+    }
+
+    // @verifies CT-DEV-003, CT-DEV-004, CT-USE-007
+    #[test]
+    fn documents_implement_only_known_inspections_and_demonstrations() {
+        let reqs = model(&[
+            ("CT-DEV-002", "inspected", Some(0), "Inspection"),
+            ("CT-DEV-003", "shown", Some(1), "Demonstration"),
+            ("CT-DEV-004", "tested", Some(1), "Test"),
+        ]) + "requirement <'CT-DEV-005'> unset : R { attribute :>> phase = 1; }\n";
+        let root = project(
+            "documents",
+            "",
+            &[
+                ("model/req.sysml", reqs.as_str()),
+                (
+                    "LICENSING.md",
+                    "<!-- @implements CT-DEV-002 -->\n# Licensing\n",
+                ),
+                (
+                    "docs/guide.md",
+                    "<!--\n  @implements CT-DEV-003, CT-DEV-004, CT-DEV-005, CT-DEV-999\n-->\n",
+                ),
+                ("docs/verification/c.md", "<!-- @verifies CT-DEV-002 -->\n"),
+            ],
+        );
+        let report = check_project(&root).unwrap();
+        let text: Vec<String> = report.findings.iter().map(|f| f.to_string()).collect();
+        let first_lines: Vec<&str> = text.iter().map(|t| t.lines().next().unwrap()).collect();
+        assert_eq!(
+            first_lines,
+            [
+                "docs/guide.md:2: error: document implements CT-DEV-004, whose verification method is `Test`, not Inspection or Demonstration",
+                "docs/guide.md:2: error: document implements CT-DEV-005, whose verification method is not set, not Inspection or Demonstration",
+                "docs/guide.md:2: error: unknown requirement ID CT-DEV-999",
+            ]
+        );
+        assert!(text[0].ends_with(
+            "help: implement it in code with `@implements` and a `@verifies` test, or remove it \
+             from the document's `@implements` tag"
         ));
     }
 
