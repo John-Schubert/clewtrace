@@ -12,6 +12,9 @@ source_roots = ["crates", "app/src", "app/src-tauri", "scripts", ".github/workfl
 languages = ["rust", "typescript", "svelte"]
 file_level_allowed = ["*.toml", "*.yml", "*.yaml", "*.sh", "*.ps1"]
 max_scope_lines = 200
+# Requirements typed by these requirement definitions, or by ones that specialize them,
+# need no parent in `clew report coverage`. Each entry is a qualified name.
+top_level_definitions = ["ClewtraceRequirements::ProductRequirement"]
 
 # Generated or vendored code may be excluded only with a reason and a requirement.
 # JSON has no comments, so each JSON config file also gets an [[exclude]] entry.

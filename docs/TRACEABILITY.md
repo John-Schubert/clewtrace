@@ -92,6 +92,11 @@ name: ci
 - Each requirement whose `phase` is less than or equal to `current_phase` in `trace.toml` needs
   at least one `@implements` scope and one `@verifies` test, or a `[[waiver]]` in `trace.toml`
   with a reason, the approver, and a date.
+- Each requirement needs a parent: it derives from or refines another requirement, or is
+  nested in one. Requirements typed by a requirement definition listed in
+  `top_level_definitions` under `[coverage]` in `trace.toml`, or by one that specializes it,
+  are top level and exempt. This repo lists `ClewtraceRequirements::ProductRequirement`.
+  `clew report coverage` lists the rest under "Requirements without a parent".
 - Requirements with verification method Inspection or Demonstration may be verified by a
   checklist file in `docs/verification/` that carries an `@verifies` tag in its first comment.
 

@@ -236,6 +236,17 @@ impl Model {
             .ok()
     }
 
+    /// The resolved targets of the names `id` cites about itself in `role`, such as the
+    /// definitions a usage is typed by (`Role::Type`) or a definition specializes
+    /// (`Role::Specializes`).
+    // @implements CT-TRC-004
+    pub fn cited(&self, id: ElementId, role: Role) -> impl Iterator<Item = ElementId> + '_ {
+        (self.element(id).generals.iter())
+            .map(|&r| &self.references[r])
+            .filter(move |r| r.role == role)
+            .filter_map(|r| r.target)
+    }
+
     /// The element's names from the root down, joined by `::`. Names that are not plain
     /// identifiers are quoted, and an element with no name uses its short name.
     pub fn qualified_name(&self, id: ElementId) -> String {
