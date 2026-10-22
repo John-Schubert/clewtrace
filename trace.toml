@@ -54,31 +54,12 @@ requirement = "CT-PLT-001"
 # date = "2026-11-01"
 # part = "Optional: the part of the requirement it covers. A part waiver excuses no gap"
 
-# Proposed by Claude Code in task 1.9, not approved. John approves or drops each one.
-[[waiver]]
-id = "CT-EFF-001"
-reason = "Verified by the release workflow, not by a test the gate can read: its Installer size step fails if any installer is over 20,000,000 bytes, and it passed for v0.1.0. Installers take too long to build in cargo test. Waived until John decides how a release workflow check counts as verification."
-status = "proposed"
-approved_by = ""
-date = "2026-10-22"
-
+# Approved by John Schubert in his decisions comment on PR #25:
+# https://github.com/John-Schubert/clewtrace/pull/25#issuecomment-6351691822
 [[waiver]]
 id = "CT-PLT-001"
-reason = "Verified by the release workflow, not by a test the gate can read: its build job fails if an MSI, DMG, deb, or rpm is missing, and it passed for v0.1.0. ARM64 installers are not built yet. Waived until John decides how a release workflow check counts as verification."
-status = "proposed"
-approved_by = ""
+reason = "ARM64 installers are not built yet: the release workflow builds the Windows MSI and the Linux deb and rpm for x64 only (the macOS DMG is already universal). The x64 installers are verified by the release workflow's tagged Installer size step. Waived until phase 2, when John rewords the requirement to name the ARM64 targets. Approved in John's decisions comment on PR #25: https://github.com/John-Schubert/clewtrace/pull/25#issuecomment-6351691822"
+status = "approved"
+approved_by = "John Schubert"
 date = "2026-10-22"
-
-[[waiver]]
-id = "CT-CMP-008"
-reason = "A rule on what the app and its docs say, not behavior, so no code implements it. LICENSING.md holds the disclaimer and docs/verification/no-cert-claim.md verifies it. Waived for good unless John lets a document implement an Inspection requirement."
-status = "proposed"
-approved_by = ""
-date = "2026-10-22"
-
-[[waiver]]
-id = "CT-DEV-013"
-reason = "A project policy, not behavior, so no code implements it. CONTRIBUTING.md states it and docs/verification/public-source.md verifies it. Waived for good unless John lets a document implement an Inspection requirement."
-status = "proposed"
-approved_by = ""
-date = "2026-10-22"
+part = "ARM64 installers"
