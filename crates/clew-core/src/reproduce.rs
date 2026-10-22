@@ -3,8 +3,10 @@
 //!
 //! The header names the command, the Git commit of the project, the tool version, and a
 //! SHA-256 of the inputs. The inputs hash is the SHA-256 of a manifest with one line per
-//! file the report read as text, sorted by path: the file's SHA-256 in lowercase hex, two
-//! spaces, and its path with `/` separators, as `sha256sum` prints it.
+//! file the report read as text, sorted by path: the SHA-256 of the file's text in lowercase
+//! hex, two spaces, and its path with `/` separators, as `sha256sum` prints it. The text is
+//! hashed without a leading byte order mark and with Windows line endings as `\n`, so a
+//! checkout on Windows verifies a report made on Linux.
 
 use std::path::Path;
 use std::process::Command;
@@ -181,6 +183,14 @@ fn inputs_digest(inputs: &[(String, Vec<u8>)]) -> String {
     format!("sha256 {} over {} files", hex(&digest), sorted.len())
 }
 
+// @implements CT-TRC-009, CT-SEC-006
+/// The SHA-256 of a file's text without a leading byte order mark and with `\r\n` line
+/// endings as `\n`, so the same file checked out with either line ending hashes the same.
+pub(crate) fn text_sha256(text: &str) -> Vec<u8> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    Sha256::digest(text.replace("\r\n", "\n").as_bytes()).to_vec()
+}
+
 // @implements CT-TRC-009
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -188,17 +198,24 @@ fn hex(bytes: &[u8]) -> String {
 
 // @implements CT-TRC-009
 /// The commit `git` reports for the repository holding `root`, noting uncommitted changes,
-/// including untracked files, or `none`.
+/// including untracked files, or `none`. The project may come from someone else, so Git
+/// runs with its file system monitor off, which a repository's config could set to any
+/// command, and without taking optional locks or looking into submodules.
 fn commit_of(git: &str, root: &Path) -> String {
     let run = |args: &[&str]| {
-        let output = Command::new(git).args(args).current_dir(root).output();
+        let output = Command::new(git)
+            .args(["-c", "core.fsmonitor=false", "--no-optional-locks"])
+            .args(args)
+            .current_dir(root)
+            .output();
         output.ok().filter(|o| o.status.success())
     };
     let Some(head) = run(&["rev-parse", "HEAD"]) else {
         return "none".to_string();
     };
     let sha = String::from_utf8_lossy(&head.stdout).trim().to_string();
-    let dirty = run(&["status", "--porcelain"]).is_some_and(|o| !o.stdout.is_empty());
+    let status = run(&["status", "--porcelain", "--ignore-submodules=all"]);
+    let dirty = status.is_some_and(|o| !o.stdout.is_empty());
     if dirty {
         format!("{sha}, with uncommitted changes")
     } else {
@@ -376,6 +393,21 @@ mod tests {
 
     // @verifies CT-TRC-009
     #[test]
+    fn windows_line_endings_and_a_bom_leave_the_inputs_hash_unchanged() {
+        let lf = project("lf");
+        let crlf = project("crlf");
+        let windows = format!("\u{feff}{}", REQS.replace('\n', "\r\n"));
+        fs::write(crlf.join("model/reqs.sysml"), windows).unwrap();
+        let a = made(&lf, &ReportKind::Coverage);
+        let b = made(&crlf, &ReportKind::Coverage);
+        assert_eq!(a.provenance.inputs, b.provenance.inputs);
+        assert_eq!(a.body, b.body);
+        let expected = Sha256::digest(b"a\nb\n").to_vec();
+        assert_eq!(text_sha256("a\r\nb\n"), expected);
+    }
+
+    // @verifies CT-TRC-009
+    #[test]
     fn records_the_commit_and_uncommitted_changes() {
         let root = project("git");
         assert_eq!(commit_of("clew-no-such-git", &root), "none");
@@ -401,6 +433,10 @@ mod tests {
             commit_of("git", &root),
             format!("{head}, with uncommitted changes")
         );
+        // A command named in the repository's own config never runs.
+        git(&["config", "core.fsmonitor", "touch fsmonitor-ran"]);
+        commit_of("git", &root);
+        assert!(!root.join("fsmonitor-ran").exists());
     }
 
     // @verifies CT-TRC-009

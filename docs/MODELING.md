@@ -81,13 +81,19 @@ Inputs: sha256 9f2c...e41a over 42 files
 - `Report` is the command that made it.
 - `Commit` is the Git commit of the project, followed by `, with uncommitted changes` when
   the work tree differs from it, untracked files included. It is `none` outside a Git
-  repository or when Git is not installed. Add `.clewtrace/` to `.gitignore` so the index
-  does not count as a change.
+  repository or when Git is not installed. clew runs only `git rev-parse HEAD` and
+  `git status`, with the file system monitor turned off, so a project's Git config cannot
+  make it run a hook command. Git can still run clean filters that a repository's own
+  config defines, so verify reports only in projects whose `.git/config` you trust. Add
+  `.clewtrace/` to `.gitignore` so the index does not count as a change.
 - `Tool` is the clew version, which also fixes the built-in libraries.
 - `Inputs` is a SHA-256 over every file the report read as text: `trace.toml`, the `.sysml`
   files, and the code files scanned for tags. The hash is taken over a manifest with one
-  line per file, sorted by path, in the form `sha256sum` prints: the file's SHA-256 in
-  lowercase hex, two spaces, and its path relative to the project root with `/` separators.
+  line per file, sorted by path, in the form `sha256sum` prints: the SHA-256 of the file's
+  text in lowercase hex, two spaces, and its path relative to the project root with `/`
+  separators. The text is hashed without a leading byte order mark and with Windows line
+  endings as `\n`, so a report made on Linux verifies on a Windows checkout of the same
+  commit.
 
 Save a report to a file, for example `clew report coverage > coverage.txt`. To check it
 later, run `clew report verify coverage.txt` from the same project root. It makes the

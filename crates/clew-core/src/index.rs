@@ -129,10 +129,10 @@ struct Row {
     doc: String,
 }
 
-// @implements CT-EFF-007, CT-TRC-004, CT-TRC-009
+// @implements CT-EFF-007, CT-TRC-004
 /// A file's content hash and text, read in one go.
 pub(crate) struct Loaded {
-    pub(crate) sha256: Vec<u8>,
+    sha256: Vec<u8>,
     pub(crate) text: String,
 }
 
