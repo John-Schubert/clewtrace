@@ -8,6 +8,7 @@
 use std::fmt;
 use std::path::Path;
 
+use crate::model::Model;
 use crate::parse::ast::{Kind, Member, Pos, Usage, UsageKind};
 use crate::parse::parser::{self, SyntaxError};
 
@@ -29,7 +30,8 @@ pub enum ReadError {
         path: String,
         error: std::io::Error,
     },
-    /// Syntax errors, duplicate IDs, and bad attribute values, sorted by position.
+    /// Syntax errors, unresolved names, duplicate IDs, and bad attribute values, sorted by
+    /// position.
     Invalid {
         path: String,
         errors: Vec<SyntaxError>,
@@ -62,11 +64,17 @@ pub fn read_requirements(path: &Path) -> Result<Vec<Requirement>, ReadError> {
     parse_requirements(&text, &label)
 }
 
-/// Reads the requirements in `text`. `path` names the file in error messages.
-// @implements CT-DEV-001, CT-TRC-001, CT-MOD-001, CT-USE-007
+/// Reads the requirements in `text`. `path` names the file in error messages. Names are
+/// resolved only when the file has no syntax errors, since a member dropped by error
+/// recovery would make names that cite it look unresolved.
+// @implements CT-DEV-001, CT-TRC-001, CT-MOD-001, CT-MOD-002, CT-USE-007
 pub fn parse_requirements(text: &str, path: &str) -> Result<Vec<Requirement>, ReadError> {
     let parsed = parser::parse(text);
     let mut errors = parsed.errors;
+    if errors.is_empty() {
+        let model = Model::build(&[(path, &parsed.members)]);
+        errors.extend(model.errors.into_iter().map(|e| e.error));
+    }
     let mut found: Vec<(Requirement, Pos)> = Vec::new();
     collect(&parsed.members, &mut found, &mut errors);
     for (index, (req, pos)) in found.iter().enumerate() {
@@ -154,8 +162,10 @@ mod tests {
     use super::*;
 
     const FIXTURE: &str = r#"package P {
+    private import ScalarValues::*;
     requirement def ProductRequirement {
         doc /* A definition, not a requirement. */
+        attribute verificationMethod : String;
         attribute phase : Integer;
     }
     package Group {
@@ -193,7 +203,7 @@ mod tests {
                 doc: "Each installer shall be 20 MB or smaller.".into(),
                 verification_method: Some("Test".into()),
                 phase: Some(0),
-                line: 7,
+                line: 9,
             }
         );
         assert_eq!(reqs[1].id, "CT-USE-002");
@@ -218,11 +228,12 @@ mod tests {
     // @verifies CT-DEV-001, CT-TRC-001, CT-USE-007
     #[test]
     fn rejects_duplicate_ids() {
-        let text = "requirement <'CT-EFF-001'> a : R;\n  requirement <'CT-EFF-001'> b : R { }\n";
+        let text = "requirement def R;\nrequirement <'CT-EFF-001'> a : R;\n  \
+                    requirement <'CT-EFF-001'> b : R { }\n";
         let err = parse_requirements(text, "m.sysml").unwrap_err();
         assert_eq!(
             err.to_string(),
-            "m.sysml:2:3: error: duplicate requirement ID CT-EFF-001, first used on line 1\n  \
+            "m.sysml:3:3: error: duplicate requirement ID CT-EFF-001, first used on line 2\n  \
              help: give each requirement its own ID"
         );
     }
@@ -245,6 +256,33 @@ mod tests {
         assert_eq!(rendered.lines().count(), 4, "{rendered}");
         assert!(rendered.starts_with("m.sysml:2:27: error: phase"));
         assert!(rendered.contains("\nm.sysml:4:34: error:"));
+    }
+
+    // @verifies CT-MOD-002, CT-USE-007
+    #[test]
+    fn reports_unresolved_names_only_when_the_syntax_is_clean() {
+        let text = "requirement <'CT-EFF-001'> a : Missing {\n    attribute :>> phase = 1;\n}\n";
+        let err = parse_requirements(text, "m.sysml").unwrap_err();
+        let ReadError::Invalid { errors, .. } = &err else {
+            panic!("expected invalid, got {err:?}")
+        };
+        let found: Vec<(u32, u32, &str)> = (errors.iter())
+            .map(|e| (e.line, e.column, e.message.as_str()))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                (1, 32, "cannot resolve type `Missing`"),
+                (2, 19, "cannot resolve redefined feature `phase`"),
+            ]
+        );
+        let broken = format!("{text}part def {{\n");
+        let err = parse_requirements(&broken, "m.sysml").unwrap_err();
+        let ReadError::Invalid { errors, .. } = &err else {
+            panic!("expected invalid, got {err:?}")
+        };
+        assert_eq!(errors.len(), 1, "{err}");
+        assert_eq!(errors[0].line, 4);
     }
 
     // @verifies CT-DEV-001, CT-TRC-001, CT-USE-007

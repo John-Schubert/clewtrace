@@ -22,7 +22,7 @@ fn fixture(name: &str, max_scope_lines: usize) -> PathBuf {
     fs::create_dir_all(root.join("src")).unwrap();
     fs::write(
         root.join("model/requirements.sysml"),
-        "package P {\n    requirement <'CT-DEV-002'> everyLineTraced : R {\n    }\n}\n",
+        "package P {\n    requirement <'CT-DEV-002'> everyLineTraced : R {\n    }\n    requirement def R;\n}\n",
     )
     .unwrap();
     fs::write(
