@@ -5,6 +5,8 @@
 //! is the statement, and the attributes `verificationMethod` and `phase` are read from
 //! their values.
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fmt;
 use std::path::Path;
 
@@ -77,17 +79,23 @@ pub fn parse_requirements(text: &str, path: &str) -> Result<Vec<Requirement>, Re
     }
     let mut found: Vec<(Requirement, Pos)> = Vec::new();
     collect(&parsed.members, &mut found, &mut errors);
-    for (index, (req, pos)) in found.iter().enumerate() {
-        if let Some((first, _)) = found[..index].iter().find(|(r, _)| r.id == req.id) {
-            errors.push(SyntaxError {
+    // The line each ID is first used on, so each requirement is checked in one lookup.
+    let mut first_lines: HashMap<&str, usize> = HashMap::with_capacity(found.len());
+    for (req, pos) in &found {
+        match first_lines.entry(&req.id) {
+            Entry::Vacant(slot) => {
+                slot.insert(req.line);
+            }
+            Entry::Occupied(first) => errors.push(SyntaxError {
                 line: pos.line,
                 column: pos.column,
                 message: format!(
                     "duplicate requirement ID {}, first used on line {}",
-                    req.id, first.line
+                    req.id,
+                    first.get()
                 ),
                 help: "give each requirement its own ID",
-            });
+            }),
         }
     }
     if errors.is_empty() {
