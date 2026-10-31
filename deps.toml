@@ -92,8 +92,8 @@ name = "@tauri-apps/api"
 ecosystem = "npm"
 license = "Apache-2.0 OR MIT"
 scope = "shipped"
-serves = ["CT-PLT-001"]
-why = "Typed calls from the UI to the Rust side over Tauri IPC. Only the app module is used so far"
+serves = ["CT-PLT-001", "CT-EFF-005"]
+why = "Typed calls from the UI to the Rust side over Tauri IPC. Uses the app module and invoke from the core module (app/src/lib/api.ts)"
 
 [[dep]]
 name = "@tauri-apps/cli"

@@ -488,7 +488,7 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       Follow-ups:
       - A script block without `lang="ts"` still allows regions only.
       - A `<script` inside an HTML comment or string is read as a tag.
-- [ ] **2.3a App data layer.** The Rust side of the app owns the open project (model, trace
+- [x] **2.3a App data layer.** The Rust side of the app owns the open project (model, trace
       graph, coverage, index). Tauri commands return pages of rows: tree children, element
       detail, links to and from, problems, search hits. A typed client in
       `app/src/lib/api.ts`. Load on a background thread so the window stays responsive.
@@ -499,6 +499,20 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       project.
       Refs: CT-EFF-004, CT-EFF-005, CT-MOD-001, CT-EFF-001, CT-SEC-001
       Model: Opus
+      Done in `app/src-tauri/src/data.rs` (the open project, pages of at most 200 rows, JSON
+      replies built with `clew_core::json::quote`, so no serde) and `commands.rs` (seven
+      thin commands on Tauri's thread pool). `wait_for_project` blocks on a condition
+      variable, so the UI never polls. `build.rs` lists the commands in an app manifest and
+      `capabilities/main.json` grants them. The perf generator moved to
+      `crates/clew-core/tests/generate/mod.rs` so the app tests share it.
+      `ElementKind::label` in clew-core gives the keywords. The window shows the project
+      status line until the 2.4 shell.
+      Follow-ups:
+      - John to accept ADR-0004 (status Proposed).
+      - The CI coverage step for `app/src-tauri` could not run in the cloud session. Check
+        it on the first PR run.
+      - Element IDs are model indexes and change on reload. Revisit in 2.10.
+      - `api.ts` has no unit tests until vitest arrives in 2.4.
 - [ ] **2.3b Opening projects.** A folder dialog (rfd 0.17.2 with `default-features = false`
       and the `gtk3` feature only, MIT, PR #27; add `("rfd", &["gtk3"])` to the no-network
       test's allowed features). A recent-projects list that stores folder paths only, never

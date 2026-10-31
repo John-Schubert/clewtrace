@@ -435,7 +435,7 @@ fn collect_rows(members: &[Member], prefix: &str, rows: &mut Vec<Row>) {
 }
 
 // @implements CT-MOD-001
-fn definition_kind(kind: Kind) -> &'static str {
+pub(crate) fn definition_kind(kind: Kind) -> &'static str {
     match kind {
         Kind::Part => "part def",
         Kind::Attribute => "attribute def",
@@ -446,7 +446,7 @@ fn definition_kind(kind: Kind) -> &'static str {
 }
 
 // @implements CT-MOD-001
-fn usage_kind(kind: UsageKind) -> &'static str {
+pub(crate) fn usage_kind(kind: UsageKind) -> &'static str {
     match kind {
         UsageKind::Of(Kind::Part) => "part",
         UsageKind::Of(Kind::Attribute) => "attribute",
