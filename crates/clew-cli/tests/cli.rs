@@ -19,7 +19,7 @@ fn lists_every_requirement() {
     let out = clew(&["reqs", "list"]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(stdout.lines().count(), 77);
+    assert_eq!(stdout.lines().count(), 79);
     let line = stdout
         .lines()
         .find(|l| l.starts_with("CT-DEV-001"))

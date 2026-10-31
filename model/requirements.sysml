@@ -27,13 +27,13 @@ package ClewtraceRequirements {
         }
 
         requirement <'CT-EFF-002'> idleMemory : ProductRequirement {
-            doc /* The application, including its web view, shall use 200 MB or less of resident memory when idle with an empty project (250 MB or less on Linux). */
+            doc /* The application, including its web view, shall use no more than the following total memory when idle with an empty project: 400 MB on Linux, measured as proportional set size (PSS); 360 MB on Windows, measured as private working set; and 250 MB on macOS, measured as resident memory. These budgets are provisional. A budget may be lowered but shall not be raised once set. */
             attribute :>> verificationMethod = "Test";
             attribute :>> phase = 2;
         }
 
         requirement <'CT-EFF-003'> coldStart : ProductRequirement {
-            doc /* The application shall show an interactive main window within 2 s of launch. */
+            doc /* The application shall show an interactive main window within 4 s of launch on the CI runner (4 GB RAM, 2 cores). This budget is provisional and may be lowered but shall not be raised once set. */
             attribute :>> verificationMethod = "Test";
             attribute :>> phase = 2;
         }
@@ -72,6 +72,18 @@ package ClewtraceRequirements {
             doc /* CI shall run the performance tests in an environment limited by the operating system to 4 GB RAM and 2 CPU cores, with no swap, and fail the build when any EFF budget is exceeded. */
             attribute :>> verificationMethod = "Inspection";
             attribute :>> phase = 1;
+        }
+
+        requirement <'CT-EFF-010'> appProcessMemory : ProductRequirement {
+            doc /* The application's own process, not counting its web view, shall use no more than the following memory when idle with an empty project: 115 MB on Linux, measured as PSS; 35 MB on Windows, measured as private working set; and 105 MB on macOS, measured as resident memory. A budget may be lowered but shall not be raised once set. */
+            attribute :>> verificationMethod = "Test";
+            attribute :>> phase = 2;
+        }
+
+        requirement <'CT-EFF-011'> referenceStart : ProductRequirement {
+            doc /* The application shall show an interactive main window within 2 s of launch on the reference machine. The Gate 2 check records the time on that machine. */
+            attribute :>> verificationMethod = "Demonstration";
+            attribute :>> phase = 2;
         }
     }
 

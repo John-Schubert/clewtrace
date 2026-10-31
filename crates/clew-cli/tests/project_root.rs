@@ -27,7 +27,7 @@ fn reqs_list_works_from_a_subfolder() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&out.stdout).lines().count(), 77);
+    assert_eq!(String::from_utf8_lossy(&out.stdout).lines().count(), 79);
 }
 
 // @verifies CT-TRC-008, CT-DEV-001, CT-TRC-001
