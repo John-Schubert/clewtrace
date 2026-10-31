@@ -6,10 +6,10 @@ use clap::{Parser, Subcommand};
 use clew_core::check::{self, Report, Severity};
 use clew_core::commit;
 use clew_core::index::Index;
-use clew_core::json;
 use clew_core::notices::{self, Package};
+use clew_core::project::find_root;
 use clew_core::reproduce::{self, GenerateError, ReportKind};
-use clew_core::reqs::{self, Requirement};
+use clew_core::reqs;
 
 // @implements CT-DEV-001
 const REQUIREMENTS_PATH: &str = "model/requirements.sysml";
@@ -43,7 +43,7 @@ enum Command {
         /// The commit message file, for example .git/COMMIT_EDITMSG
         file: PathBuf,
     },
-    /// Index every .sysml file under the current folder into .clewtrace/index.db,
+    /// Index every .sysml file under the project root into .clewtrace/index.db,
     /// re-parsing only the files that changed. Exits 0 when clean, 1 when a file has
     /// syntax errors or cannot be read, and 2 when the index cannot be opened or written
     Index {
@@ -51,7 +51,7 @@ enum Command {
         #[arg(long)]
         rebuild: bool,
     },
-    /// Report on the trace graph of the model and code under the current folder
+    /// Report on the trace graph of the model and code under the project root
     Report {
         #[command(subcommand)]
         command: ReportCommand,
@@ -95,12 +95,19 @@ enum ReportCommand {
     /// tool version, and inputs hash. Exits 0 when clean, 1 when files have problems, and 2
     /// when the report cannot run
     Coverage,
-    /// Make a saved report again from the files under the current folder and compare.
+    /// Make a saved report again from the files under the project root and compare.
     /// Exits 0 when it matches, 1 when it differs, and 2 when the comparison cannot run
     Verify {
         /// The report file, saved from `clew report coverage` or `clew impact`
         file: PathBuf,
     },
+}
+
+// @implements CT-TRC-008, CT-USE-007
+/// The project root for the current folder: the nearest folder up the tree with a
+/// `trace.toml` or `.clewtrace`, else the current folder.
+fn project_root() -> PathBuf {
+    find_root(Path::new("."))
 }
 
 // @implements CT-TRC-008
@@ -118,10 +125,10 @@ fn main() -> ExitCode {
 }
 
 // @implements CT-TRC-008, CT-TRC-004, CT-TRC-005, CT-TRC-009, CT-USE-007
-/// Makes a report of the project under the current folder and prints it. Exits 1 when
+/// Makes a report of the project under the project root and prints it. Exits 1 when
 /// files have problems or the element is not found, and 2 when the project cannot be read.
 fn run_generate(kind: &ReportKind) -> ExitCode {
-    match reproduce::generate(Path::new("."), kind) {
+    match reproduce::generate(&project_root(), kind) {
         Ok(report) => {
             print!("{}", report.text());
             if report.problems {
@@ -154,7 +161,7 @@ fn run_verify(file: &Path) -> ExitCode {
     let label = file.display().to_string();
     let verdict = fs::read_to_string(file)
         .map_err(|e| e.to_string())
-        .and_then(|text| reproduce::verify(Path::new("."), &text));
+        .and_then(|text| reproduce::verify(&project_root(), &text));
     let verdict = match verdict {
         Ok(verdict) => verdict,
         Err(e) => {
@@ -184,7 +191,7 @@ fn run_impact(name: &str) -> ExitCode {
 
 // @implements CT-TRC-008, CT-MOD-001, CT-EFF-007, CT-USE-007
 fn run_index(rebuild: bool) -> ExitCode {
-    let result = Index::open(Path::new(".")).and_then(|mut index| {
+    let result = Index::open(&project_root()).and_then(|mut index| {
         let stats = if rebuild {
             index.rebuild()?
         } else {
@@ -219,7 +226,7 @@ fn run_index(rebuild: bool) -> ExitCode {
 
 // @implements CT-TRC-008, CT-TRC-001
 fn run_reqs(command: ReqsCommand) -> ExitCode {
-    let all = match reqs::read_requirements(Path::new(REQUIREMENTS_PATH)) {
+    let all = match reqs::read_requirements(&project_root().join(REQUIREMENTS_PATH)) {
         Ok(all) => all,
         Err(e) => {
             eprintln!("clew: {e}");
@@ -229,27 +236,13 @@ fn run_reqs(command: ReqsCommand) -> ExitCode {
     match command {
         ReqsCommand::List => {
             for r in &all {
-                println!(
-                    "{}  {}  {}  phase {}",
-                    r.id,
-                    r.name,
-                    r.verification_method.as_deref().unwrap_or("-"),
-                    phase_text(r)
-                );
+                println!("{}", r.list_line());
             }
             ExitCode::SUCCESS
         }
         ReqsCommand::Show { id } => match all.iter().find(|r| r.id == id) {
             Some(r) => {
-                println!("{} {}", r.id, r.name);
-                println!(
-                    "Verification: {}",
-                    r.verification_method.as_deref().unwrap_or("-")
-                );
-                println!("Phase: {}", phase_text(r));
-                println!("Location: {REQUIREMENTS_PATH}:{}", r.line);
-                println!();
-                println!("{}", r.doc);
+                print!("{}", r.show_text(REQUIREMENTS_PATH));
                 ExitCode::SUCCESS
             }
             None => {
@@ -262,7 +255,7 @@ fn run_reqs(command: ReqsCommand) -> ExitCode {
 
 // @implements CT-TRC-008, CT-DEV-002, CT-DEV-004, CT-USE-007
 fn run_check() -> ExitCode {
-    let report = match check::check_project(Path::new(".")) {
+    let report = match check::check_project(&project_root()) {
         Ok(report) => report,
         Err(e) => {
             eprintln!("clew: {e}");
@@ -282,7 +275,7 @@ fn run_check_commit(file: &Path) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    match commit::check_commit_message(Path::new("."), &label, &message) {
+    match commit::check_commit_message(&project_root(), &label, &message) {
         Ok(report) => print_report("clew check-commit", &report),
         Err(e) => {
             eprintln!("clew: {e}");
@@ -293,7 +286,7 @@ fn run_check_commit(file: &Path) -> ExitCode {
 
 // @implements CT-DEV-014, CT-DEV-008, CT-USE-007
 fn run_notices(out: Option<&Path>) -> ExitCode {
-    let packages = match read_packages() {
+    let packages = match notices::read_packages(Path::new("."), &run_cargo) {
         Ok(packages) => packages,
         Err(e) => {
             eprintln!("clew: {e}");
@@ -334,95 +327,25 @@ fn run_notices(out: Option<&Path>) -> ExitCode {
     }
 }
 
-/// Every third-party package, from `cargo metadata` for each desktop target and the npm
-/// lockfile, with the license texts found in its installed folder.
+/// Runs `cargo` (the one in `$CARGO` when set) and returns what it printed.
 // @implements CT-DEV-014
-fn read_packages() -> Result<Vec<Package>, String> {
+fn run_cargo(args: &[&str]) -> Result<String, String> {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let run = |args: &[&str]| -> Result<String, String> {
-        let output = std::process::Command::new(&cargo)
-            .args(args)
-            .output()
-            .map_err(|e| format!("cannot run cargo: {e}"))?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("cargo {} failed:\n{stderr}", args.join(" ")));
-        }
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-    };
-    let mut metadata = Vec::new();
-    let mut shipped = std::collections::BTreeSet::new();
-    for target in notices::DESKTOP_TARGETS {
-        let text = run(&[
-            "metadata",
-            "--locked",
-            "--format-version",
-            "1",
-            "--filter-platform",
-            target,
-        ])?;
-        metadata.push(json::parse(&text).map_err(|e| format!("cargo metadata: {e}"))?);
-        let tree = run(&[
-            "tree",
-            "--locked",
-            "--workspace",
-            "--edges",
-            "normal,no-proc-macro",
-            "--target",
-            target,
-            "--prefix",
-            "none",
-            "--format",
-            "{p}",
-        ])?;
-        shipped.extend(notices::tree_crates(&tree));
+    let output = std::process::Command::new(&cargo)
+        .args(args)
+        .output()
+        .map_err(|e| format!("cannot run cargo: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("cargo {} failed:\n{stderr}", args.join(" ")));
     }
-    let mut packages = notices::cargo_packages(&metadata, &shipped)?;
-    let lock_text =
-        fs::read_to_string(notices::NPM_LOCK).map_err(|e| format!("{}: {e}", notices::NPM_LOCK))?;
-    let lock = json::parse(&lock_text).map_err(|e| format!("{}: {e}", notices::NPM_LOCK))?;
-    let modules = Path::new(notices::NPM_MODULES);
-    if !modules.is_dir() {
-        return Err(format!(
-            "{} is missing. Run `npm ci` in app/ first",
-            notices::NPM_MODULES
-        ));
-    }
-    let app = modules.parent().unwrap_or(Path::new("."));
-    packages.extend(notices::npm_packages(&lock, app));
-    for p in &mut packages {
-        if let Some(dir) = &p.dir {
-            p.license_texts = notices::read_license_texts(dir);
-        }
-    }
-    Ok(packages)
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Writes the notices file, the SBOM, and a copy of each shipped MPL-2.0 crate archive.
 // @implements CT-DEV-014
 fn write_notices(dir: &Path, packages: &[Package]) -> Result<(), String> {
-    let sources = dir.join("mpl-sources");
-    fs::create_dir_all(&sources).map_err(|e| format!("{}: {e}", sources.display()))?;
-    let write = |path: PathBuf, text: String| {
-        fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
-    };
-    write(
-        dir.join("THIRD-PARTY-NOTICES.txt"),
-        notices::notices_text(packages),
-    )?;
-    write(
-        dir.join("sbom.cdx.json"),
-        notices::sbom_json(packages, env!("CARGO_PKG_VERSION")),
-    )?;
-    for p in packages.iter().filter(|p| p.needs_source()) {
-        let archive = p
-            .archive
-            .as_ref()
-            .filter(|a| a.is_file())
-            .ok_or_else(|| format!("no source archive found for {}", p.label()))?;
-        let name = archive.file_name().unwrap_or_default();
-        fs::copy(archive, sources.join(name)).map_err(|e| format!("{}: {e}", archive.display()))?;
-    }
+    notices::write_outputs(dir, packages, env!("CARGO_PKG_VERSION"))?;
     println!("clew notices: wrote {}", dir.display());
     Ok(())
 }
@@ -433,23 +356,10 @@ fn print_report(command: &str, report: &Report) -> ExitCode {
     for finding in &report.findings {
         println!("{finding}");
     }
-    let errors = report.count(Severity::Error);
-    let warnings = report.count(Severity::Warning);
-    let plural = |n: usize, word: &str| format!("{n} {word}{}", if n == 1 { "" } else { "s" });
-    println!(
-        "{command}: {} checked, {}, {}",
-        plural(report.files, "file"),
-        plural(errors, "error"),
-        plural(warnings, "warning")
-    );
-    if errors == 0 {
+    println!("{}", report.summary(command));
+    if report.count(Severity::Error) == 0 {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
     }
-}
-
-// @implements CT-TRC-008, CT-TRC-001
-fn phase_text(r: &Requirement) -> String {
-    r.phase.map_or_else(|| "-".to_string(), |p| p.to_string())
 }

@@ -40,6 +40,13 @@ The standard `RequirementDerivation` library also defines a metadata with the sh
 `derivation`, for derivation connections. Do not import both `RequirementDerivation::*` and
 `Clewtrace::*` into the same package, or `#derivation` is ambiguous in other tools.
 
+## Project root
+
+`clew` commands work from any folder inside a project. They look for the nearest folder, the
+current one or a parent, that holds a `trace.toml` file or a `.clewtrace` folder, and use it
+as the project root. When there is none, they use the current folder. `clew notices` is the
+exception: it runs from the repository root, where `cargo` and `app/package-lock.json` are.
+
 ## Coverage and impact
 
 Run these from the project root, where `trace.toml` lives. Both read every `.sysml` file

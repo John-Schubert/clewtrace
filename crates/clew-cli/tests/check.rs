@@ -77,7 +77,9 @@ fn reports_findings_with_file_and_line_and_exits_nonzero() {
 // @verifies CT-DEV-004, CT-TRC-008, CT-USE-007
 #[test]
 fn missing_config_exits_two() {
-    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join("check-no-config");
+    let root = std::env::temp_dir()
+        .join("clew-cli-tests")
+        .join("check-no-config");
     fs::create_dir_all(&root).unwrap();
     let out = clew_in(&root, &["check", "--self"]);
     assert_eq!(out.status.code(), Some(2));

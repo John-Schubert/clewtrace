@@ -13,7 +13,7 @@
 //! is listed apart from the gaps.
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::check::{self, SetupError};
 use crate::config::{TOP_LEVEL_DEFINITIONS, TraceConfig, Waiver};
@@ -63,6 +63,8 @@ pub struct Document {
 // @implements CT-TRC-004, CT-TRC-005
 /// A project's model and trace graph, and the problems found while reading them.
 pub struct Project {
+    /// The project root the project was read from.
+    pub root: PathBuf,
     pub model: Model,
     pub graph: TraceGraph,
     /// Unreadable model files, syntax errors, unresolved names, and links that could not be
@@ -140,6 +142,7 @@ pub fn load_project(root: &Path) -> Result<Project, SetupError> {
     let checklists = read_checklists(root, &mut problems, &mut hashed);
     let documents = read_documents(root, &mut problems, &mut hashed);
     Ok(Project {
+        root: root.to_path_buf(),
         model,
         graph,
         problems,

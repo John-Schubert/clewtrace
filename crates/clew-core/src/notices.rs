@@ -612,10 +612,162 @@ pub fn sbom_json(packages: &[Package], version: &str) -> String {
     out
 }
 
+// @implements CT-DEV-014
+/// Runs `cargo` with the given arguments and returns what it printed.
+pub type CargoRunner<'a> = &'a dyn Fn(&[&str]) -> Result<String, String>;
+
+// @implements CT-DEV-014
+/// Every third-party package: the crates from `cargo metadata` and `cargo tree` for each
+/// desktop target, run through `run`, and the npm packages from the lockfile under `root`,
+/// each with the license texts found in its installed folder.
+pub fn read_packages(root: &Path, run: CargoRunner) -> Result<Vec<Package>, String> {
+    let mut metadata = Vec::new();
+    let mut shipped = BTreeSet::new();
+    for target in DESKTOP_TARGETS {
+        let text = run(&[
+            "metadata",
+            "--locked",
+            "--format-version",
+            "1",
+            "--filter-platform",
+            target,
+        ])?;
+        metadata.push(json::parse(&text).map_err(|e| format!("cargo metadata: {e}"))?);
+        let tree = run(&[
+            "tree",
+            "--locked",
+            "--workspace",
+            "--edges",
+            "normal,no-proc-macro",
+            "--target",
+            target,
+            "--prefix",
+            "none",
+            "--format",
+            "{p}",
+        ])?;
+        shipped.extend(tree_crates(&tree));
+    }
+    let mut packages = cargo_packages(&metadata, &shipped)?;
+    let lock_path = root.join(NPM_LOCK);
+    let lock_text =
+        std::fs::read_to_string(&lock_path).map_err(|e| format!("{}: {e}", lock_path.display()))?;
+    let lock = json::parse(&lock_text).map_err(|e| format!("{}: {e}", lock_path.display()))?;
+    let modules = root.join(NPM_MODULES);
+    if !modules.is_dir() {
+        return Err(format!(
+            "{} is missing. Run `npm ci` in app/ first",
+            modules.display()
+        ));
+    }
+    let app = modules.parent().unwrap_or(root);
+    packages.extend(npm_packages(&lock, app));
+    for p in &mut packages {
+        if let Some(dir) = &p.dir {
+            p.license_texts = read_license_texts(dir);
+        }
+    }
+    Ok(packages)
+}
+
+// @implements CT-DEV-014
+/// Writes `THIRD-PARTY-NOTICES.txt`, `sbom.cdx.json`, and a copy of the source archive of
+/// each shipped package that needs one into `dir` and `dir/mpl-sources`.
+pub fn write_outputs(dir: &Path, packages: &[Package], version: &str) -> Result<(), String> {
+    let sources = dir.join("mpl-sources");
+    std::fs::create_dir_all(&sources).map_err(|e| format!("{}: {e}", sources.display()))?;
+    let write = |path: PathBuf, text: String| {
+        std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
+    };
+    write(dir.join("THIRD-PARTY-NOTICES.txt"), notices_text(packages))?;
+    write(dir.join("sbom.cdx.json"), sbom_json(packages, version))?;
+    for p in packages.iter().filter(|p| p.needs_source()) {
+        let archive = p
+            .archive
+            .as_ref()
+            .filter(|a| a.is_file())
+            .ok_or_else(|| format!("no source archive found for {}", p.label()))?;
+        let name = archive.file_name().unwrap_or_default();
+        std::fs::copy(archive, sources.join(name))
+            .map_err(|e| format!("{}: {e}", archive.display()))?;
+    }
+    Ok(())
+}
+
 // @verifies CT-DEV-008, CT-DEV-014
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // @verifies CT-DEV-014
+    #[test]
+    fn reads_cargo_and_npm_packages_through_the_runner() {
+        let root = std::env::temp_dir().join(format!("clew-packages-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let run = |args: &[&str]| -> Result<String, String> {
+            match args[0] {
+                "metadata" => Ok(metadata_text()),
+                _ => Ok("app v0.1.0\nc v1.0.0\n".to_string()),
+            }
+        };
+        let missing = read_packages(&root, &run).unwrap_err();
+        assert!(missing.contains("package-lock.json"), "{missing}");
+
+        std::fs::create_dir_all(root.join(NPM_LOCK).parent().unwrap()).unwrap();
+        std::fs::write(root.join(NPM_LOCK), "{ not json").unwrap();
+        let broken = read_packages(&root, &run).unwrap_err();
+        assert!(broken.contains("package-lock.json"), "{broken}");
+
+        std::fs::write(
+            root.join(NPM_LOCK),
+            r#"{"packages": {"node_modules/tool": {"version": "1.0.0", "license": "ISC", "dev": true}}}"#,
+        )
+        .unwrap();
+        let no_modules = read_packages(&root, &run).unwrap_err();
+        assert!(no_modules.contains("npm ci"), "{no_modules}");
+
+        let tool = root.join(NPM_MODULES).join("tool");
+        std::fs::create_dir_all(&tool).unwrap();
+        std::fs::write(tool.join("LICENSE"), "ISC text").unwrap();
+        let packages = read_packages(&root, &run).unwrap();
+        let names: Vec<&str> = packages.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["a", "c", "tool"]);
+        assert_eq!(packages[2].license_texts, ["ISC text"]);
+
+        let failing = |_: &[&str]| -> Result<String, String> { Err("no cargo".to_string()) };
+        assert_eq!(read_packages(&root, &failing).unwrap_err(), "no cargo");
+        let garbled = |_: &[&str]| -> Result<String, String> { Ok("{ nope".to_string()) };
+        let bad = read_packages(&root, &garbled).unwrap_err();
+        assert!(bad.starts_with("cargo metadata: "), "{bad}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // @verifies CT-DEV-014
+    #[test]
+    fn writes_the_outputs_and_copies_the_mpl_source() {
+        let dir = std::env::temp_dir().join(format!("clew-outputs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let archive = dir.join("opt-1.0.crate");
+        std::fs::write(&archive, "source").unwrap();
+        let mut mpl = package(Ecosystem::Cargo, "opt", "MPL-2.0", Scope::Shipped);
+        mpl.archive = Some(archive.clone());
+        let out = dir.join("out");
+        write_outputs(&out, &[mpl.clone()], "1.2.3").unwrap();
+        let notices = std::fs::read_to_string(out.join("THIRD-PARTY-NOTICES.txt")).unwrap();
+        let sbom = std::fs::read_to_string(out.join("sbom.cdx.json")).unwrap();
+        let copied = std::fs::read_to_string(out.join("mpl-sources/opt-1.0.crate")).unwrap();
+        assert!(notices.contains("opt"), "{notices}");
+        assert!(sbom.contains("1.2.3"), "{sbom}");
+        assert_eq!(copied, "source");
+
+        mpl.archive = None;
+        let err = write_outputs(&dir.join("out2"), &[mpl], "1.2.3").unwrap_err();
+        assert!(err.contains("no source archive found for opt"), "{err}");
+        let blocked = write_outputs(&archive.join("sub"), &[], "1.2.3").unwrap_err();
+        assert!(blocked.contains("mpl-sources"), "{blocked}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     // @verifies CT-DEV-008, CT-DEV-014
     #[test]
@@ -644,7 +796,7 @@ mod tests {
     }
 
     /// `cargo metadata` output for a small workspace member `app` and crates `a` and `c`.
-    fn metadata() -> Json {
+    fn metadata_text() -> String {
         let pkg = |name: &str, license: &str| {
             format!(
                 r#"{{"id": "{name}-id", "name": "{name}", "version": "1.0.0", "license": "{license}",
@@ -652,13 +804,16 @@ mod tests {
                 "manifest_path": "/home/u/.cargo/registry/src/index.crates.io-x/{name}-1.0.0/Cargo.toml"}}"#
             )
         };
-        let text = format!(
+        format!(
             r#"{{"packages": [{}, {}, {}], "workspace_members": ["app-id"]}}"#,
             pkg("app", "BUSL-1.1"),
             pkg("c", "MPL-2.0"),
             pkg("a", "MIT"),
-        );
-        json::parse(&text).expect("sample metadata parses")
+        )
+    }
+
+    fn metadata() -> Json {
+        json::parse(&metadata_text()).expect("sample metadata parses")
     }
 
     fn scopes(packages: &[Package]) -> Vec<(String, Scope)> {

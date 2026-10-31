@@ -25,6 +25,40 @@ pub struct Requirement {
     pub line: usize,
 }
 
+// @implements CT-TRC-008, CT-TRC-001
+impl Requirement {
+    /// The line `clew reqs list` prints: ID, name, verification method, and phase.
+    pub fn list_line(&self) -> String {
+        format!(
+            "{}  {}  {}  phase {}",
+            self.id,
+            self.name,
+            self.verification_method.as_deref().unwrap_or("-"),
+            self.phase_text()
+        )
+    }
+
+    /// The text `clew reqs show` prints: the fields, where it is defined in `path`, and
+    /// its doc.
+    pub fn show_text(&self, path: &str) -> String {
+        format!(
+            "{} {}\nVerification: {}\nPhase: {}\nLocation: {path}:{}\n\n{}\n",
+            self.id,
+            self.name,
+            self.verification_method.as_deref().unwrap_or("-"),
+            self.phase_text(),
+            self.line,
+            self.doc
+        )
+    }
+
+    /// The phase as a number, or `-` when the requirement has none.
+    fn phase_text(&self) -> String {
+        self.phase
+            .map_or_else(|| "-".to_string(), |p| p.to_string())
+    }
+}
+
 // @implements CT-DEV-001, CT-TRC-001, CT-USE-007
 #[derive(Debug)]
 pub enum ReadError {
@@ -324,6 +358,32 @@ mod tests {
         let err = read_requirements(Path::new("no/such/file.sysml")).unwrap_err();
         assert!(matches!(err, ReadError::Io { .. }));
         assert!(err.to_string().starts_with("no/such/file.sysml: "), "{err}");
+    }
+
+    // @verifies CT-TRC-008, CT-TRC-001
+    #[test]
+    fn formats_a_requirement_for_the_cli() {
+        let mut req = Requirement {
+            id: "CT-DEV-001".to_string(),
+            name: "reqsInRepo".to_string(),
+            doc: "It shall.".to_string(),
+            verification_method: Some("Inspection".to_string()),
+            phase: Some(0),
+            line: 7,
+        };
+        assert_eq!(
+            req.list_line(),
+            "CT-DEV-001  reqsInRepo  Inspection  phase 0"
+        );
+        assert_eq!(
+            req.show_text("model/r.sysml"),
+            "CT-DEV-001 reqsInRepo\nVerification: Inspection\nPhase: 0\n\
+             Location: model/r.sysml:7\n\nIt shall.\n"
+        );
+        req.verification_method = None;
+        req.phase = None;
+        assert_eq!(req.list_line(), "CT-DEV-001  reqsInRepo  -  phase -");
+        assert!(req.show_text("m").contains("Verification: -\nPhase: -\n"));
     }
 
     // @verifies CT-DEV-001, CT-TRC-001, CT-MOD-001

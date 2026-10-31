@@ -70,6 +70,18 @@ impl Report {
             .filter(|f| f.severity == severity)
             .count()
     }
+
+    /// The summary line a command prints after its findings, such as
+    /// `clew check: 3 files checked, 0 errors, 1 warning`.
+    pub fn summary(&self, command: &str) -> String {
+        let plural = |n: usize, word: &str| format!("{n} {word}{}", if n == 1 { "" } else { "s" });
+        format!(
+            "{command}: {} checked, {}, {}",
+            plural(self.files, "file"),
+            plural(self.count(Severity::Error), "error"),
+            plural(self.count(Severity::Warning), "warning")
+        )
+    }
 }
 
 /// A problem that stops the check from running, such as a broken `trace.toml`.
@@ -1139,6 +1151,34 @@ mod tests {
             fs::write(path, text).unwrap();
         }
         root
+    }
+
+    // @verifies CT-DEV-004, CT-USE-007
+    #[test]
+    fn the_summary_line_counts_and_pluralizes() {
+        let finding = |severity| Finding {
+            severity,
+            path: "a".to_string(),
+            line: 1,
+            message: "m".to_string(),
+            help: "h".to_string(),
+        };
+        let one = Report {
+            files: 1,
+            findings: vec![finding(Severity::Warning)],
+        };
+        assert_eq!(
+            one.summary("clew check"),
+            "clew check: 1 file checked, 0 errors, 1 warning"
+        );
+        let many = Report {
+            files: 3,
+            findings: vec![finding(Severity::Error), finding(Severity::Error)],
+        };
+        assert_eq!(
+            many.summary("clew notices"),
+            "clew notices: 3 files checked, 2 errors, 0 warnings"
+        );
     }
 
     // @verifies CT-DEV-002, CT-DEV-004
