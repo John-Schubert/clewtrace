@@ -90,6 +90,11 @@ jobs:
         working-directory: app
         run: npm run check
 
+      # @verifies CT-USE-002, CT-USE-004, CT-USE-005, CT-EFF-005, CT-SEC-003
+      - name: UI tests
+        working-directory: app
+        run: npm test
+
       # The Tauri crate embeds app/dist, so the UI is built before any cargo step.
       - name: UI build
         working-directory: app

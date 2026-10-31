@@ -136,6 +136,22 @@ serves = ["CT-DEV-004"]
 why = "Type checker for the UI, run by svelte-check. Version 6, the newest svelte-check supports"
 
 [[dep]]
+name = "vitest"
+ecosystem = "npm"
+license = "MIT"
+scope = "build-only"
+serves = ["CT-USE-002", "CT-USE-004", "CT-USE-005", "CT-EFF-005", "CT-SEC-003"]
+why = "Test runner for the UI (`npm test` in app/). Approved by John for task 2.4"
+
+[[dep]]
+name = "happy-dom"
+ecosystem = "npm"
+license = "MIT"
+scope = "build-only"
+serves = ["CT-USE-002", "CT-USE-004", "CT-USE-005", "CT-EFF-005"]
+why = "DOM for vitest, so Svelte components mount in UI tests without a browser. Approved by John for task 2.4"
+
+[[dep]]
 name = "svelte-check"
 ecosystem = "npm"
 license = "MIT"

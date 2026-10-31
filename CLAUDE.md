@@ -61,6 +61,9 @@ in `model/requirements.sysml` are the authority once code exists.
   and the CodeMirror 6 editor. SQLite (rusqlite, bundled) with FTS5 for the index.
 - **Svelte 5 runes syntax only** (`$state`, `$derived`, `$effect`, `$props`). Never use
   Svelte 4 patterns such as `export let`, `$:` reactive statements, or `createEventDispatcher`.
+- **The UI never puts project content in localStorage, sessionStorage, or IndexedDB.** It asks
+  the Rust core each time. Only UI preferences such as the theme may use them, and only in
+  files on the allowlist in `app/src/lib/storage-rule.test.ts`, which fails on any other use.
 - Keep component logic in `.ts` modules and components thin, so most UI code is scanned
   as plain TypeScript with item-level tags.
 - Source of truth: `.sysml` text files. The index in `.clewtrace/` is a rebuildable cache.
@@ -74,7 +77,7 @@ in `model/requirements.sysml` are the authority once code exists.
 - Trace gate: `cargo run -p clew-cli -- check --self` (alias `clew check --self` once installed)
 - Commit message check: `cargo run -p clew-cli -- check-commit .git/COMMIT_EDITMSG`
 - App dev: `cd app && npm install && npm run tauri dev`
-- Lint: `cargo clippy -- -D warnings`, `cargo fmt --check`, `npm run check` in `app/`
+- Lint: `cargo clippy -- -D warnings`, `cargo fmt --check`, `npm run check` and `npm test` in `app/`
 - Rust builds can take several minutes. Run long builds with a 10-minute timeout.
 
 ## How to work (keeps usage low on the Pro plan)

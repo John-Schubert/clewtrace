@@ -531,7 +531,7 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       - `commands.rs` and the folder dialog are not covered by tests, and `api.ts` has none
         until vitest arrives in 2.4. The dialog needs a manual check on each OS.
       - The recent tests were written together with the code, not seen failing first.
-- [ ] **2.4 App shell.** Pane layout (model browser, main view, trace panel, problems). Light
+- [x] **2.4 App shell.** Pane layout (model browser, main view, trace panel, problems). Light
       and dark themes from CSS tokens, following the OS setting, with a manual override. A
       command palette with an action registry that every later action joins. One shared
       virtual list component for any list that can pass 200 rows. Keyboard focus order and
@@ -542,6 +542,19 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       Split into two sessions if the first attempt overruns.
       Refs: CT-USE-002, CT-USE-005, CT-USE-004, CT-EFF-005, CT-SEC-003
       Model: Sonnet
+      Done: `Layout.svelte` has the five panes as landmarks in focus order, with a skip link.
+      Themes are CSS tokens in `App.svelte`, following the OS by media query and event, with
+      a manual override saved by `theme.ts` (the only file on the storage allowlist).
+      `actions.ts` is the registry and `CommandPalette.svelte` opens with Ctrl/Cmd+K.
+      `VirtualList.svelte` with `virtual.ts` is the shared list. vitest 5.0.5 and happy-dom
+      21.0.4 are in `deps.toml`, `npm test` runs in CI, and CLAUDE.md has the storage rule.
+      Follow-ups:
+      - Panes hold placeholders until 2.6 (browser, problems) and 2.7a (trace panel).
+      - Contrast ratios of the tokens were chosen by hand and are not tested yet. 2.5 should
+        run its probe script through the registry.
+      - No manual run on a real web view yet: check the palette, focus order, and themes on
+        each OS.
+      - `App.svelte` and `api.ts` have no unit tests, as they call Tauri directly.
 - [ ] **2.5 App performance probes.** A `perf-probe` Cargo feature, off in release builds (a
       test checks that `release.yml` passes no `--features` and that `default` does not
       include it). All timing and memory reading is on the Rust side, so no probe code is in
