@@ -586,6 +586,8 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       cached syntax trees of the other files. Perf tests: an edit in a 10,000-line file is
       validated within 1 s on the 4 GB, 2 CPU job, and the 10,000-requirement project stays
       within the CT-EFF-004 memory budget. ADR-0005 records the incremental design.
+      Element IDs stay stable across a rebuild, so the UI keeps its selection and
+      history while the user types (ADR-0004).
       Refs: CT-MOD-003, CT-EFF-007, CT-EFF-004
       Model: Opus
 - [ ] **2.9b Live validation in the app.** After a short pause in typing (a one-shot timer
