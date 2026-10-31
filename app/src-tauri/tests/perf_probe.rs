@@ -8,14 +8,18 @@ use std::process::Command;
 
 use clew_core::json::{Json, parse};
 
-/// CT-EFF-003: the main window is interactive within 2 s of launch.
-// @verifies CT-EFF-002, CT-EFF-003
-const MAX_INTERACTIVE_MS: f64 = 2000.0;
+/// CT-EFF-003: the main window is interactive within 4 s of launch on the CI runner.
+// @verifies CT-EFF-003
+const MAX_INTERACTIVE_MS: f64 = 4000.0;
 
-/// CT-EFF-002: resident memory when idle with an empty project, app and web view together.
-/// 250 MB on Linux (200 MB on Windows and macOS, checked by ci.yml).
-// @verifies CT-EFF-002, CT-EFF-003
-const MAX_IDLE_BYTES: u64 = 250 * 1_000_000;
+/// CT-EFF-002 on Linux: total proportional set size (PSS) of the app and its web view
+/// processes when idle with an empty project. Windows and macOS are checked by ci.yml.
+// @verifies CT-EFF-002
+const MAX_TOTAL_PSS_BYTES: u64 = 400 * 1_000_000;
+
+/// CT-EFF-010 on Linux: the app's own process, in PSS.
+// @verifies CT-EFF-010
+const MAX_APP_PSS_BYTES: u64 = 115 * 1_000_000;
 
 /// The number under `key`, or a message saying what the report held.
 // @verifies CT-EFF-002, CT-EFF-003
@@ -42,33 +46,57 @@ fn budget_failures(report: &str, check_memory: bool) -> Vec<String> {
         Err(e) => failures.push(e),
     }
     if check_memory {
-        match json.get("idle_memory").map(|m| number(m, "total_bytes")) {
-            Some(Ok(bytes)) if bytes > MAX_IDLE_BYTES as f64 => failures.push(format!(
-                "CT-EFF-002: idle resident memory was {:.0} MB, over the {} MB budget",
-                bytes / 1e6,
-                MAX_IDLE_BYTES / 1_000_000
-            )),
-            Some(Ok(_)) => {}
-            Some(Err(e)) => failures.push(e),
-            None => failures.push("the report has no idle_memory".into()),
+        let memory = json.get("idle_memory");
+        let limits = [
+            (
+                "pss_total_bytes",
+                MAX_TOTAL_PSS_BYTES,
+                "CT-EFF-002",
+                "idle PSS of the app and web view",
+            ),
+            (
+                "app_pss_bytes",
+                MAX_APP_PSS_BYTES,
+                "CT-EFF-010",
+                "idle PSS of the app process",
+            ),
+        ];
+        for (key, max, id, what) in limits {
+            match memory.map(|m| number(m, key)) {
+                Some(Ok(bytes)) if bytes > max as f64 => failures.push(format!(
+                    "{id}: {what} was {:.0} MB, over the {} MB budget",
+                    bytes / 1e6,
+                    max / 1_000_000
+                )),
+                Some(Ok(_)) => {}
+                Some(Err(e)) => failures.push(e),
+                None => failures.push("the report has no idle_memory".into()),
+            }
         }
     }
     failures
 }
 
-// @verifies CT-EFF-002, CT-EFF-003
+// @verifies CT-EFF-002, CT-EFF-003, CT-EFF-010
 #[test]
 fn the_budget_check_passes_within_budget_and_names_each_requirement_over_it() {
-    let ok = r#"{"time_to_interactive_ms":900.0,"idle_memory":{"total_bytes":200000000}}"#;
-    assert!(budget_failures(ok, true).is_empty());
-    let slow = r#"{"time_to_interactive_ms":2000.1,"idle_memory":{"total_bytes":250000001}}"#;
-    let failures = budget_failures(slow, true);
-    assert_eq!(failures.len(), 2, "{failures:?}");
+    let memory = |total: u64, app: u64| {
+        format!(r#""idle_memory":{{"pss_total_bytes":{total},"app_pss_bytes":{app}}}"#)
+    };
+    let report = |ms: &str, memory: &str| format!(r#"{{"time_to_interactive_ms":{ms},{memory}}}"#);
+    // Exactly on every budget passes.
+    let ok = report("4000.0", &memory(400_000_000, 115_000_000));
+    assert!(budget_failures(&ok, true).is_empty());
+    // One unit over each budget fails, and each failure names its requirement.
+    let over = report("4000.1", &memory(400_000_001, 115_000_001));
+    let failures = budget_failures(&over, true);
+    assert_eq!(failures.len(), 3, "{failures:?}");
     assert!(failures[0].starts_with("CT-EFF-003"));
     assert!(failures[1].starts_with("CT-EFF-002"));
-    assert_eq!(budget_failures(slow, false).len(), 1);
+    assert!(failures[2].starts_with("CT-EFF-010"));
+    assert_eq!(budget_failures(&over, false).len(), 1);
     assert_eq!(budget_failures("not json", true).len(), 1);
-    assert_eq!(budget_failures("{}", true).len(), 2);
+    assert_eq!(budget_failures("{}", true).len(), 3);
 }
 
 // @verifies CT-EFF-002, CT-EFF-003

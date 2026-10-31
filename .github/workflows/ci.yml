@@ -1,4 +1,4 @@
-# @file CT-DEV-003, CT-DEV-004, CT-DEV-005, CT-DEV-008, CT-DEV-014, CT-PLT-001, CT-EFF-009, CT-EFF-001, CT-EFF-002, CT-EFF-003
+# @file CT-DEV-003, CT-DEV-004, CT-DEV-005, CT-DEV-008, CT-DEV-014, CT-PLT-001, CT-EFF-009, CT-EFF-001, CT-EFF-002, CT-EFF-003, CT-EFF-010
 # CI gate on Ubuntu, Windows, and macOS: builds the desktop app (UI and Tauri crate), then
 # format, lint, tests, the trace gate, the license notices check, the commit hook, and (on
 # Ubuntu) commit trailers, cargo-deny, the performance budgets on 4 GB and 2 CPUs, the test
@@ -301,11 +301,13 @@ jobs:
             -- xvfb-run -a --server-args="-screen 0 1280x800x24" \
             "$bin" --ignored --nocapture
 
-  # CT-EFF-002: idle memory of the shipped build on Windows and macOS, read from a workflow
-  # step so no new crate is needed. The build is the release build without installers and
-  # without the perf-probe feature. The step starts the app with no project, waits for it to
-  # settle, and sums the resident memory of the app and its web view processes. Fails over
-  # 200 MB, or when no web view process is found (which would undercount).
+  # CT-EFF-002 and CT-EFF-010: idle memory of the shipped build on Windows and macOS, read
+  # from a workflow step so no new crate is needed. The build is the release build without
+  # installers and without the perf-probe feature. The step starts the app with no project,
+  # waits for it to settle, and measures the app and its web view processes: private working
+  # set on Windows, resident memory on macOS. Fails over the total budget (360 MB Windows,
+  # 250 MB macOS), over the app process budget (35 MB Windows, 105 MB macOS), or when no web
+  # view process is found (which would undercount).
   app-idle-memory:
     name: app idle memory (${{ matrix.os }})
     strategy:
@@ -339,8 +341,9 @@ jobs:
         working-directory: app
         run: npm run tauri build -- --ci --no-bundle
 
-      # Fails (exit 1) over 200 MB or with no web view process counted.
-      # @verifies CT-EFF-002
+      # Fails (exit 1) over 360 MB in total, over 35 MB for the app process, with no web view
+      # process, or with a process whose private working set cannot be read.
+      # @verifies CT-EFF-002, CT-EFF-010
       - name: Idle memory (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -354,19 +357,29 @@ jobs:
             $before = $ids.Count
             foreach ($p in $all) { if ($ids.Contains([int]$p.ParentProcessId)) { [void]$ids.Add([int]$p.ProcessId) } }
           } while ($ids.Count -ne $before)
-          $mine = $all | Where-Object { $ids.Contains([int]$_.ProcessId) }
-          $mine | ForEach-Object { "{0,6} {1,-24} {2,8:N0} KB" -f $_.ProcessId, $_.Name, ($_.WorkingSetSize / 1KB) }
-          $webview = @($mine | Where-Object { $_.Name -eq "msedgewebview2.exe" }).Count
-          $total = ($mine | Measure-Object -Property WorkingSetSize -Sum).Sum
+          $private = @{}
+          Get-CimInstance Win32_PerfFormattedData_PerfProc_Process | ForEach-Object { $private[[int]$_.IDProcess] = $_.WorkingSetPrivate }
+          $rows = $all | Where-Object { $ids.Contains([int]$_.ProcessId) } | ForEach-Object {
+            [pscustomobject]@{ Id = [int]$_.ProcessId; Name = $_.Name; Private = $private[[int]$_.ProcessId]; WorkingSet = $_.WorkingSetSize }
+          }
           Stop-Process -Id $app.Id -Force
-          "idle memory: {0:N0} MB in {1} processes ({2} web view)" -f ($total / 1e6), $mine.Count, $webview
+          $rows | ForEach-Object { "{0,6} {1,-24} private {2,8:N0} KB, working set {3,8:N0} KB" -f $_.Id, $_.Name, ($_.Private / 1KB), ($_.WorkingSet / 1KB) }
+          $webview = @($rows | Where-Object { $_.Name -eq "msedgewebview2.exe" }).Count
+          $missing = @($rows | Where-Object { $null -eq $_.Private }).Count
+          $total = ($rows | Measure-Object -Property Private -Sum).Sum
+          $appPrivate = ($rows | Where-Object { $_.Id -eq $app.Id }).Private
+          "idle private working set: {0:N0} MB in {1} processes ({2} web view), app process {3:N0} MB" -f ($total / 1e6), $rows.Count, $webview, ($appPrivate / 1e6)
+          if ($missing -gt 0) { Write-Error "No private working set for $missing process(es), so the total is too low."; exit 1 }
           if ($webview -eq 0) { Write-Error "No msedgewebview2 process under the app, so the total is too low."; exit 1 }
-          if ($total -gt 200e6) { Write-Error "CT-EFF-002: idle memory is over 200 MB."; exit 1 }
+          $failed = $false
+          if ($total -gt 360e6) { Write-Error "CT-EFF-002: idle private working set is over 360 MB."; $failed = $true }
+          if ($appPrivate -gt 35e6) { Write-Error "CT-EFF-010: the app process is over 35 MB."; $failed = $true }
+          if ($failed) { exit 1 }
 
-      # Fails (exit 1) over 200 MB or with no web view process counted. WKWebView runs its
-      # processes outside the app's process tree, so they are summed by name; a runner with
-      # no other web content has only the app's.
-      # @verifies CT-EFF-002
+      # Fails (exit 1) over 250 MB in total, over 105 MB for the app process, or with no web
+      # view process counted. WKWebView runs its processes outside the app's process tree, so
+      # they are summed by name; a runner with no other web content has only the app's.
+      # @verifies CT-EFF-002, CT-EFF-010
       - name: Idle memory (macOS)
         if: runner.os == 'macOS'
         run: |
@@ -381,7 +394,10 @@ jobs:
           total=$(( (app_kb + web_kb) * 1024 ))
           echo "idle memory: $(( total / 1000000 )) MB (app $app_kb KB, web view $web_kb KB)"
           if [ "$web_kb" -eq 0 ]; then echo "No WebKit process found, so the total is too low." >&2; exit 1; fi
-          if [ "$total" -gt 200000000 ]; then echo "CT-EFF-002: idle memory is over 200 MB." >&2; exit 1; fi
+          failed=0
+          if [ "$total" -gt 250000000 ]; then echo "CT-EFF-002: idle memory is over 250 MB." >&2; failed=1; fi
+          if [ $(( app_kb * 1024 )) -gt 105000000 ]; then echo "CT-EFF-010: the app process is over 105 MB." >&2; failed=1; fi
+          exit $failed
 
   # Test coverage of clew-core and clew-cli, measured by cargo-llvm-cov. The job prints the
   # total line coverage, writes it with a per-file table to the job summary, and fails when

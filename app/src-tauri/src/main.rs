@@ -46,7 +46,7 @@ fn project_arg(args: impl IntoIterator<Item = OsString>) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-// @implements CT-PLT-001, CT-PLT-003, CT-EFF-004, CT-EFF-005, CT-EFF-008
+// @implements CT-PLT-001, CT-PLT-003, CT-EFF-004, CT-EFF-005, CT-EFF-008, CT-EFF-011
 fn main() {
     #[cfg(feature = "perf-probe")]
     let started = std::time::Instant::now();

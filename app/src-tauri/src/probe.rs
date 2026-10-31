@@ -44,12 +44,14 @@ pub struct Proc {
 }
 
 /// Memory of the app and of the processes below it.
-// @implements CT-EFF-002
+// @implements CT-EFF-002, CT-EFF-010
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Memory {
     pub app_bytes: u64,
     pub webview_bytes: u64,
     pub pss_total_bytes: u64,
+    /// The app process alone, in PSS (CT-EFF-010).
+    pub app_pss_bytes: u64,
     pub processes: Vec<Proc>,
 }
 
@@ -116,7 +118,7 @@ pub fn descendants(procs: &[Proc], root: u32) -> Vec<Proc> {
 
 /// The memory of `root` (the app) and its descendants (the web view), or `None` when `root`
 /// is not in the table.
-// @implements CT-EFF-002
+// @implements CT-EFF-002, CT-EFF-010
 pub fn memory_of(procs: &[Proc], root: u32) -> Option<Memory> {
     let processes = descendants(procs, root);
     let app = processes.iter().find(|p| p.pid == root)?;
@@ -127,23 +129,25 @@ pub fn memory_of(procs: &[Proc], root: u32) -> Option<Memory> {
         app_bytes,
         webview_bytes,
         pss_total_bytes,
+        app_pss_bytes: app.pss_bytes,
         processes,
     })
 }
 
 /// The report as one line of JSON.
-// @implements CT-EFF-002, CT-EFF-003
+// @implements CT-EFF-002, CT-EFF-003, CT-EFF-010
 pub fn report_json(report: &Report) -> String {
     let ms = |d: &Duration| format!("{:.1}", d.as_secs_f64() * 1000.0);
     let mut out = format!(r#"{{"time_to_interactive_ms":{}"#, ms(&report.interactive));
     if let Some(m) = &report.memory {
         let _ = write!(
             out,
-            r#","idle_memory":{{"app_bytes":{},"webview_bytes":{},"total_bytes":{},"pss_total_bytes":{},"processes":["#,
+            r#","idle_memory":{{"app_bytes":{},"webview_bytes":{},"total_bytes":{},"pss_total_bytes":{},"app_pss_bytes":{},"processes":["#,
             m.app_bytes,
             m.webview_bytes,
             m.app_bytes + m.webview_bytes,
-            m.pss_total_bytes
+            m.pss_total_bytes,
+            m.app_pss_bytes
         );
         for (i, p) in m.processes.iter().enumerate() {
             let comma = if i > 0 { "," } else { "" };
@@ -396,7 +400,7 @@ fn finish(run: &Run, finished: &AtomicBool, window: &tauri::WebviewWindow) {
     window.app_handle().exit(0);
 }
 
-// @verifies CT-EFF-002, CT-EFF-003
+// @verifies CT-EFF-002, CT-EFF-003, CT-EFF-010
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -469,6 +473,7 @@ mod tests {
         assert_eq!(memory.app_bytes, 100 * 1024);
         assert_eq!(memory.webview_bytes, 350 * 1024);
         assert_eq!(memory.pss_total_bytes, 450 * 512);
+        assert_eq!(memory.app_pss_bytes, 100 * 512);
         assert_eq!(memory.processes.len(), 3);
         assert_eq!(memory_of(&procs, 99), None);
     }
@@ -492,6 +497,7 @@ mod tests {
         let memory = json.get("idle_memory").expect("idle_memory");
         assert!(memory.get("total_bytes").is_some());
         assert!(memory.get("pss_total_bytes").is_some());
+        assert!(memory.get("app_pss_bytes").is_some());
         assert_eq!(json.get("actions").unwrap().items().len(), 1);
     }
 

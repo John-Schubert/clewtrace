@@ -583,17 +583,20 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       no new command, capability, or UI code (a test checks the bundle has none). xvfb is in
       `deps.toml` as a CI tool.
       Follow-ups:
-      - **CT-EFF-002 and CT-EFF-003 fail in CI, so three jobs are red until John decides.**
-        The pipeline works (xvfb inside systemd-run, and the Windows and macOS steps all
-        measured). The numbers are over budget on every OS. First CI run, 2026-10-31:
-        - Linux (`perf`): 537 MB resident against 250 MB (PSS 350 MB), and 3292 ms to an
-          interactive window against 2000 ms. On a dev box with no CPU limit the same build
-          took about 1000 ms and used 507 MB, so the start time depends a lot on the
-          2-CPU limit and the cold start.
-        - Windows: 325 MB against 200 MB (app 30 MB, six `msedgewebview2` processes 295 MB).
-        - macOS: 210 MB against 200 MB (app 93 MB, WebKit processes 108 MB).
-        The gates are as the requirements say, and I did not loosen them. Options: raise
-        the budgets, define memory on PSS, measure warm starts, or cut memory.
+      - **Budgets reset on PR #36 (John approved, 2026-10-31).** The first CI runs were over
+        the original budgets on every OS: Linux 537 and 541 MB resident (PSS 350 and
+        354 MB) and 3292 and 3098 ms to an interactive window; Windows 325 MB working set
+        (app 30 MB, six `msedgewebview2` processes 295 MB); macOS 210 MB, then under 200 MB
+        (app 93 MB, WebKit processes 108 MB). The requirements now say: total memory
+        400 MB PSS on Linux, 360 MB private working set on Windows, 250 MB resident on macOS
+        (CT-EFF-002); app process alone 115 MB PSS, 35 MB private working set, 105 MB
+        resident (CT-EFF-010); window interactive within 4 s on the CI runner (CT-EFF-003)
+        and within 2 s on the reference machine at Gate 2 (CT-EFF-011). Budgets only go
+        down; task 2.5b lowers them.
+      - **Windows budget is a cap until measured.** The Windows step now reads private
+        working set. John's rule is the measured value plus 10%, capped at 360 MB. The first
+        CI run of the new step gives the value; if it is below 327 MB, lower CT-EFF-002 (and
+        the step) to it plus 10%.
       - Scripted actions took 32 to 40 ms each on the Linux runner. They are logged, not
         gated. The probe's second-frame measure is the only start-time definition so far.
       - macOS sums the `com.apple.WebKit.*` processes by name, since WKWebView runs them
@@ -603,6 +606,18 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
         pass" ruleset once they pass.
       - Web view idle CPU is not measured, only first-party code is checked (see
         `docs/verification/idle-cpu.md`).
+- [ ] **2.5b Lower the memory and start-time budgets.** Try, one at a time, the WebView2
+      memory settings (the memory usage target level and the browser arguments that limit
+      renderer processes), the WebKitGTK cache model and process model, and the compositing
+      settings (hardware acceleration and the compositing mode on Linux, and the
+      equivalents on Windows and macOS). Measure each with the 2.5 probes on all three
+      operating systems, and keep a setting only if it lowers a number without breaking the
+      app. Record each result, kept or not, with its before and after numbers under this
+      task. Then lower the CT-EFF-002, CT-EFF-003, and CT-EFF-010 budgets to what was
+      reached plus about 10%, with John's approval of the new text. Budgets only go down.
+      A setting that needs a new dependency stops for John.
+      Refs: CT-EFF-002, CT-EFF-003, CT-EFF-010
+      Model: Sonnet
 - [ ] **2.6 Model browser and problems.** A lazy, virtualized tree of packages, definitions,
       and usages. Element detail: kind, qualified name, doc, attributes, file and line. A
       problems panel with every syntax, name, and trace problem as file:line:column with its
@@ -701,11 +716,12 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
 - [ ] **Gate 2 check.** `clew check --self` shows 0 errors and 0 phase 2 coverage warnings
       (CT-MOD-003, -004, -005, CT-SEC-009, and CT-USE-009 are phase 2 warnings from task 2.0
       until their tasks land). The perf job passes every phase 2 budget with the app measured
-      (CT-EFF-002 to CT-EFF-006, CT-MOD-003). John installs the release build on his Windows 10
+      (CT-EFF-002 to CT-EFF-006, CT-EFF-010, CT-MOD-003). John installs the release build on his Windows 10
       laptop (4 GB), opens the Clewtrace repo, edits `model/requirements.sysml` with live
       errors, follows a requirement to its code and tests, ends the app in Task Manager during
       an edit and loses no saved work, and records idle memory including the WebView2
-      processes. The accessibility, command palette, themes, and editor checklists pass. Raise
+      processes, and the time to an interactive window (CT-EFF-011, 2 s;
+      `docs/verification/reference-start.md`). The accessibility, command palette, themes, and editor checklists pass. Raise
       the test coverage minimum to the measured value rounded down, and make the `app/src-tauri`
       coverage enforced. Then set `current_phase = 3`.
 
