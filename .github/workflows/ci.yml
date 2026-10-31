@@ -343,7 +343,7 @@ jobs:
             echo "No minimum until Gate 2."
             echo
             echo '```'
-            grep -E '^(Filename|-{10}|app/|src|TOTAL)' "$RUNNER_TEMP/app-coverage.txt"
+            grep -E '^(Filename|-{10}|[A-Za-z_]+\.rs |TOTAL)' "$RUNNER_TEMP/app-coverage.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
