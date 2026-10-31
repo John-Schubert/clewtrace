@@ -190,6 +190,37 @@ export function search(text: string, offset = 0, limit = MAX_PAGE): Promise<Page
   return call('search', { text, offset, limit });
 }
 
+// @implements CT-SEC-003
+/** A recent project: the folder path and its name. Paths only, never project content. */
+export interface RecentProject {
+  path: string;
+  name: string;
+}
+
+// @implements CT-SEC-003
+/** Shows the OS folder dialog. Resolves with the chosen folder, or null when cancelled. */
+export function pickFolder(): Promise<string | null> {
+  return call('pick_folder', {});
+}
+
+// @implements CT-SEC-003, CT-USE-007
+/** Opens the project in `path`; resolves with the status once its load ends. */
+export function openProject(path: string): Promise<ProjectStatus> {
+  return invoke<ProjectStatus>('open_project', { path });
+}
+
+// @implements CT-SEC-003
+/** The recent projects, newest first. */
+export function recentProjects(): Promise<RecentProject[]> {
+  return call('recent_projects', {});
+}
+
+// @implements CT-SEC-003
+/** Empties the recent list. */
+export function clearRecent(): Promise<void> {
+  return call<unknown[]>('clear_recent', {}).then(() => undefined);
+}
+
 // @implements CT-EFF-004, CT-USE-007
 /** One line describing a project status, for the window until the app shell exists. */
 export function describeStatus(status: ProjectStatus): string {

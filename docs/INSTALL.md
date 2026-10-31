@@ -50,6 +50,18 @@ available from a local mirror or installed first.
 There is no AppImage. It would bundle GTK and WebKitGTK, which are LGPL, and exceed the
 20 MB installer budget (ADR-0001, ADR-0003).
 
+## Recent projects
+
+Clewtrace keeps a list of the folders you opened, newest first, up to 10. It holds folder
+paths only, never project content, and the app never sends it anywhere (CT-SEC-003). The
+list is the text file `recent-projects.txt`, one path per line, in the app config folder:
+
+- Windows: `%APPDATA%\io.github.john-schubert.clewtrace\recent-projects.txt`
+- macOS: `~/Library/Application Support/io.github.john-schubert.clewtrace/recent-projects.txt`
+- Linux: `~/.config/io.github.john-schubert.clewtrace/recent-projects.txt`
+
+Choose "Clear recent" in the app, or delete the file, to empty the list.
+
 ## License notices
 
 `THIRD-PARTY-NOTICES.txt` is installed next to the program on Windows, in

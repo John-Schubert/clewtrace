@@ -35,7 +35,11 @@ pub struct AppError {
 
 // @implements CT-USE-007
 impl AppError {
-    fn new(what: impl Into<String>, place: impl Into<String>, help: impl Into<String>) -> Self {
+    pub(crate) fn new(
+        what: impl Into<String>,
+        place: impl Into<String>,
+        help: impl Into<String>,
+    ) -> Self {
         AppError {
             what: what.into(),
             place: place.into(),
