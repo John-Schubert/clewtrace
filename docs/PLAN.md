@@ -610,7 +610,7 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
         pass" ruleset once they pass.
       - Web view idle CPU is not measured, only first-party code is checked (see
         `docs/verification/idle-cpu.md`).
-- [ ] **2.5b Lower the memory and start-time budgets.** Try, one at a time, the WebView2
+- [x] **2.5b Lower the memory and start-time budgets.** Try, one at a time, the WebView2
       memory settings (the memory usage target level and the browser arguments that limit
       renderer processes), the WebKitGTK cache model and process model, and the compositing
       settings (hardware acceleration and the compositing mode on Linux, and the
@@ -622,6 +622,34 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       A setting that needs a new dependency stops for John.
       Refs: CT-EFF-002, CT-EFF-003, CT-EFF-010
       Model: Sonnet
+      Done: three CI runs of a temporary workflow (removed again), each launching the app 3
+      times per variant with the 2.5 probes. Results, in MB of PSS on Linux and private
+      working set on Windows, range over the 9 launches:
+      - **Kept: Linux `WEBKIT_DISABLE_DMABUF_RENDERER=1`**, set in `main` before any thread
+        starts, unless the user set it. Total 330 to 354 -> 196 (all 9 launches), app
+        process 99 to 103 -> 84, time to interactive about 750 to 900 ms -> 640 to 730 ms.
+      - Not kept: Linux `WEBKIT_DISABLE_COMPOSITING_MODE=1` (total 210, app 94 to 98, so
+        worse than DMABUF off, and no gain with both). `LIBGL_ALWAYS_SOFTWARE=1` (330 to
+        338, no change; xvfb has no GPU anyway).
+      - Not kept: Windows `--renderer-process-limit=1`, `--disable-gpu`, `--in-process-gpu`,
+        `--disable-gpu --renderer-process-limit=1`, and a longer `--disable-features` list,
+        passed through `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`. All gave 61 to 67 total and
+        3 for the app, the same as the baseline (62 to 67). WebView2 still ran 7 processes.
+      - Not tried, needs a new crate (stops for John): the WebView2 memory usage target
+        level (`webview2-com`) and the WebKitGTK cache model (`webkit2gtk`). The WebKitGTK
+        process model has no setting in 4.1. WKWebView has no setting reachable without
+        new objc crates, so macOS stays at the baseline: total 173 to 232 over 6 launches
+        (3 more in run 1 read 175 to 345 because WebKit processes of the previous launch
+        were still running; the job now waits for them), app process 93 to 95.
+      - Budget numbers and the "shall not be raised" wording wait for John's approval on the
+        PR. Until he approves, the requirements and the CI gates are unchanged.
+      Follow-ups:
+      - After approval: edit the three requirements, the constants in
+        `app/src-tauri/tests/perf_probe.rs`, and the Windows and macOS steps in `ci.yml`.
+      - Only the Linux probe measures start time. Windows and macOS start time is not
+        measured, so CT-EFF-003 is a Linux CI number.
+      - The DMABUF setting is not measured on real hardware with a GPU. Gate 2 should check
+        that the window still renders and scrolls smoothly on the reference machine.
 - [ ] **2.6 Model browser and problems.** A lazy, virtualized tree of packages, definitions,
       and usages. Element detail: kind, qualified name, doc, attributes, file and line. A
       problems panel with every syntax, name, and trace problem as file:line:column with its
