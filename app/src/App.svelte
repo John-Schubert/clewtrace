@@ -1,11 +1,12 @@
 <script lang="ts">
-  // @begin CT-PLT-001, CT-EFF-004
+  // @begin CT-PLT-001, CT-EFF-004, CT-MOD-005
   // The app window: shows the app name and version, read from the Rust side, and the
   // project opened from the command line once its background load ends.
   import { getName, getVersion } from '@tauri-apps/api/app';
   import {
     clearRecent,
     describeStatus,
+    type ProjectStatus,
     openProject,
     pickFolder,
     recentProjects,
@@ -13,6 +14,10 @@
     type RecentProject,
   } from './lib/api';
   import { ActionRegistry } from './lib/actions';
+  import DetailView from './lib/DetailView.svelte';
+  import ModelBrowser from './lib/ModelBrowser.svelte';
+  import ProblemsPanel from './lib/ProblemsPanel.svelte';
+  import type { Selection } from './lib/describe';
   import Tokens from './lib/Tokens.svelte';
   import CommandPalette from './lib/CommandPalette.svelte';
   import { isPaletteShortcut, nextPane, PANES, type Pane } from './shell';
@@ -27,14 +32,23 @@
   let name = $state('Clewtrace');
   let version = $state('');
   let project = $state('');
+  // Counts the projects opened. The browser and problems panes start again for each one.
+  let opened = $state(0);
+  let selection = $state<Selection>();
+
+  function showStatus(status: ProjectStatus) {
+    project = describeStatus(status);
+    selection = undefined;
+    if (status.state === 'ready') {
+      opened += 1;
+    }
+  }
 
   Promise.all([getName(), getVersion()]).then(([n, v]) => {
     name = n;
     version = v;
   });
-  waitForProject().then((status) => {
-    project = describeStatus(status);
-  });
+  waitForProject().then(showStatus);
   // @end
 
   // @begin CT-SEC-003, CT-USE-007
@@ -55,7 +69,7 @@
     problem = '';
     project = `Opening ${path}`;
     try {
-      project = describeStatus(await openProject(path));
+      showStatus(await openProject(path));
       await reloadRecent();
     } catch (e) {
       show(e);
@@ -163,7 +177,7 @@
 <svelte:window onkeydown={onwindowkeydown} />
 <!-- @end -->
 
-<!-- @begin CT-PLT-001, CT-EFF-004, CT-SEC-003, CT-USE-007, CT-USE-004 -->
+<!-- @begin CT-PLT-001, CT-EFF-004, CT-SEC-003, CT-USE-007, CT-USE-004, CT-MOD-005 -->
 <Tokens />
 <a class="skip" href="#pane-main">Skip to main view</a>
 <div class="shell">
@@ -182,7 +196,11 @@
   </header>
   <nav id="pane-browser" tabindex="-1" aria-label="Model browser">
     <h2>Model browser</h2>
-    <p class="muted">The model tree arrives in task 2.6.</p>
+    {#if opened > 0}
+      {#key opened}
+        <ModelBrowser onselect={(id) => (selection = { kind: 'element', id })} />
+      {/key}
+    {/if}
     {#if recent.length > 0}
       <h3>Recent projects</h3>
       <ul>
@@ -201,6 +219,9 @@
     {#if problem}
       <p class="problem" role="alert">{problem}</p>
     {/if}
+    {#if selection}
+      <DetailView {selection} />
+    {/if}
   </main>
   <aside id="pane-trace" tabindex="-1" aria-label="Trace panel">
     <h2>Trace panel</h2>
@@ -208,7 +229,11 @@
   </aside>
   <section id="pane-problems" tabindex="-1" aria-label="Problems">
     <h2>Problems</h2>
-    <p class="muted">The problems list arrives in task 2.6.</p>
+    {#if opened > 0}
+      {#key opened}
+        <ProblemsPanel onselect={(p) => (selection = { kind: 'problem', problem: p })} />
+      {/key}
+    {/if}
   </section>
 </div>
 {#if paletteOpen}

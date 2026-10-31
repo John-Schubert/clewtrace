@@ -1,0 +1,70 @@
+// A list backed by pages fetched on demand. The UI holds only the pages it has asked for.
+import { MAX_PAGE, type Page } from './api';
+
+// @implements CT-EFF-005, CT-USE-007
+export class PagedRows<Row> {
+  count = 0;
+  private readonly loaded = new Map<number, Row[]>();
+  private readonly pending = new Map<number, Promise<void>>();
+  private generation = 0;
+
+  constructor(
+    private readonly fetch: (offset: number, limit: number) => Promise<Page<Row>>,
+    private readonly onchange: () => void,
+    private readonly pageSize = MAX_PAGE,
+    private readonly onerror: (e: unknown) => void = () => {},
+  ) {}
+
+  /** Forgets every page and loads the first, which tells how many rows there are. */
+  async reset(): Promise<void> {
+    this.generation++;
+    this.loaded.clear();
+    this.pending.clear();
+    this.count = 0;
+    await this.load(0);
+    this.onchange();
+  }
+
+  /** The row at an index, or undefined while its page loads (which this starts). */
+  at(index: number): Row | undefined {
+    const page = Math.floor(index / this.pageSize);
+    const rows = this.loaded.get(page);
+    if (rows === undefined) {
+      void this.load(page);
+      return undefined;
+    }
+    return rows[index - page * this.pageSize];
+  }
+
+  /** Resolves when every page asked for so far has arrived. */
+  async idle(): Promise<void> {
+    while (this.pending.size > 0) {
+      await Promise.all([...this.pending.values()]);
+    }
+  }
+
+  private load(page: number): Promise<void> {
+    const running = this.pending.get(page);
+    if (running) {
+      return running;
+    }
+    const generation = this.generation;
+    const task = this.fetch(page * this.pageSize, this.pageSize)
+      .then((result) => {
+        if (generation !== this.generation) {
+          return;
+        }
+        this.loaded.set(page, result.rows);
+        this.count = result.total ?? this.count;
+        this.onchange();
+      })
+      .catch((e: unknown) => this.onerror(e))
+      .finally(() => {
+        if (this.pending.get(page) === task) {
+          this.pending.delete(page);
+        }
+      });
+    this.pending.set(page, task);
+    return task;
+  }
+}
