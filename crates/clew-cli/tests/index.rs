@@ -15,7 +15,7 @@ fn clew_in(dir: &Path, args: &[&str]) -> Output {
 
 // @verifies CT-MOD-001
 fn fixture(name: &str) -> PathBuf {
-    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let root = std::env::temp_dir().join("clew-cli-tests").join(name);
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(root.join("model")).unwrap();
     fs::write(

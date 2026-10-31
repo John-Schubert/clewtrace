@@ -37,7 +37,7 @@ fn body<'a>(stdout: &'a str, command: &str) -> &'a str {
 
 // @verifies CT-TRC-004, CT-TRC-005
 fn fixture(name: &str) -> PathBuf {
-    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let root = std::env::temp_dir().join("clew-cli-tests").join(name);
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(root.join("model")).unwrap();
     fs::create_dir_all(root.join("src")).unwrap();

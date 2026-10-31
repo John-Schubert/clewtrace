@@ -433,12 +433,27 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
         cache, the coverage floor, and the `installer-size` job.
       - The review counted 22 phase 2 tasks. After its five phase 2 splits there are 20; the
         two other splits (3.1 and 3.7) are in phase 3.
-- [ ] **2.1a Project opener and CLI tests.** A shared `Project::open(path)` that finds the
+- [x] **2.1a Project opener and CLI tests.** A shared `Project::open(path)` that finds the
       project root (nearest folder with `trace.toml` or `.clewtrace/`, else the given
       folder), used by every `clew` command and later by the app. Move logic out of
       `clew-cli/src/main.rs` (50.7% test coverage) into tested functions.
       Refs: CT-TRC-008, CT-USE-007, CT-DEV-003
       Model: Sonnet
+      Done in `crates/clew-core/src/project.rs`: `find_root` and `Project::open`, and a `root`
+      field on `Project`. Every `clew` command except `notices` now finds the root from the
+      current folder; docs in `docs/MODELING.md`. Moved out of `main.rs` into tested core
+      functions: the `reqs` output (`Requirement::list_line`, `show_text`), the report
+      summary line (`Report::summary`), `notices::read_packages` (with an injected cargo
+      runner) and `notices::write_outputs`. `main.rs` test coverage went from 50.7% to
+      66.7% of lines; the total is 97.2%.
+      Follow-ups:
+      - The remaining untested `main.rs` code is `clew notices` and its cargo runner, and
+        the error branches of the other commands. A `notices` test needs `npm ci` and six
+        `cargo metadata` runs, so CI is its only check.
+      - Test fixtures that must have no project above them moved from `target/tmp` (inside the
+        repo) to the system temp folder, since the root lookup would find the repo's
+        `trace.toml`.
+      - `Project::open` has no caller yet but the tests; the app uses it in 2.3a.
 - [ ] **2.1b Model checks.** Read a phase given only as a default on a requirement
       definition. Warn on an ambiguous name. Report an import of a standard library package
       that is not built in (such as ISQ or SI) once, as a warning that its names are not
