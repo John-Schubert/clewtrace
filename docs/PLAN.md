@@ -588,15 +588,19 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
         354 MB) and 3292 and 3098 ms to an interactive window; Windows 325 MB working set
         (app 30 MB, six `msedgewebview2` processes 295 MB); macOS 210 MB, then under 200 MB
         (app 93 MB, WebKit processes 108 MB). The requirements now say: total memory
-        400 MB PSS on Linux, 360 MB private working set on Windows, 250 MB resident on macOS
+        400 MB PSS on Linux, 74 MB private working set on Windows, 250 MB resident on macOS
         (CT-EFF-002); app process alone 115 MB PSS, 35 MB private working set, 105 MB
         resident (CT-EFF-010); window interactive within 4 s on the CI runner (CT-EFF-003)
         and within 2 s on the reference machine at Gate 2 (CT-EFF-011). Budgets only go
         down; task 2.5b lowers them.
-      - **Windows budget is a cap until measured.** The Windows step now reads private
-        working set. John's rule is the measured value plus 10%, capped at 360 MB. The first
-        CI run of the new step gives the value; if it is below 327 MB, lower CT-EFF-002 (and
-        the step) to it plus 10%.
+      - **Windows total budget set from the first private-working-set run.** The CI step
+        measured 67 MB for the app and its six `msedgewebview2` processes (the app process
+        3 MB), against 325 MB for the plain working set, which counts shared pages in every
+        process. By John's rule (measured plus 10%, capped at 360 MB) CT-EFF-002 is now
+        74 MB on Windows. The 35 MB Windows budget for the app process in CT-EFF-010 is
+        far above the 3 MB measured; John set it, so 2.5b may lower it. Other first runs
+        under the new budgets: macOS 180 MB total (app 95 MB, WebKit 81 MB), and the
+        Linux `perf` job passed.
       - Scripted actions took 32 to 40 ms each on the Linux runner. They are logged, not
         gated. The probe's second-frame measure is the only start-time definition so far.
       - macOS sums the `com.apple.WebKit.*` processes by name, since WKWebView runs them
