@@ -13,7 +13,19 @@ publish.workspace = true
 [build-dependencies]
 tauri-build = { version = "2.7.3", default-features = false, features = ["config-json"] }
 
+[features]
+# Off by default and never passed by release.yml (a test checks both). Builds the probes in
+# src/probe.rs, which measure start time, idle memory, and action latency for CI (CT-EFF-002,
+# CT-EFF-003). `tauri/custom-protocol` makes the build load the embedded UI like a shipped
+# build does, since cargo alone does not (the Tauri CLI adds it for release builds).
+default = []
+perf-probe = ["tauri/custom-protocol"]
+
 [dependencies]
 clew-core = { version = "0.1.0", path = "../../crates/clew-core" }
 tauri = { version = "2.12.4", default-features = false, features = ["wry"] }
 rfd = { version = "0.17.2", default-features = false, features = ["gtk3"] }
+
+[[test]]
+name = "perf_probe"
+required-features = ["perf-probe"]

@@ -557,7 +557,7 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
         placeholders until 2.6 and 2.7a.
       - Colors were chosen for AA contrast but not measured with a tool.
       - Tokens are a style-only Svelte component, since the scanner does not read plain CSS.
-- [ ] **2.5 App performance probes.** A `perf-probe` Cargo feature, off in release builds (a
+- [x] **2.5 App performance probes.** A `perf-probe` Cargo feature, off in release builds (a
       test checks that `release.yml` passes no `--features` and that `default` does not
       include it). All timing and memory reading is on the Rust side, so no probe code is in
       the UI bundle. It reports time to an interactive window and the resident memory of the
@@ -577,6 +577,29 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       each action to the next painted frame, and exit. No new dependency.
       Refs: CT-EFF-002, CT-EFF-003, CT-EFF-008, CT-EFF-009
       Model: Sonnet
+      Done: the probe is `app/src-tauri/src/probe.rs`. `CLEW_PROBE=idle` or `script` makes
+      the app print one JSON line and exit. Time to interactive is the second painted frame
+      after the page loads. The web view reports back through `document.title`, so there is
+      no new command, capability, or UI code (a test checks the bundle has none). xvfb is in
+      `deps.toml` as a CI tool.
+      Follow-ups:
+      - **CT-EFF-002 fails on Linux, so the perf job is red until John decides.** Measured
+        here in a release build under xvfb with software rendering: 507 MB resident (app
+        166 MB, WebKitWebProcess 286 MB, WebKitNetworkProcess 49 MB) against the 250 MB
+        budget. Proportional memory (PSS, shared pages counted once) is about 333 MB, also
+        over. The probe reports both and the gate uses resident memory, as the requirement
+        says. Options: raise the budget, define the budget on PSS, or cut memory. Not
+        decided here, since it changes a CI gate.
+      - Time to interactive is about 1.0 s in the same run (budget 2 s). Scripted actions
+        took 28 to 48 ms each in a debug build. They are logged, not gated.
+      - Not run here: the `systemd-run` limits (no systemd in this sandbox), and the Windows
+        and macOS idle-memory steps. The new `app-idle-memory` job and the xvfb step in
+        the `perf` job need a first CI run. macOS sums the `com.apple.WebKit.*` processes by
+        name, since WKWebView runs them outside the app's process tree.
+      - John adds `app idle memory (windows-latest)` and `(macos-latest)` to the "CI must
+        pass" ruleset once they pass.
+      - Web view idle CPU is not measured, only first-party code is checked (see
+        `docs/verification/idle-cpu.md`).
 - [ ] **2.6 Model browser and problems.** A lazy, virtualized tree of packages, definitions,
       and usages. Element detail: kind, qualified name, doc, attributes, file and line. A
       problems panel with every syntax, name, and trace problem as file:line:column with its

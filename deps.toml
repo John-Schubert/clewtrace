@@ -215,6 +215,14 @@ serves = ["CT-PLT-001", "CT-DEV-004"]
 why = "Node.js and npm from the runner image: install, check, and build the UI. Vite 7 needs 20.19 or newer"
 
 [[dep]]
+name = "xvfb"
+ecosystem = "ci"
+license = "MIT"
+scope = "build-only"
+serves = ["CT-EFF-002", "CT-EFF-003"]
+why = "Headless X display so the perf job can run the app and measure its start time and idle memory on Linux. An apt package (with xauth, which xvfb-run needs), installed in CI only, never shipped. Run inside the systemd-run scope because sudo drops DISPLAY. Approved by John for task 2.5 (PR #27)"
+
+[[dep]]
 name = "gh"
 ecosystem = "ci"
 license = "MIT"

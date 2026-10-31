@@ -11,6 +11,8 @@
 // @begin CT-EFF-004, CT-EFF-005
 mod commands;
 mod data;
+#[cfg(feature = "perf-probe")]
+mod probe;
 mod recent;
 
 use std::ffi::OsString;
@@ -44,14 +46,23 @@ fn project_arg(args: impl IntoIterator<Item = OsString>) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-// @implements CT-PLT-001, CT-PLT-003, CT-EFF-004, CT-EFF-005
+// @implements CT-PLT-001, CT-PLT-003, CT-EFF-004, CT-EFF-005, CT-EFF-008
 fn main() {
+    #[cfg(feature = "perf-probe")]
+    let started = std::time::Instant::now();
     let state = Arc::new(AppState::default());
     // Loading starts before the window opens and runs beside it.
     if let Some(path) = project_arg(std::env::args_os().skip(1)) {
         state.open(path);
     }
-    tauri::Builder::default()
+    #[cfg_attr(not(feature = "perf-probe"), allow(unused_mut))]
+    let mut context = context();
+    #[cfg(feature = "perf-probe")]
+    probe::prepare(&mut context);
+    let builder = tauri::Builder::default();
+    #[cfg(feature = "perf-probe")]
+    let builder = builder.setup(move |app| probe::start(app, started));
+    builder
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::project_status,
@@ -66,7 +77,7 @@ fn main() {
             commands::recent_projects,
             commands::clear_recent,
         ])
-        .run(context())
+        .run(context)
         .expect("Clewtrace could not start its window");
 }
 
