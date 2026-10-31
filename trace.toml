@@ -61,7 +61,7 @@ requirement = "CT-PLT-001"
 # https://github.com/John-Schubert/clewtrace/pull/25#issuecomment-6351691822
 [[waiver]]
 id = "CT-PLT-001"
-reason = "ARM64 installers are not built yet: the release workflow builds the Windows MSI and the Linux deb and rpm for x64 only (the macOS DMG is already universal). The x64 installers are verified by the release workflow's tagged Installer size step. Waived until phase 2, when John rewords the requirement to name the ARM64 targets. Approved in John's decisions comment on PR #25: https://github.com/John-Schubert/clewtrace/pull/25#issuecomment-6351691822"
+reason = "ARM64 installers are not built yet: the release workflow builds the Windows MSI and the Linux deb and rpm for x64 only (the macOS DMG is already universal). The x64 installers are verified by the release workflow's tagged Installer size step. The requirement now names the Linux ARM64 targets (John, PR #27). Waived until Gate 2: task 2.14 builds the Linux ARM64 deb and rpm and removes this waiver. Originally approved in John's decisions comment on PR #25 (https://github.com/John-Schubert/clewtrace/pull/25#issuecomment-6351691822), and the end moved from phase 2 to Gate 2 in his decisions on PR #27."
 status = "approved"
 approved_by = "John Schubert"
 date = "2026-10-22"

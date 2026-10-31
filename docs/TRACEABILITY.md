@@ -162,11 +162,12 @@ first-party code lies in a scope tagged with a requirement, as `clew check --sel
 (John, 2026-10-22). Test coverage, the share of lines the tests run, is measured
 separately.
 
-- The `coverage (report only)` CI job runs cargo-llvm-cov on the clew-core and clew-cli
-  tests (not the desktop app crate). It prints the total line coverage and writes it, with
-  a per-file table, to the job summary.
-- The number is report-only until John sets a minimum: the job never fails on it. Once John
-  sets a minimum, it only goes up, never down.
+- The `coverage` CI job runs cargo-llvm-cov on the clew-core and clew-cli tests (not the
+  desktop app crate). It prints the total line coverage and writes it, with a per-file
+  table, to the job summary.
+- John set a minimum of 95% of lines (decision 6 on PR #27, 2026-10-31). The job fails
+  below it, and John adds it to the "CI must pass" ruleset. The minimum only goes up,
+  never down: at each gate, raise it to the measured value rounded down to a whole percent.
 - Still give every new error path and branch a test in the task that adds it.
 - To measure it locally: `cargo install cargo-llvm-cov --locked --version 0.9.1`,
   `rustup component add llvm-tools-preview`, then
