@@ -65,6 +65,8 @@ pub struct Report {
 /// The parent ID and name from the text of `/proc/<pid>/stat`. The name sits in
 /// parentheses and may itself hold spaces and parentheses, so the last `)` ends it.
 // @implements CT-EFF-002
+// Only the Linux reader calls it; the tests run it everywhere.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn parse_stat(text: &str) -> Option<(u32, String)> {
     let open = text.find('(')?;
     let close = text.rfind(')')?;
@@ -81,6 +83,8 @@ pub fn parse_stat(text: &str) -> Option<(u32, String)> {
 
 /// The resident memory in bytes from the text of `/proc/<pid>/status` (`VmRSS`, in kB).
 // @implements CT-EFF-002
+// Only the Linux reader calls it; the tests run it everywhere.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn parse_rss_bytes(text: &str) -> Option<u64> {
     let line = text.lines().find_map(|l| l.strip_prefix("VmRSS:"))?;
     let kb: u64 = line.split_whitespace().next()?.parse().ok()?;
@@ -89,6 +93,8 @@ pub fn parse_rss_bytes(text: &str) -> Option<u64> {
 
 /// The proportional memory in bytes from the text of `/proc/<pid>/smaps_rollup`.
 // @implements CT-EFF-002
+// Only the Linux reader calls it; the tests run it everywhere.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn parse_pss_bytes(text: &str) -> Option<u64> {
     let line = text.lines().find_map(|l| l.strip_prefix("Pss:"))?;
     let kb: u64 = line.split_whitespace().next()?.parse().ok()?;
