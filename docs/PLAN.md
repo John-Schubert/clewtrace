@@ -454,13 +454,23 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
         repo) to the system temp folder, since the root lookup would find the repo's
         `trace.toml`.
       - `Project::open` has no caller yet but the tests; the app uses it in 2.3a.
-- [ ] **2.1b Model checks.** Read a phase given only as a default on a requirement
+- [x] **2.1b Model checks.** Read a phase given only as a default on a requirement
       definition. Warn on an ambiguous name. Report an import of a standard library package
       that is not built in (such as ISQ or SI) once, as a warning that its names are not
       checked, instead of one error per name. Check that satisfy and verify targets are
       requirements. Report a short name used by two requirements as an error.
       Refs: CT-MOD-002, CT-TRC-001, CT-TRC-002, CT-DEV-003, CT-USE-007
       Model: Sonnet
+      Done in `model.rs` and `reqs.rs`: `ModelError` has a `warning` flag, and
+      `Project::warnings` holds the warnings (they print in reports but do not set the
+      problems exit code). `PhaseDefaults` reads a phase from the requirement definition,
+      across files. Documented in `docs/MODELING.md`.
+      Follow-ups:
+      - The list of standard library package names in `model.rs` (`STANDARD_PACKAGES`) is
+        a fixed list. A qualified use such as `ISQ::mass` with no import is still an error.
+      - A satisfy or verify of a requirement definition is accepted, not only a usage.
+      - Ambiguity is checked for owned members only, not for two imports that supply the
+        same name.
 - [ ] **2.2 Svelte script scanning.** Scan `<script lang="ts">` blocks with the TypeScript
       grammar, offsetting line numbers, so functions in components get item-level tags.
       Markup stays covered by the component tag or regions. Read `<!-- @file -->` in HTML

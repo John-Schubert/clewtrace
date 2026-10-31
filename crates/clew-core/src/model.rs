@@ -13,6 +13,7 @@
 //! a qualified name see only public members. A built-in `ScalarValues` package stands in for
 //! the standard library, next to the built-in `Clewtrace` package of trace link metadata.
 
+use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 
@@ -171,17 +172,26 @@ pub struct Reference {
 }
 
 // @implements CT-MOD-002, CT-USE-007
-/// An unresolved name: the file it is in and where, what, and how to fix it.
+/// An unresolved name or another model problem: the file it is in and where, what, and how
+/// to fix it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelError {
     pub path: String,
     pub error: SyntaxError,
+    /// True for a warning, which leaves the model usable; false for an error.
+    pub warning: bool,
 }
 
 // @implements CT-USE-007
 impl fmt::Display for ModelError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.error.render(&self.path))
+        let e = &self.error;
+        let severity = if self.warning { "warning" } else { "error" };
+        write!(
+            f,
+            "{}:{}:{}: {severity}: {}\n  help: {}",
+            self.path, e.line, e.column, e.message, e.help
+        )
     }
 }
 
@@ -194,7 +204,7 @@ pub struct Model {
     /// Elements, the root first.
     pub elements: Vec<Element>,
     pub references: Vec<Reference>,
-    /// Unresolved names, sorted by file, line, and column.
+    /// Unresolved names and other problems, sorted by file, line, and column.
     pub errors: Vec<ModelError>,
 }
 
@@ -384,43 +394,119 @@ impl Model {
 }
 
 // @implements CT-MOD-002, CT-USE-007
+/// The packages of the SysML v2 standard library that are not built in. An import of one is
+/// a warning, and the names it would bring in are not checked.
+const STANDARD_PACKAGES: &[&str] = &[
+    "ISQ",
+    "ISQBase",
+    "ISQSpaceTime",
+    "ISQMechanics",
+    "ISQThermodynamics",
+    "ISQElectromagnetism",
+    "ISQLight",
+    "ISQAtomicNuclear",
+    "ISQCondensedMatter",
+    "ISQChargedParticleRadiation",
+    "ISQAcoustics",
+    "ISQChemistryMolecular",
+    "ISQInformation",
+    "ISQDimensionless",
+    "SI",
+    "SIPrefixes",
+    "USCustomaryUnits",
+    "Quantities",
+    "MeasurementReferences",
+    "Time",
+    "Collections",
+    "Base",
+    "Objects",
+    "Occurrences",
+    "Items",
+    "Parts",
+    "Ports",
+    "Actions",
+    "States",
+    "Requirements",
+    "ModelingMetadata",
+    "VectorValues",
+    "NumericalFunctions",
+    "TrigFunctions",
+    "RealFunctions",
+    "ControlFunctions",
+    "DataFunctions",
+    "SequenceFunctions",
+    "CollectionFunctions",
+    "BaseFunctions",
+];
+
+// @implements CT-TRC-001, CT-USE-007
+/// The start of the error for a short name used by two requirements. The requirement
+/// reader leaves these errors to the model.
+pub const DUPLICATE_ID: &str = "duplicate requirement ID";
+
+// @implements CT-MOD-002, CT-USE-007
 /// Resolution of the cited names, and the errors for those that do not resolve.
 impl Model {
-    /// Resolves every reference and records an error for each one that does not resolve.
+    /// Resolves every reference and records the problems: an error for each name that does
+    /// not resolve, a warning for an ambiguous name or an unchecked library import, and an
+    /// error for a satisfy or verify target that is not a requirement or a short name used
+    /// twice.
     fn resolve(&mut self) {
         let mut resolver = Resolver::new(self);
         let mut targets = Vec::with_capacity(self.references.len());
-        let mut errors = Vec::new();
+        let mut failures = Vec::new();
         for (index, reference) in self.references.iter().enumerate() {
             if let State::Done(Some(target)) = resolver.state[index] {
                 targets.push(Some(target));
                 continue;
             }
             resolver.state[index] = State::Busy;
+            resolver.ambiguous.set(None);
             let outcome =
                 resolver.resolve(reference.scope, &reference.name.segments, reference.skip);
             let target = outcome.as_ref().ok().copied();
             resolver.state[index] = State::Done(target);
+            resolver.ambiguity[index] = resolver.ambiguous.take();
             targets.push(target);
             if let Err(failure) = outcome {
-                errors.push(self.error(reference, failure));
+                failures.push((index, failure));
             }
         }
+        let ambiguity = std::mem::take(&mut resolver.ambiguity);
         for (reference, target) in self.references.iter_mut().zip(targets) {
             reference.target = target;
         }
-        errors.sort_by(|a: &(usize, SyntaxError), b| {
-            (a.0, a.1.line, a.1.column).cmp(&(b.0, b.1.line, b.1.column))
-        });
-        self.errors = (errors.into_iter())
-            .map(|(file, error)| ModelError {
+        let mut problems = Vec::new();
+        let unchecked = self.unchecked_imports(&failures);
+        for (index, failure) in failures {
+            let reference = &self.references[index];
+            let warned = unchecked.iter().any(|(import, _)| *import == index);
+            if warned || self.is_unchecked(reference, failure.segment, &unchecked) {
+                continue;
+            }
+            problems.push(self.error(reference, failure));
+        }
+        for &(index, _) in &unchecked {
+            problems.push(self.unchecked_warning(&self.references[index]));
+        }
+        for (reference, found) in self.references.iter().zip(ambiguity) {
+            if let Some((ns, count)) = found {
+                problems.push(self.ambiguous_warning(reference, ns, count));
+            }
+        }
+        self.check_requirement_targets(&mut problems);
+        self.check_requirement_ids(&mut problems);
+        problems.sort_by_key(|p| (p.0, p.1.line, p.1.column));
+        self.errors = (problems.into_iter())
+            .map(|(file, error, warning)| ModelError {
                 path: self.files[file].clone(),
                 error,
+                warning,
             })
             .collect();
     }
 
-    fn error(&self, reference: &Reference, failure: Failure) -> (usize, SyntaxError) {
+    fn error(&self, reference: &Reference, failure: Failure) -> Problem {
         let segments = &reference.name.segments;
         let written = segments.iter().map(|s| quote(s)).collect::<Vec<_>>();
         let noun = reference.role.noun();
@@ -449,15 +535,202 @@ impl Model {
             ),
         };
         let pos = reference.name.pos;
+        (reference.file, SyntaxError::at(pos, message, help), false)
+    }
+}
+
+// @implements CT-MOD-002, CT-USE-007
+/// Imports of standard library packages that are not built in, and the warnings for them.
+impl Model {
+    /// The imports that failed at their first segment because it names a standard library
+    /// package that is not built in: the failed reference, and the one name it would bring
+    /// in, or none when it brings in a package's members.
+    fn unchecked_imports(&self, failures: &[(usize, Failure)]) -> Vec<(usize, Option<String>)> {
+        let mut found = Vec::new();
+        for (index, failure) in failures {
+            let reference = &self.references[*index];
+            let segments = &reference.name.segments;
+            if reference.role != Role::Import
+                || failure.segment != 0
+                || !STANDARD_PACKAGES.contains(&segments[0].as_str())
+            {
+                continue;
+            }
+            let imported =
+                (self.elements[reference.source.0].imports.iter()).find(|i| i.reference == *index);
+            let one_name = imported
+                .filter(|i| i.kind == ImportKind::Element && segments.len() > 1)
+                .map(|_| segments[segments.len() - 1].clone());
+            found.push((*index, one_name));
+        }
+        found
+    }
+
+    /// Whether an unresolved first segment could come from an unchecked library import in
+    /// the namespace that cites it or one around it.
+    fn is_unchecked(
+        &self,
+        reference: &Reference,
+        segment: usize,
+        unchecked: &[(usize, Option<String>)],
+    ) -> bool {
+        if segment != 0 || reference.role == Role::Import {
+            return false;
+        }
+        let first = &reference.name.segments[0];
+        let mut at = Some(reference.scope);
+        while let Some(ns) = at {
+            let hit = unchecked.iter().any(|(index, name)| {
+                self.references[*index].source == ns && name.as_ref().is_none_or(|n| n == first)
+            });
+            if hit {
+                return true;
+            }
+            at = self.element(ns).owner;
+        }
+        false
+    }
+
+    fn unchecked_warning(&self, reference: &Reference) -> Problem {
+        let package = quote(&reference.name.segments[0]);
         (
             reference.file,
-            SyntaxError {
-                line: pos.line,
-                column: pos.column,
-                message,
-                help,
-            },
+            SyntaxError::at(
+                reference.name.pos,
+                format!(
+                    "standard library package `{package}` is not built in, so names from it \
+                     are not checked"
+                ),
+                "check those names against the library in another SysML v2 tool; only \
+                 ScalarValues of the standard library is built in",
+            ),
+            true,
         )
+    }
+}
+
+// @implements CT-MOD-002, CT-TRC-001, CT-USE-007
+/// Warnings for ambiguous names and checks of requirement targets and IDs.
+impl Model {
+    fn ambiguous_warning(&self, reference: &Reference, ns: ElementId, count: usize) -> Problem {
+        let written: Vec<String> = reference.name.segments.iter().map(|s| quote(s)).collect();
+        let owner = match ns {
+            Model::ROOT => "the top level".to_string(),
+            _ => format!("`{}`", self.qualified_name(ns)),
+        };
+        (
+            reference.file,
+            SyntaxError::at(
+                reference.name.pos,
+                format!(
+                    "`{}` is ambiguous: {count} members of {owner} have that name",
+                    written.join("::")
+                ),
+                "rename one of the members, or its short name, so the name is unique; the \
+                 first one declared is used",
+            ),
+            true,
+        )
+    }
+
+    /// Adds an error for each `satisfy` or `verify` whose requirement is not a requirement.
+    fn check_requirement_targets(&self, problems: &mut Vec<Problem>) {
+        for reference in &self.references {
+            let (Role::Requirement, Some(target)) = (reference.role, reference.target) else {
+                continue;
+            };
+            let kind = self.element(target).kind;
+            if matches!(
+                kind,
+                ElementKind::Usage(UsageKind::Of(Kind::Requirement))
+                    | ElementKind::Definition(Kind::Requirement)
+            ) {
+                continue;
+            }
+            let written: Vec<String> = reference.name.segments.iter().map(|s| quote(s)).collect();
+            problems.push((
+                reference.file,
+                SyntaxError::at(
+                    reference.name.pos,
+                    format!(
+                        "`{}` is a {}, not a requirement",
+                        written.join("::"),
+                        kind.noun()
+                    ),
+                    "name a requirement here; to link a part to a requirement, write \
+                     `satisfy <requirement> by <part>;` or `verify <requirement>;`",
+                ),
+                false,
+            ));
+        }
+    }
+
+    /// Adds an error for each requirement whose short name an earlier requirement uses.
+    fn check_requirement_ids(&self, problems: &mut Vec<Problem>) {
+        let mut first: HashMap<&str, &Element> = HashMap::new();
+        for element in &self.elements {
+            let (ElementKind::Usage(UsageKind::Of(Kind::Requirement)), Some(id)) =
+                (element.kind, element.short_name.as_deref())
+            else {
+                continue;
+            };
+            let Some(earlier) = first.get(id) else {
+                first.insert(id, element);
+                continue;
+            };
+            let place = if earlier.file == element.file {
+                String::new()
+            } else {
+                format!("in {} ", self.files[earlier.file])
+            };
+            problems.push((
+                element.file,
+                SyntaxError::at(
+                    element.pos,
+                    format!(
+                        "{DUPLICATE_ID} {id}, first used {place}on line {}",
+                        earlier.pos.line
+                    ),
+                    "give each requirement its own ID",
+                ),
+                false,
+            ));
+        }
+    }
+}
+
+// @implements CT-MOD-002, CT-USE-007
+/// A problem: the index of its file, the error with its position, and whether it is a
+/// warning.
+type Problem = (usize, SyntaxError, bool);
+
+// @implements CT-USE-007
+impl ElementKind {
+    /// What the element is called in messages, such as `part definition`.
+    fn noun(self) -> &'static str {
+        let kind = |k: Kind| match k {
+            Kind::Part => "part",
+            Kind::Attribute => "attribute",
+            Kind::Port => "port",
+            Kind::Requirement => "requirement",
+            Kind::Metadata => "metadata",
+        };
+        match self {
+            ElementKind::Root => "namespace",
+            ElementKind::Package => "package",
+            ElementKind::Definition(k) => match k {
+                Kind::Part => "part definition",
+                Kind::Attribute => "attribute definition",
+                Kind::Port => "port definition",
+                Kind::Requirement => "requirement definition",
+                Kind::Metadata => "metadata definition",
+            },
+            ElementKind::Usage(UsageKind::Of(k)) => kind(k),
+            ElementKind::Usage(UsageKind::Subject) => "subject",
+            ElementKind::Satisfy => "satisfy",
+            ElementKind::Verify => "verify",
+            ElementKind::Dependency(_) => "dependency",
+        }
     }
 }
 
@@ -554,6 +827,11 @@ struct Resolver<'m> {
     state: Vec<State>,
     /// Namespaces being searched, so inheritance and import cycles end.
     open: Vec<ElementId>,
+    /// The first namespace found with several members of the name looked up, and how many,
+    /// for the lookup in progress.
+    ambiguous: Cell<Option<(ElementId, usize)>>,
+    /// The same, for each reference once resolved.
+    ambiguity: Vec<Option<(ElementId, usize)>>,
 }
 
 // @implements CT-MOD-002
@@ -569,6 +847,8 @@ impl<'m> Resolver<'m> {
             model,
             state,
             open: Vec::new(),
+            ambiguous: Cell::new(None),
+            ambiguity: vec![None; model.references.len()],
         }
     }
 
@@ -583,7 +863,9 @@ impl<'m> Resolver<'m> {
         // The reference resolves from its own scope, whatever namespaces the lookup that
         // needs it has open; `Busy` already ends cycles of references.
         let open = std::mem::take(&mut self.open);
+        let outer = self.ambiguous.take();
         let target = self.resolve(r.scope, &r.name.segments, r.skip).ok();
+        self.ambiguity[index] = self.ambiguous.replace(outer);
         self.open = open;
         self.state[index] = State::Done(target);
         target
@@ -639,10 +921,15 @@ impl<'m> Resolver<'m> {
         skip: Option<ElementId>,
     ) -> Option<ElementId> {
         let candidates = self.model.element(ns).by_name.get(name)?;
-        candidates
-            .iter()
-            .copied()
-            .find(|&id| Some(id) != skip && access.sees(self.model.element(id).visibility))
+        let mut visible: Vec<ElementId> = (candidates.iter().copied())
+            .filter(|&id| Some(id) != skip && access.sees(self.model.element(id).visibility))
+            .collect();
+        // A member whose name and short name are the same is listed twice.
+        visible.dedup();
+        if visible.len() > 1 && self.ambiguous.get().is_none() {
+            self.ambiguous.set(Some((ns, visible.len())));
+        }
+        visible.first().copied()
     }
 
     fn inherited(&mut self, ns: ElementId, name: &str) -> Option<ElementId> {
@@ -1102,5 +1389,122 @@ mod tests {
         );
         assert!(CLEWTRACE_LIBRARY.contains("private import Clewtrace::*;"));
         assert!(CLEWTRACE_LIBRARY.contains("ModelingMetadata"));
+    }
+    /// The rendered `line:column: severity: message` of each problem.
+    fn found(m: &Model) -> Vec<String> {
+        (m.errors.iter())
+            .map(|e| {
+                let severity = if e.warning { "warning" } else { "error" };
+                format!(
+                    "{}:{}:{}: {severity}: {}",
+                    e.path, e.error.line, e.error.column, e.error.message
+                )
+            })
+            .collect()
+    }
+
+    // @verifies CT-MOD-002, CT-USE-007
+    #[test]
+    fn warns_when_a_name_matches_two_members_of_one_namespace() {
+        let m =
+            one("package P {\n  part def A;\n  part def A;\n  part x : A;\n  part y : P::A;\n}\n");
+        assert_eq!(
+            found(&m),
+            [
+                "m.sysml:4:12: warning: `A` is ambiguous: 2 members of `P` have that name",
+                "m.sysml:5:12: warning: `P::A` is ambiguous: 2 members of `P` have that name",
+            ]
+        );
+        assert!(
+            m.errors
+                .iter()
+                .all(|e| e.warning && !e.error.help.is_empty())
+        );
+        assert!(m.references.iter().all(|r| r.target.is_some()));
+    }
+
+    // @verifies CT-MOD-002
+    #[test]
+    fn a_name_and_its_short_name_are_not_ambiguous() {
+        let m = one("package P {\n  part def <a> A;\n  part x : a;\n  part y : A;\n}\n");
+        assert!(m.errors.is_empty(), "{:?}", rendered(&m));
+    }
+
+    // @verifies CT-MOD-002, CT-USE-007
+    #[test]
+    fn reports_a_missing_library_import_once_and_checks_no_names_through_it() {
+        let m = one(
+            "package P {\n  private import ISQ::*;\n  private import SI::mass;\n  \
+             attribute m : MassValue;\n  attribute n : mass;\n  attribute o : Gone;\n}\n",
+        );
+        assert_eq!(
+            found(&m),
+            [
+                "m.sysml:2:18: warning: standard library package `ISQ` is not built in, so \
+                 names from it are not checked",
+                "m.sysml:3:18: warning: standard library package `SI` is not built in, so \
+                 names from it are not checked",
+            ]
+        );
+        assert!(
+            m.errors
+                .iter()
+                .all(|e| e.warning && !e.error.help.is_empty())
+        );
+    }
+
+    // @verifies CT-MOD-002, CT-USE-007
+    #[test]
+    fn a_name_no_library_import_can_supply_is_still_an_error() {
+        let m = one("package P {\n  private import ISQ::mass;\n  attribute n : length;\n}\n");
+        assert_eq!(
+            found(&m),
+            [
+                "m.sysml:2:18: warning: standard library package `ISQ` is not built in, so \
+                 names from it are not checked",
+                "m.sysml:3:17: error: cannot resolve type `length`",
+            ]
+        );
+    }
+
+    // @verifies CT-MOD-002, CT-USE-007
+    #[test]
+    fn satisfy_and_verify_targets_must_be_requirements() {
+        let m = one(
+            "requirement def RD;\nrequirement <'R1'> r : RD;\npart def Engine;\npart e : Engine;\n\
+             part car {\n  satisfy r;\n  satisfy RD;\n  satisfy e;\n  verify Engine;\n  \
+             satisfy r by e;\n  satisfy r by r;\n}\n",
+        );
+        assert_eq!(
+            found(&m),
+            [
+                "m.sysml:8:11: error: `e` is a part, not a requirement",
+                "m.sysml:9:10: error: `Engine` is a part definition, not a requirement",
+            ]
+        );
+        assert!(m.errors.iter().all(|e| !e.error.help.is_empty()));
+    }
+
+    // @verifies CT-TRC-001, CT-USE-007
+    #[test]
+    fn a_short_name_used_by_two_requirements_is_an_error() {
+        let m = model(&[
+            (
+                "a.sysml",
+                "package A {\n  requirement <'R1'> one;\n  requirement <'R1'> two;\n}\n",
+            ),
+            (
+                "b.sysml",
+                "requirement <'R1'> three;\nrequirement <'R2'> four;\npart <'R1'> p;\n",
+            ),
+        ]);
+        assert_eq!(
+            found(&m),
+            [
+                "a.sysml:3:3: error: duplicate requirement ID R1, first used on line 2",
+                "b.sysml:1:1: error: duplicate requirement ID R1, first used in a.sysml on line 2",
+            ]
+        );
+        assert!(m.errors.iter().all(|e| !e.error.help.is_empty()));
     }
 }

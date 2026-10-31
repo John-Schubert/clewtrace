@@ -1,6 +1,6 @@
 # Trace links and reports
 
-Implements CT-TRC-002, CT-MOD-002, CT-TRC-004, and CT-TRC-005.
+Implements CT-TRC-002, CT-MOD-002, CT-TRC-001, CT-USE-007, CT-TRC-004, and CT-TRC-005.
 
 Clewtrace reads SysML v2 text. Besides `satisfy` and `verify`, a model states three kinds of
 trace link with a marked dependency:
@@ -39,6 +39,21 @@ private import ModelingMetadata::*;
 The standard `RequirementDerivation` library also defines a metadata with the short name
 `derivation`, for derivation connections. Do not import both `RequirementDerivation::*` and
 `Clewtrace::*` into the same package, or `#derivation` is ambiguous in other tools.
+
+## Model checks
+
+Clewtrace checks the model as it reads it. Each problem names the file, line, and column.
+
+- **Errors.** A name that does not resolve. A `satisfy` or `verify` whose requirement is
+  not a requirement (for example, a part). A short name used by two requirements.
+- **Warnings.** A name that matches two members of one namespace (the first one declared
+  is used). An import of a standard library package that is not built in, such as `ISQ` or
+  `SI`: it is reported once, and the names the import would bring in are not checked. Only
+  `ScalarValues` is built in. Warnings do not make `clew report` exit 1.
+
+A requirement takes its `phase` from its own `attribute :>> phase = N;`. When it has none,
+it takes the default on the requirement definition it is typed by (or on one that
+definition specializes), for example `attribute phase : Integer = 2;`.
 
 ## Project root
 

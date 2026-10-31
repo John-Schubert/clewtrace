@@ -99,7 +99,7 @@ impl Provenance {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Generated {
     pub provenance: Provenance,
-    /// The file problems, then the report itself.
+    /// The file problems and warnings, then the report itself.
     pub body: String,
     /// The project has file problems.
     pub problems: bool,
@@ -154,6 +154,10 @@ pub fn generate(root: &Path, kind: &ReportKind) -> Result<Generated, GenerateErr
     let mut body = String::new();
     for problem in &project.problems {
         body.push_str(problem);
+        body.push('\n');
+    }
+    for warning in &project.warnings {
+        body.push_str(warning);
         body.push('\n');
     }
     body.push_str(&report);
