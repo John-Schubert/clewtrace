@@ -25,6 +25,16 @@ pub struct SyntaxError {
 
 // @implements CT-USE-007
 impl SyntaxError {
+    /// An error at `pos`.
+    pub fn at(pos: Pos, message: String, help: &'static str) -> SyntaxError {
+        SyntaxError {
+            line: pos.line,
+            column: pos.column,
+            message,
+            help,
+        }
+    }
+
     /// The error as `path:line:column: error: message` plus a `help:` line.
     pub fn render(&self, path: &str) -> String {
         format!("{path}:{self}")

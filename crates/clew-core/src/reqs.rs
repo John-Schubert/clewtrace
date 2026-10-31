@@ -10,8 +10,8 @@ use std::collections::hash_map::Entry;
 use std::fmt;
 use std::path::Path;
 
-use crate::model::Model;
-use crate::parse::ast::{Kind, Member, Pos, Usage, UsageKind};
+use crate::model::{self, Model};
+use crate::parse::ast::{Kind, Member, Pos, QualifiedName, Usage, UsageKind};
 use crate::parse::parser::{self, SyntaxError};
 
 // @implements CT-DEV-001, CT-TRC-001
@@ -109,10 +109,14 @@ pub fn parse_requirements(text: &str, path: &str) -> Result<Vec<Requirement>, Re
     let mut errors = parsed.errors;
     if errors.is_empty() {
         let model = Model::build(&[(path, &parsed.members)]);
-        errors.extend(model.errors.into_iter().map(|e| e.error));
+        // Warnings do not stop the reader, and duplicate IDs are reported below.
+        let errors_only = (model.errors.into_iter())
+            .filter(|e| !e.warning && !e.error.message.starts_with(model::DUPLICATE_ID));
+        errors.extend(errors_only.map(|e| e.error));
     }
     let mut found: Vec<(Requirement, Pos)> = Vec::new();
-    collect(&parsed.members, &mut found, &mut errors);
+    let defaults = PhaseDefaults::new([parsed.members.as_slice()]);
+    collect(&parsed.members, &defaults, &mut found, &mut errors);
     // The line each ID is first used on, so each requirement is checked in one lookup.
     let mut first_lines: HashMap<&str, usize> = HashMap::with_capacity(found.len());
     for (req, pos) in &found {
@@ -143,30 +147,126 @@ pub fn parse_requirements(text: &str, path: &str) -> Result<Vec<Requirement>, Re
 }
 
 /// The requirements in parsed members, at any depth, in file order. Bad attribute values
-/// are skipped: the model reader and `clew check --self` report them.
+/// are skipped: the model reader and `clew check --self` report them. A phase is read
+/// from the definitions in `members` only; use `requirements_with_defaults` for a project.
 // @implements CT-DEV-003, CT-TRC-004
 pub fn requirements_in(members: &[Member]) -> Vec<Requirement> {
+    requirements_with_defaults(members, &PhaseDefaults::default())
+}
+
+/// Like `requirements_in`, with a phase that a requirement lacks read from the requirement
+/// definition it is typed by, such as one in another file.
+// @implements CT-TRC-001, CT-MOD-002
+pub fn requirements_with_defaults(
+    members: &[Member],
+    defaults: &PhaseDefaults,
+) -> Vec<Requirement> {
     let mut found = Vec::new();
-    collect(members, &mut found, &mut Vec::new());
+    collect(members, defaults, &mut found, &mut Vec::new());
     found.into_iter().map(|(req, _)| req).collect()
+}
+
+/// The phase that requirement definitions give as a default, by definition name. A
+/// requirement with no phase of its own takes the one of its type, or of what its type
+/// specializes. A name used by two definitions gives no default.
+// @implements CT-TRC-001, CT-MOD-002
+#[derive(Debug, Clone, Default)]
+pub struct PhaseDefaults {
+    /// The default phase and the names the definition specializes, by definition name.
+    definitions: HashMap<String, Option<Definition>>,
+}
+
+// @implements CT-TRC-001, CT-MOD-002
+/// A requirement definition's default phase and the names it specializes.
+type Definition = (Option<u8>, Vec<String>);
+
+// @implements CT-TRC-001, CT-MOD-002
+impl PhaseDefaults {
+    /// Collects the requirement definitions in each of `files`, at any depth.
+    pub fn new<'a>(files: impl IntoIterator<Item = &'a [Member]>) -> PhaseDefaults {
+        let mut defaults = PhaseDefaults::default();
+        for members in files {
+            defaults.add(members);
+        }
+        defaults
+    }
+
+    fn add(&mut self, members: &[Member]) {
+        for member in members {
+            if let Member::Definition(d) = member
+                && d.kind == Kind::Requirement
+                && let Some(name) = &d.name
+            {
+                let (phase, _) = read_phase(&d.members, &mut Vec::new());
+                let parents = (d.specializes.iter().filter_map(last_segment))
+                    .map(str::to_string)
+                    .collect();
+                match self.definitions.entry(name.clone()) {
+                    Entry::Vacant(slot) => {
+                        slot.insert(Some((phase, parents)));
+                    }
+                    Entry::Occupied(mut slot) => {
+                        slot.insert(None);
+                    }
+                }
+            }
+            self.add(member.members());
+        }
+    }
+
+    /// The default phase of the first of `types` that has one, directly or through what it
+    /// specializes.
+    fn phase_of(&self, types: &[QualifiedName]) -> Option<u8> {
+        let mut pending: Vec<&str> = types.iter().filter_map(last_segment).collect();
+        let mut seen = 0;
+        while let Some(name) = pending.pop() {
+            // The chain is short; the count only stops a specialization cycle.
+            seen += 1;
+            if seen > self.definitions.len() + types.len() {
+                break;
+            }
+            if let Some(Some((phase, parents))) = self.definitions.get(name) {
+                if phase.is_some() {
+                    return *phase;
+                }
+                pending.extend(parents.iter().map(String::as_str));
+            }
+        }
+        None
+    }
+}
+
+// @implements CT-TRC-001, CT-MOD-002
+fn last_segment(name: &QualifiedName) -> Option<&str> {
+    name.segments.last().map(String::as_str)
 }
 
 /// Collects requirement usages with a short name, at any depth, in file order.
 // @implements CT-DEV-001, CT-TRC-001
-fn collect(members: &[Member], found: &mut Vec<(Requirement, Pos)>, errors: &mut Vec<SyntaxError>) {
+fn collect(
+    members: &[Member],
+    defaults: &PhaseDefaults,
+    found: &mut Vec<(Requirement, Pos)>,
+    errors: &mut Vec<SyntaxError>,
+) {
     for member in members {
         if let Member::Usage(usage) = member
             && usage.kind == UsageKind::Of(Kind::Requirement)
             && let Some(id) = &usage.short_name
         {
-            found.push((requirement(id, usage, errors), usage.pos));
+            found.push((requirement(id, usage, defaults, errors), usage.pos));
         }
-        collect(member.members(), found, errors);
+        collect(member.members(), defaults, found, errors);
     }
 }
 
 // @implements CT-DEV-001, CT-TRC-001, CT-USE-007
-fn requirement(id: &str, usage: &Usage, errors: &mut Vec<SyntaxError>) -> Requirement {
+fn requirement(
+    id: &str,
+    usage: &Usage,
+    defaults: &PhaseDefaults,
+    errors: &mut Vec<SyntaxError>,
+) -> Requirement {
     let mut req = Requirement {
         id: id.to_string(),
         name: usage.name.clone().unwrap_or_default(),
@@ -182,29 +282,46 @@ fn requirement(id: &str, usage: &Usage, errors: &mut Vec<SyntaxError>) -> Requir
                 req.doc = lines.join(" ");
             }
             Member::Usage(a) if a.kind == UsageKind::Of(Kind::Attribute) => {
-                match (a.effective_name(), &a.value) {
-                    (Some("verificationMethod"), Some(v)) => {
-                        req.verification_method = Some(v.text.clone());
-                    }
-                    (Some("phase"), Some(v)) => match v.text.parse() {
-                        Ok(phase) => req.phase = Some(phase),
-                        Err(_) => errors.push(SyntaxError {
-                            line: v.pos.line,
-                            column: v.pos.column,
-                            message: format!(
-                                "phase is not a whole number from 0 to 255: {}",
-                                v.text
-                            ),
-                            help: "write the phase as a number, like `attribute :>> phase = 1;`",
-                        }),
-                    },
-                    _ => {}
+                if let (Some("verificationMethod"), Some(v)) = (a.effective_name(), &a.value) {
+                    req.verification_method = Some(v.text.clone());
                 }
             }
             _ => {}
         }
     }
+    let (phase, written) = read_phase(&usage.members, errors);
+    req.phase = phase;
+    if !written {
+        req.phase = defaults.phase_of(&usage.types);
+    }
     req
+}
+
+/// The phase an attribute in `members` gives, and whether one is written at all, so a bad
+/// value does not fall back to a default. A bad value is added to `errors`.
+// @implements CT-TRC-001, CT-USE-007
+fn read_phase(members: &[Member], errors: &mut Vec<SyntaxError>) -> (Option<u8>, bool) {
+    let mut phase = None;
+    let mut written = false;
+    for member in members {
+        if let Member::Usage(a) = member
+            && a.kind == UsageKind::Of(Kind::Attribute)
+            && a.effective_name() == Some("phase")
+            && let Some(v) = &a.value
+        {
+            written = true;
+            match v.text.parse() {
+                Ok(value) => phase = Some(value),
+                Err(_) => errors.push(SyntaxError {
+                    line: v.pos.line,
+                    column: v.pos.column,
+                    message: format!("phase is not a whole number from 0 to 255: {}", v.text),
+                    help: "write the phase as a number, like `attribute :>> phase = 1;`",
+                }),
+            }
+        }
+    }
+    (phase, written)
 }
 
 // @verifies CT-DEV-001, CT-TRC-001
@@ -407,6 +524,44 @@ mod tests {
         assert!(
             dev1.doc
                 .starts_with("The product requirements shall be maintained")
+        );
+    }
+    // @verifies CT-TRC-001, CT-MOD-002
+    #[test]
+    fn reads_a_phase_given_only_as_a_default_on_the_definition() {
+        let text = "package P {\n  private import ScalarValues::*;\n  requirement def R { attribute phase : Integer = 2; }\n  \
+                    requirement def Sub :> R;\n  requirement def Other { attribute phase = 4; }\n  \
+                    requirement <'CT-EFF-001'> a : R;\n  \
+                    requirement <'CT-EFF-002'> b : R { attribute :>> phase = 0; }\n  \
+                    requirement <'CT-EFF-003'> c : Sub;\n  \
+                    requirement <'CT-EFF-004'> d : Other;\n  \
+                    requirement <'CT-EFF-005'> e;\n}\n";
+        let reqs = parse_requirements(text, "m.sysml").unwrap();
+        let phases: Vec<Option<u8>> = reqs.iter().map(|r| r.phase).collect();
+        assert_eq!(phases, [Some(2), Some(0), Some(2), Some(4), None]);
+    }
+
+    // @verifies CT-TRC-001, CT-MOD-002
+    #[test]
+    fn a_default_phase_applies_across_files() {
+        let defs = parser::parse("requirement def R { attribute phase : Integer = 3; }");
+        let uses = parser::parse("requirement <'CT-EFF-001'> a : R;");
+        let defaults = PhaseDefaults::new([defs.members.as_slice(), uses.members.as_slice()]);
+        let found = requirements_with_defaults(&uses.members, &defaults);
+        assert_eq!(found[0].phase, Some(3));
+        assert_eq!(requirements_in(&uses.members)[0].phase, None);
+    }
+
+    // @verifies CT-TRC-001
+    #[test]
+    fn a_bad_phase_value_gets_no_default() {
+        let text = "requirement def R { attribute phase : Integer = 2; }\n\
+                    requirement <'CT-EFF-001'> a : R { attribute :>> phase = \"one\"; }\n";
+        let parsed = parser::parse(text);
+        let defaults = PhaseDefaults::new([parsed.members.as_slice()]);
+        assert_eq!(
+            requirements_with_defaults(&parsed.members, &defaults)[0].phase,
+            None
         );
     }
 }

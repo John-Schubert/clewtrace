@@ -70,6 +70,9 @@ pub struct Project {
     /// Unreadable model files, syntax errors, unresolved names, and links that could not be
     /// made, each rendered with where and how to fix it.
     pub problems: Vec<String>,
+    /// Model warnings, such as an ambiguous name or an import of a library package that is
+    /// not built in. They do not make the project count as having problems.
+    pub warnings: Vec<String>,
     /// Every file read as text, `trace.toml` included, with the SHA-256 of its text from
     /// `reproduce::text_sha256`.
     pub inputs: Vec<(String, Vec<u8>)>,
@@ -120,11 +123,14 @@ pub fn load_project(root: &Path) -> Result<Project, SetupError> {
     let inputs: Vec<(&str, &[Member])> = (parsed.iter())
         .map(|(path, members)| (*path, members.as_slice()))
         .collect();
+    let defaults = reqs::PhaseDefaults::new(parsed.iter().map(|(_, m)| m.as_slice()));
     let requirements = (parsed.iter())
-        .flat_map(|(_, members)| reqs::requirements_in(members))
+        .flat_map(|(_, members)| reqs::requirements_with_defaults(members, &defaults))
         .collect();
     let model = Model::build(&inputs);
-    problems.extend(model.errors.iter().map(ToString::to_string));
+    let (warnings, errors): (Vec<_>, Vec<_>) = model.errors.iter().partition(|e| e.warning);
+    problems.extend(errors.iter().map(ToString::to_string));
+    let warnings = warnings.iter().map(ToString::to_string).collect();
     let top_level = top_level_definitions(&model, &config)?;
     let mut scans = Vec::new();
     for path in check::source_files(root, &config)? {
@@ -146,6 +152,7 @@ pub fn load_project(root: &Path) -> Result<Project, SetupError> {
         model,
         graph,
         problems,
+        warnings,
         inputs: hashed,
         top_level,
         requirements,
