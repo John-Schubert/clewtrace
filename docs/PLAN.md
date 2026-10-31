@@ -508,10 +508,10 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       `ElementKind::label` in clew-core gives the keywords. The window shows the project
       status line until the 2.4 shell.
       Follow-ups:
-      - John to accept ADR-0004 (status Proposed).
-      - The CI coverage step for `app/src-tauri` could not run in the cloud session. Check
-        it on the first PR run.
-      - Element IDs are model indexes and change on reload. Revisit in 2.10.
+      - First PR run (#32): `app/src-tauri` line coverage 90.66% (report only), Linux deb
+        4.3 MB. `commands.rs` is not covered, since tests call `data.rs` directly.
+      - Element IDs are model indexes and change on a rebuild. 2.9a provides stable IDs,
+        since 2.9b rebuilds the model while the user types (ADR-0004).
       - `api.ts` has no unit tests until vitest arrives in 2.4.
 - [ ] **2.3b Opening projects.** A folder dialog (rfd 0.17.2 with `default-features = false`
       and the `gtk3` feature only, MIT, PR #27; add `("rfd", &["gtk3"])` to the no-network

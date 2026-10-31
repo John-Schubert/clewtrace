@@ -1,6 +1,6 @@
 # ADR-0004: App data layer, commands, and paging
 
-- Status: Proposed (task 2.3a, for John to accept)
+- Status: Accepted (John, 2026-10-31)
 - Date: 2026-10-31
 - Serves: CT-EFF-004, CT-EFF-005, CT-MOD-001, CT-USE-007, CT-SEC-001, CT-EFF-001
 
@@ -32,7 +32,8 @@ pages of rows.
   clamped. Search does not count its hits, since that costs a second query, so its
   `total` is null and `more` says whether another page follows.
 - **Element IDs** are indexes into the loaded model. They stay valid until the project is
-  opened again, which is enough until live reload (2.10) needs stable IDs.
+  opened again. Live validation in 2.9b rebuilds the model while the user types, so 2.9a
+  provides IDs that stay stable across a rebuild.
 - **Replies.** Commands reply with JSON text built with `clew_core::json::quote`, so the
   app needs no serialization crate. Data commands reply `{"ok": value}` or
   `{"error": {"what", "where", "help"}}` (CT-USE-007). `app/src/lib/api.ts` is the typed
@@ -64,4 +65,4 @@ pages of rows.
 - A new command needs four changes: `commands.rs`, `generate_handler!` in `main.rs`,
   `COMMANDS` in `build.rs`, and its `allow-` permission in `capabilities/main.json` and in
   `OFFLINE_PERMISSIONS` after review.
-- Element IDs are not stable across reloads. 2.10 revisits this.
+- Element IDs are not stable across a model rebuild yet. 2.9a provides stable IDs.
