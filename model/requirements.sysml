@@ -27,7 +27,7 @@ package ClewtraceRequirements {
         }
 
         requirement <'CT-EFF-002'> idleMemory : ProductRequirement {
-            doc /* The application, including its web view, shall use no more than the following total memory when idle with an empty project: 400 MB on Linux, measured as proportional set size (PSS); 360 MB on Windows, measured as private working set; and 250 MB on macOS, measured as resident memory. These budgets are provisional. A budget may be lowered but shall not be raised once set. */
+            doc /* The application, including its web view, shall use no more than the following total memory when idle with an empty project: 400 MB on Linux, measured as proportional set size (PSS); 74 MB on Windows, measured as private working set; and 250 MB on macOS, measured as resident memory. These budgets are provisional. A budget may be lowered but shall not be raised once set. */
             attribute :>> verificationMethod = "Test";
             attribute :>> phase = 2;
         }
