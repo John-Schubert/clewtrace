@@ -642,11 +642,13 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
         (3 more in run 1 read 175 to 345 because WebKit processes of the previous launch
         were still running; the job now waits for them), app process 93 to 95.
       - **Budgets set on PR #37 (John approved, 2026-10-31).** CT-EFF-002: 216 MB Linux, 74 MB
-        Windows, 250 MB macOS. CT-EFF-010: 93 MB Linux, 4 MB Windows, 105 MB macOS.
+        Windows, 250 MB macOS. CT-EFF-010: 93 MB Linux, 8 MB Windows (John raised it from the proposed 4 MB, since
+        3 MB measured left 1 MB of room), 105 MB macOS.
         CT-EFF-003: 1.5 s on the median of 3 launches after one warm-up launch that is not
         counted (John's change, instead of the proposed 2 s on one cold launch). The cold
         start stays covered by CT-EFF-011 (2 s on the reference machine at Gate 2). From now
-        on "shall not be raised" applies. Memory is checked on every measured launch.
+        on the requirements say: a budget may be lowered, and raising it needs John's approval,
+        recorded with the measurement that justifies it. Memory is checked on every measured launch.
       Follow-ups:
       - Only the Linux probe measures start time. Windows and macOS start time is not
         measured, so CT-EFF-003 is a Linux CI number.
