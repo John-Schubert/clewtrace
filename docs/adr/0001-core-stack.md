@@ -24,7 +24,7 @@ installer, idle under 200 MB of memory (250 MB on Linux), and handle 10,000 requ
 | Text editor | CodeMirror 6 |
 | SysML v2 parser | Hand-written recursive descent in Rust, with error recovery |
 | Storage | `.sysml` text files as truth; SQLite (rusqlite, bundled) with FTS5 as a rebuildable index |
-| Code scanning | tree-sitter grammars for Rust and TypeScript; GitHub Actions workflow steps carry `@verifies`; Svelte files use `@begin`/`@end` regions until task 2.2, which scans each `<script lang="ts">` block with the TypeScript grammar |
+| Code scanning | tree-sitter grammars for Rust and TypeScript; GitHub Actions workflow steps carry `@verifies`; each Svelte `<script lang="ts">` block is scanned with the TypeScript grammar, and markup and HTML files use `@begin`/`@end` regions or one `@file` tag |
 | File watching | OS file events through `notify` (recommended watcher only, no polling watcher, no debouncer crate); a one-shot timer ends a burst of events |
 | Licensing | Ed25519-signed license file verified offline with `ed25519-dalek` |
 | Diagrams | Deferred to phase 5; SVG generated in Rust, layout chosen in a later ADR |

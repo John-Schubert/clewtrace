@@ -34,9 +34,10 @@ Full grammar: `docs/TRACEABILITY.md`.
 - `clew check --self` (task 0.4) scans the source roots in `trace.toml` and fails on any
   untraced line, unknown ID, untraceable file type, or direct dependency missing from
   `deps.toml`. It also checks the IDs cited in `deps.toml` and in these ADRs.
-- Rust and TypeScript use tree-sitter for item spans (task 0.3). Svelte files use
-  `@begin`/`@end` regions only in v0; a line holding only a `<script>` or `<style>` tag
-  is exempt.
+- Rust and TypeScript use tree-sitter for item spans (task 0.3). Svelte files are
+  scanned the same way inside each `<script lang="ts">` block (task 2.2), and markup and
+  style text use `@begin`/`@end` regions only. A line holding only a `<script>` or
+  `<style>` tag is exempt.
 - Config, CI, and script files (`*.toml`, `*.yml`, `*.yaml`, `*.sh`, `*.ps1`) take one
   `@file` tag. JSON cannot carry a comment, so each JSON config file under a source root
   needs an `[[exclude]]` entry with a reason and a requirement. Generated code is excluded
@@ -62,8 +63,8 @@ Full grammar: `docs/TRACEABILITY.md`.
 - A `[[waiver]]` in `trace.toml` records why a due requirement lacks an implementation or
   verification. It may name a `part`, which excuses no gap.
 - Each ADR must cite a requirement (CT-DEV-010).
-- Svelte `<script lang="ts">` scanning and `<!-- @file -->` in HTML are planned for task 2.2,
-  which will update the phase 0 text above.
+- HTML files (`app/index.html`) take regions or one `<!-- @file -->` tag before any markup
+  (task 2.2).
 
 ## Consequences
 

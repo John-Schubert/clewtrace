@@ -61,6 +61,8 @@ in `model/requirements.sysml` are the authority once code exists.
   and the CodeMirror 6 editor. SQLite (rusqlite, bundled) with FTS5 for the index.
 - **Svelte 5 runes syntax only** (`$state`, `$derived`, `$effect`, `$props`). Never use
   Svelte 4 patterns such as `export let`, `$:` reactive statements, or `createEventDispatcher`.
+- Keep component logic in `.ts` modules and components thin, so most UI code is scanned
+  as plain TypeScript with item-level tags.
 - Source of truth: `.sysml` text files. The index in `.clewtrace/` is a rebuildable cache.
 - Decisions: `docs/adr/`. Plan and task list: `docs/PLAN.md`.
 

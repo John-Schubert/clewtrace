@@ -25,7 +25,7 @@ Tags live in ordinary comments in the language of the file (`//`, `#`, or `<!-- 
 | `@implements IDs` | In the comment directly above an item. Rust: function, method, trait method signature, struct, enum, union, trait, impl block, const or static, type alias, `macro_rules!`, `extern` block, or inline `mod`. TypeScript: function, class, method, or exported declaration | Every line of that item, including nested items that carry no tag of their own |
 | `@verifies IDs` | Directly above a test function or test block. In TypeScript a call statement such as `describe(...)` is a test block | That test; creates a verifies link |
 | `@begin IDs` ... `@end` | Around module-level code that is not an item | Every line between the markers |
-| `@file IDs` | In the first comment of a file type listed in `trace.toml` under `file_level_allowed` (config, CI, scripts) | The whole file |
+| `@file IDs` | In the first comment of a file type listed in `trace.toml` under `file_level_allowed` (config, CI, scripts), or in an HTML file as `<!-- @file IDs -->` before any markup | The whole file |
 | `@verifies IDs` in a workflow | In the comment directly above a step's `- name:` line in a `.yml` or `.yaml` file in `.github/workflows` (see below) | That step; creates a verifies link |
 
 Rules:
@@ -33,7 +33,7 @@ Rules:
 1. A nested item with its own tag is covered by its own tag plus its parent's tags.
 2. Imports, `use`, and `mod` lines inherit the union of the tags on items in the same file.
    A file that has no tagged item fails, so imports alone never pass.
-3. Blank lines and comment-only lines are exempt. In Svelte files, a line holding only a
+3. Blank lines and comment-only lines are exempt. In Svelte and HTML files, a line holding only a
    `<script ...>`, `</script>`, `<style ...>`, or `</style>` tag is exempt too.
 4. An `@implements` scope or `@begin`/`@end` region longer than `max_scope_lines` in
    `trace.toml` (default 200) produces a warning. Large scopes usually mean the tag is too
@@ -72,13 +72,30 @@ TypeScript or Svelte:
 export function openCommandPalette(): void { /* ... */ }
 ```
 
+A `<script lang="ts">` block in a Svelte file is scanned with the TypeScript grammar, so the
+rules above apply inside it and line numbers are the file's. Functions take `@implements`
+tags like in a `.ts` file, and module-level code takes `@begin`/`@end`. A script block
+without `lang="ts"` allows regions only. Markup and `<style>` allow regions only, or are
+covered by the component tag. Keep component logic in `.ts` modules and components thin.
+
 ```svelte
 <script lang="ts">
-  // @begin CT-TRC-003
   import { traceMatrix } from '$lib/api';
-  let rows = $state([]);
-  // @end
+
+  // @implements CT-TRC-003
+  function reload(): void { /* ... */ }
 </script>
+
+<!-- @begin CT-TRC-003 -->
+<button onclick={reload}>Reload</button>
+<!-- @end -->
+```
+
+HTML (the file tag comes before any markup, so before the doctype):
+
+```html
+<!-- @file CT-PLT-001 -->
+<!doctype html>
 ```
 
 YAML (CI), allowed at file level:
