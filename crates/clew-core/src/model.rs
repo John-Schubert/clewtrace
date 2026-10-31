@@ -66,6 +66,25 @@ pub enum ElementKind {
     Dependency(DependencyKind),
 }
 
+// @implements CT-MOD-001, CT-EFF-005
+impl ElementKind {
+    /// The keywords that declare an element of this kind, such as `part def`, as the index
+    /// and the app show them.
+    pub fn label(self) -> &'static str {
+        match self {
+            ElementKind::Root => "root",
+            ElementKind::Package => "package",
+            ElementKind::Definition(kind) => crate::index::definition_kind(kind),
+            ElementKind::Usage(kind) => crate::index::usage_kind(kind),
+            ElementKind::Satisfy => "satisfy",
+            ElementKind::Verify => "verify",
+            ElementKind::Dependency(DependencyKind::Derivation) => "#derivation dependency",
+            ElementKind::Dependency(DependencyKind::Refinement) => "#refinement dependency",
+            ElementKind::Dependency(DependencyKind::Evidence) => "#evidence dependency",
+        }
+    }
+}
+
 // @implements CT-MOD-002
 /// A namespace member that can be named, with the namespaces it inherits from and imports.
 #[derive(Debug, Clone)]
@@ -1081,6 +1100,32 @@ mod tests {
         assert_eq!(m.element(Model::ROOT).kind, ElementKind::Root);
         assert_eq!(target(&m, Role::SatisfiedBy, "p"), Some("P::R::p".into()));
         assert!(m.errors.is_empty(), "{:?}", rendered(&m));
+    }
+
+    // @verifies CT-MOD-001, CT-EFF-005
+    #[test]
+    fn kinds_have_the_keywords_the_text_uses() {
+        let m = one(
+            "package P {\n  requirement def D;\n  requirement r : D { subject s; }\n  \
+             part p { satisfy r; }\n  #derivation dependency r to r;\n}\n",
+        );
+        let labels: Vec<&str> = (m.elements.iter())
+            .filter(|e| e.file == 2)
+            .map(|e| e.kind.label())
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                "package",
+                "requirement def",
+                "requirement",
+                "subject",
+                "part",
+                "satisfy",
+                "#derivation dependency"
+            ]
+        );
+        assert_eq!(m.element(Model::ROOT).kind.label(), "root");
     }
 
     // @verifies CT-MOD-002

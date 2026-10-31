@@ -1,10 +1,29 @@
-//! The Clewtrace desktop app. For now it opens one window that shows the app name and
-//! version. The UI is embedded in the binary, and the only commands it may call are the
-//! ones granted in capabilities/main.json.
+//! The Clewtrace desktop app. It opens one window and, when started with a folder path,
+//! loads that project in the background and serves it to the UI in pages (ADR-0004). The
+//! UI is embedded in the binary, and the only commands it may call are the ones granted in
+//! capabilities/main.json.
 
 // @begin CT-PLT-001
 // Release builds on Windows open no console window next to the app window.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// @end
+
+// @begin CT-EFF-004, CT-EFF-005
+mod commands;
+mod data;
+
+use std::ffi::OsString;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use data::AppState;
+// @end
+
+// @begin CT-EFF-004, CT-EFF-005
+// Tests in data.rs open the generated projects the perf harness uses.
+#[cfg(test)]
+#[path = "../../../crates/clew-core/tests/generate/mod.rs"]
+mod generate;
 // @end
 
 /// The context the app is built with: tauri.conf.json and the capability files.
@@ -15,17 +34,53 @@ fn context() -> tauri::Context<tauri::Wry> {
     tauri::generate_context!()
 }
 
-// @implements CT-PLT-001, CT-PLT-003
+/// The project folder given on the command line: the first argument that is not an
+/// option. macOS may pass a `-psn_...` process serial number when started from Finder.
+// @implements CT-EFF-004
+fn project_arg(args: impl IntoIterator<Item = OsString>) -> Option<PathBuf> {
+    args.into_iter()
+        .find(|a| !a.to_string_lossy().starts_with('-'))
+        .map(PathBuf::from)
+}
+
+// @implements CT-PLT-001, CT-PLT-003, CT-EFF-004, CT-EFF-005
 fn main() {
+    let state = Arc::new(AppState::default());
+    // Loading starts before the window opens and runs beside it.
+    if let Some(path) = project_arg(std::env::args_os().skip(1)) {
+        state.open(path);
+    }
     tauri::Builder::default()
+        .manage(state)
+        .invoke_handler(tauri::generate_handler![
+            commands::project_status,
+            commands::wait_for_project,
+            commands::tree_children,
+            commands::element_detail,
+            commands::element_links,
+            commands::problems,
+            commands::search,
+        ])
         .run(context())
         .expect("Clewtrace could not start its window");
 }
 
-// @verifies CT-SEC-001, CT-PLT-003
+// @verifies CT-SEC-001, CT-PLT-003, CT-EFF-004
 #[cfg(test)]
 mod tests {
-    use super::context;
+    use super::{context, project_arg};
+
+    // @verifies CT-EFF-004
+    #[test]
+    fn the_project_is_the_first_argument_that_is_not_an_option() {
+        let args = |list: &[&str]| list.iter().map(Into::into).collect::<Vec<_>>();
+        assert_eq!(project_arg(args(&[])), None);
+        assert_eq!(project_arg(args(&["-psn_0_1"])), None);
+        assert_eq!(
+            project_arg(args(&["-psn_0_1", "my project", "x"])),
+            Some("my project".into())
+        );
+    }
 
     // @verifies CT-SEC-001, CT-PLT-003
     #[test]
@@ -80,12 +135,33 @@ mod no_network {
 
     /// Permissions reviewed as granting no network access. Adding one here needs the same
     /// review, recorded in docs/verification/no-network.md.
-    const OFFLINE_PERMISSIONS: [&str; 2] = ["core:app:allow-name", "core:app:allow-version"];
+    /// The `allow-` permissions of the app's own commands (build.rs) only read the project
+    /// the app has open; none of them opens a connection.
+    const OFFLINE_PERMISSIONS: [&str; 9] = [
+        "core:app:allow-name",
+        "core:app:allow-version",
+        "allow-project-status",
+        "allow-wait-for-project",
+        "allow-tree-children",
+        "allow-element-detail",
+        "allow-element-links",
+        "allow-problems",
+        "allow-search",
+    ];
 
-    /// Features each Tauri crate may enable. None of them pulls in a TLS stack, an HTTP
-    /// client, or a plugin.
-    const ALLOWED_FEATURES: [(&str, &[&str]); 2] =
-        [("tauri", &["wry"]), ("tauri-build", &["config-json"])];
+    /// Features each pinned crate may enable, with its default features off. None of them
+    /// pulls in a TLS stack, an HTTP client, or a plugin. The Tauri crates are in the app's
+    /// manifest; the others are in clew-core's, which the app links.
+    const ALLOWED_FEATURES: [(&str, &[&str]); 5] = [
+        ("tauri", &["wry"]),
+        ("tauri-build", &["config-json"]),
+        ("rusqlite", &["bundled"]),
+        ("tree-sitter", &[]),
+        ("sha2", &[]),
+    ];
+
+    /// The manifests of the crates the app is built from, relative to app/src-tauri.
+    const MANIFESTS: [&str; 2] = ["Cargo.toml", "../../crates/clew-core/Cargo.toml"];
 
     /// Crates that open network connections or exist only to serve them.
     const NETWORK_CRATES: [&str; 16] = [
@@ -300,9 +376,13 @@ mod no_network {
     // @verifies CT-SEC-001, CT-PLT-003
     #[test]
     fn cargo_features_enable_no_network_access() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
-        let manifest = std::fs::read_to_string(&path).expect("Cargo.toml is readable");
-        let problems = manifest_problems(&manifest);
+        let mut problems = Vec::new();
+        for manifest in MANIFESTS {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(manifest);
+            let text = std::fs::read_to_string(&path).expect("manifest is readable");
+            let found = manifest_problems(&text);
+            problems.extend(found.into_iter().map(|p| format!("{manifest}: {p}")));
+        }
         assert!(problems.is_empty(), "{}", problems.join("\n"));
     }
 
@@ -363,6 +443,25 @@ mod no_network {
         };
         let problems = capability_problems(&c);
         assert_eq!(problems.len(), 3, "{problems:?}");
+    }
+
+    // @verifies CT-SEC-001, CT-PLT-003
+    #[test]
+    fn manifest_check_holds_the_core_crates_to_their_pins() {
+        let manifest = r#"
+[dependencies]
+rusqlite = { version = "0.40", default-features = false, features = ["bundled", "url"] }
+sha2 = "0.10"
+tree-sitter = { version = "0.27", default-features = false }
+tree-sitter-rust = "0.24"
+"#;
+        assert_eq!(
+            manifest_problems(manifest),
+            [
+                "line 3: `rusqlite` enables feature `url`",
+                "line 4: `sha2` keeps default features",
+            ]
+        );
     }
 
     // @verifies CT-SEC-001, CT-PLT-003

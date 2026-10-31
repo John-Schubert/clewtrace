@@ -1,23 +1,32 @@
 <script lang="ts">
-  // @begin CT-PLT-001
-  // The empty app window: shows the app name and version, read from the Rust side.
+  // @begin CT-PLT-001, CT-EFF-004
+  // The app window: shows the app name and version, read from the Rust side, and the
+  // project opened from the command line once its background load ends.
   import { getName, getVersion } from '@tauri-apps/api/app';
+  import { describeStatus, waitForProject } from './lib/api';
 
   let name = $state('Clewtrace');
   let version = $state('');
+  let project = $state('');
 
   Promise.all([getName(), getVersion()]).then(([n, v]) => {
     name = n;
     version = v;
   });
+  waitForProject().then((status) => {
+    project = describeStatus(status);
+  });
   // @end
 </script>
 
-<!-- @begin CT-PLT-001 -->
+<!-- @begin CT-PLT-001, CT-EFF-004 -->
 <main>
   <h1>{name}</h1>
   {#if version}
     <p>Version {version}</p>
+  {/if}
+  {#if project}
+    <p class="project">{project}</p>
   {/if}
 </main>
 <!-- @end -->
@@ -43,6 +52,9 @@
   p {
     margin: 0.5rem 0 0;
     color: #4a5a66;
+  }
+  .project {
+    max-width: 40rem;
   }
   /* @end */
 </style>

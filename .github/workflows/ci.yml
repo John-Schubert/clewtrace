@@ -256,12 +256,17 @@ jobs:
   # total line coverage, writes it with a per-file table to the job summary, and fails when
   # the total is under the minimum (docs/TRACEABILITY.md). The minimum only goes up: John
   # raises it at each gate. John adds this job to the "CI must pass" ruleset.
+  # The desktop app crate (app/src-tauri) is measured in a separate run and reported only,
+  # until Gate 2 sets its minimum. It never changes the core result.
   coverage:
     name: coverage
     runs-on: ubuntu-latest
     env:
       LLVM_COV_VERSION: 0.9.1
       MIN_LINE_COVERAGE: 95
+      TAURI_APT_PACKAGES: >-
+        libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev
+        libayatana-appindicator3-dev librsvg2-dev
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -309,6 +314,38 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit $status
+
+      # The app crate links the web view libraries and embeds app/dist, as in the check job.
+      - name: Tauri Linux packages
+        timeout-minutes: 10
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $TAURI_APT_PACKAGES
+
+      - name: UI build
+        working-directory: app
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      # Report only until Gate 2: a low number or a failed run does not fail the job.
+      - name: App test coverage (report only)
+        continue-on-error: true
+        shell: bash
+        run: |
+          cargo llvm-cov --locked -p clewtrace --summary-only --ignore-filename-regex '/crates/' | tee "$RUNNER_TEMP/app-coverage.txt"
+          lines=$(awk '$1 == "TOTAL" { print $10 }' "$RUNNER_TEMP/app-coverage.txt")
+          echo "Total line coverage (app/src-tauri, report only): ${lines:-unknown}"
+          {
+            echo "## App test coverage (report only)"
+            echo
+            echo "Total line coverage of the clewtrace app crate (app/src-tauri): **${lines:-unknown}**."
+            echo "No minimum until Gate 2."
+            echo
+            echo '```'
+            grep -E '^(Filename|-{10}|app/|src|TOTAL)' "$RUNNER_TEMP/app-coverage.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # CT-EFF-001: the Linux deb is built on every pull request, on the release image (Ubuntu
   # 22.04) with the release config and the notices file, so a size regression shows up

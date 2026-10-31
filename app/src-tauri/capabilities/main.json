@@ -1,6 +1,16 @@
 {
   "identifier": "main",
-  "description": "The main window may read the app name and version, and nothing else.",
+  "description": "The main window may read the app name and version and call the app's own read-only project commands, and nothing else.",
   "windows": ["main"],
-  "permissions": ["core:app:allow-name", "core:app:allow-version"]
+  "permissions": [
+    "core:app:allow-name",
+    "core:app:allow-version",
+    "allow-project-status",
+    "allow-wait-for-project",
+    "allow-tree-children",
+    "allow-element-detail",
+    "allow-element-links",
+    "allow-problems",
+    "allow-search"
+  ]
 }

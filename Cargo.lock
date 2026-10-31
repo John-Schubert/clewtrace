@@ -359,6 +359,7 @@ dependencies = [
 name = "clewtrace"
 version = "0.1.0"
 dependencies = [
+ "clew-core",
  "tauri",
  "tauri-build",
 ]
