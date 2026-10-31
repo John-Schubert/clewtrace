@@ -2,7 +2,7 @@
 # Task 2.5b, temporary: measures web view settings against the 2.5 probes on all three
 # operating systems. Each job builds the app once, then launches it 3 times per variant and
 # prints one summary table. It runs on each push of this file, 3 pushes (3 CI runs)
-# before a budget is set. Run counter: 1
+# before a budget is set. Run counter: 2
 # Removed from the branch when the results are recorded in docs/PLAN.md.
 name: budget-experiments
 
@@ -190,10 +190,15 @@ jobs:
           for run in 1 2 3; do
             target/release/clewtrace &
             pid=$!
+            echo "WebKit processes before settle: $(ps -axo comm= | grep -cE 'com\.apple\.WebKit\.' || true)"
             sleep 10
             app_kb=$(ps -o rss= -p "$pid")
             web_kb=$(ps -axo rss=,comm= | grep -E 'com\.apple\.WebKit\.(WebContent|Networking|GPU)' | awk '{s+=$1} END{print s+0}')
-            kill "$pid"; sleep 2
+            kill "$pid"
+            for i in $(seq 1 30); do
+              ps -axo comm= | grep -qE 'com\.apple\.WebKit\.(WebContent|Networking|GPU)' || break
+              sleep 1
+            done
             echo "| baseline | $run | $(( (app_kb + web_kb) / 1000 )) | $(( app_kb / 1000 )) | $(( web_kb / 1000 )) |" >> table.md
           done
           cat table.md
