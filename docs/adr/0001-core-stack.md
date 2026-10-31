@@ -3,7 +3,8 @@
 - Status: Accepted
 - Date: 2026-10-20
 - Updated: 2026-10-21 (task 0.10, reviewed against what was built in phase 0);
-  2026-10-22 (task 1.8, performance gate)
+  2026-10-22 (task 1.8, performance gate); 2026-10-31 (task 2.0, phase 1 status and the
+  phase 2 and 3 plan)
 - Serves: CT-EFF-001, CT-EFF-002, CT-EFF-004, CT-EFF-008, CT-PLT-001, CT-PLT-005, CT-MOD-001,
   CT-TRC-008, CT-USE-004, CT-SEC-001, CT-SEC-006, CT-DEV-012, CT-DEV-014, CT-EFF-009
 
@@ -23,8 +24,8 @@ installer, idle under 200 MB of memory (250 MB on Linux), and handle 10,000 requ
 | Text editor | CodeMirror 6 |
 | SysML v2 parser | Hand-written recursive descent in Rust, with error recovery |
 | Storage | `.sysml` text files as truth; SQLite (rusqlite, bundled) with FTS5 as a rebuildable index |
-| Code scanning | tree-sitter grammars for Rust and TypeScript; Svelte files use `@begin`/`@end` regions only (v0) |
-| File watching | OS file events (no polling) |
+| Code scanning | tree-sitter grammars for Rust and TypeScript; GitHub Actions workflow steps carry `@verifies`; Svelte files use `@begin`/`@end` regions until task 2.2, which scans each `<script lang="ts">` block with the TypeScript grammar |
+| File watching | OS file events through `notify` (recommended watcher only, no polling watcher, no debouncer crate); a one-shot timer ends a burst of events |
 | Licensing | Ed25519-signed license file verified offline with `ed25519-dalek` |
 | Diagrams | Deferred to phase 5; SVG generated in Rust, layout chosen in a later ADR |
 | Installers | MSI (Windows), universal DMG (macOS), deb and rpm (Linux), built by CI from a signed tag |
@@ -38,6 +39,19 @@ Svelte 5 UI shell, the tree-sitter tag scanner, and the CI and release workflows
 Not built yet, still decided as above: the SysML v2 parser (phase 1, replacing the v0
 requirement reader), the SQLite index, CodeMirror, file watching, and license file checks.
 The Rust toolchain is pinned in `rust-toolchain.toml`.
+
+## Status of the stack after phase 1
+
+Built since phase 0: the hand-written SysML v2 parser with error recovery (replacing the v0
+requirement reader), the model with name resolution, the SQLite index with FTS5 and
+incremental re-indexing, the trace graph (derives, refines, satisfies, verifies, implements,
+evidences), the coverage and impact reports, reproducible reports with `clew report verify`,
+the phase-aware requirement coverage gate, and the performance job on 4 GB and 2 CPUs.
+Still to build, decided as above: CodeMirror, file watching, license file checks, and the
+desktop app's use of the core (phase 2).
+Phases 2 and 3 are planned in `docs/PLAN.md`. ADR-0004 (app data layer, task 2.3a),
+ADR-0005 (incremental live validation, task 2.9a), and ADR-0006 (license file format,
+task 3.9) will record the design of those parts.
 
 ## Installers (John, 2026-10-21, task 0.9 decisions)
 
@@ -58,7 +72,11 @@ The Rust toolchain is pinned in `rust-toolchain.toml`.
 - **Code signing** of the MSI and DMG is required before the first business pilot
   (`docs/PLAN.md`). Until then installers are unsigned and Windows SmartScreen and macOS
   Gatekeeper will warn.
-- ARM64 installers for Windows and Linux are not built yet.
+- ARM64 installers (John, 2026-10-31): CT-PLT-001 names Linux deb and rpm on x64 and ARM64,
+  and the universal DMG already covers Apple silicon. Task 2.14 builds the Linux ARM64
+  packages on the `ubuntu-22.04-arm` runner, and the waiver for the ARM64 part ends at Gate 2.
+  A Windows ARM64 installer is optional, because Windows on ARM runs the x64 MSI under
+  emulation and Tauri's ARM64 path is NSIS only.
 
 ## Performance gate (John, 2026-10-22, task 1.8)
 
@@ -73,6 +91,15 @@ The Rust toolchain is pinned in `rust-toolchain.toml`.
   must be killed. It fails if either check does not hold.
 - This covers the core and CLI budgets on Linux. The desktop app on a 4 GB Windows machine
   is still checked on John's laptop at each gate that changes the desktop app.
+
+## Installer size and coverage in CI (John, 2026-10-31, task 2.0)
+
+- The `installer-size` job builds the Linux deb on every pull request, on Ubuntu 22.04 with
+  the release config and the notices file, and fails over 20 MB (CT-EFF-001).
+- The `coverage` job fails below 95% of lines for clew-core and clew-cli. The minimum only
+  goes up, at each gate.
+- The WebKitGTK packages are cached from a folder under `$HOME`, keyed on the runner image
+  and the package list, and the install step has a timeout.
 
 ## Development environment
 

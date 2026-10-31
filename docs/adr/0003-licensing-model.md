@@ -2,7 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-20
-- Updated: 2026-10-21 (task 0.10, reviewed against what was built in phase 0)
+- Updated: 2026-10-21 (task 0.10, reviewed against what was built in phase 0);
+  2026-10-31 (task 2.0, exceptions approved for later dependencies)
 - Serves: CT-DEV-009, CT-DEV-013, CT-PLT-005, CT-PLT-006, CT-PLT-007, CT-SEC-001, CT-SEC-006,
   CT-DEV-008, CT-DEV-012, CT-DEV-014
 
@@ -60,6 +61,20 @@ distributed.
   | target-lexicon | Apache-2.0 WITH LLVM-exception | build-only | Tauri's Linux GTK sys crates |
   | WiX Toolset 3 (CI tool) | MS-RL | build-only | tauri-cli, MSI bundling |
 
+- **Exceptions approved, pending their dependency** (John, 2026-10-31, decisions on PR #27).
+  Each is added to `deny.toml` and `deps.toml` only in the task that adds the dependency,
+  and that task takes the exact crate list from cargo-deny:
+
+  | Crate | License | Scope | Task | Notes |
+  | --- | --- | --- | --- | --- |
+  | ed25519-dalek, curve25519-dalek, subtle | BSD-3-Clause | shipped | 3.9 | Per-crate only, not the whole license. Default features off, verify only |
+  | notify | CC0-1.0 | shipped | 2.10b | Version 8.2.1 (9.x is a release candidate) |
+  | inotify, inotify-sys | ISC | shipped | 2.10b | Linux only, pulled in by notify |
+  | libfuzzer-sys | NCSA (with MIT OR Apache-2.0) | build-only | 3.8 | Fuzz job only |
+
+- **Test inputs under other licenses:** the OMG SysML v2 example models (EPL-2.0) may be
+  fetched in CI, pinned by hash, as test inputs only for the conformance job (task 3.14).
+  They are never committed, never shipped, and never copied into first-party code.
 - **Advisories:** RUSTSEC-2024-0370 (proc-macro-error, unmaintained) is ignored in
   `deny.toml` until Tauri moves off its GTK 0.18 crates. Any other ignore needs John.
 - **Enforcement as built (task 0.9):** `cargo deny check` enforces the Rust tiers in CI.

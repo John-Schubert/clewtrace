@@ -79,9 +79,9 @@ package ClewtraceRequirements {
         doc /* Productive without SysML syntax, keyboard-first, accessible. */
 
         requirement <'CT-USE-001'> formEditing : ProductRequirement {
-            doc /* Users shall create, edit, and delete requirements through forms without writing SysML text, and each form save shall produce valid SysML v2 text. */
+            doc /* Users shall create, edit, and delete requirements and their trace links through forms without writing SysML text, and each form save shall produce valid SysML v2 text. */
             attribute :>> verificationMethod = "Demonstration";
-            attribute :>> phase = 2;
+            attribute :>> phase = 3;
         }
 
         requirement <'CT-USE-002'> commandPalette : ProductRequirement {
@@ -111,7 +111,7 @@ package ClewtraceRequirements {
         requirement <'CT-USE-006'> firstRun : ProductRequirement {
             doc /* A first-run sample project shall let a new user create and trace a first requirement within 5 minutes. */
             attribute :>> verificationMethod = "Demonstration";
-            attribute :>> phase = 2;
+            attribute :>> phase = 3;
         }
 
         requirement <'CT-USE-007'> actionableErrors : ProductRequirement {
@@ -122,6 +122,12 @@ package ClewtraceRequirements {
 
         requirement <'CT-USE-008'> autosave : ProductRequirement {
             doc /* The application shall save edits to disk automatically and lose no saved work after a crash or power loss. */
+            attribute :>> verificationMethod = "Test";
+            attribute :>> phase = 2;
+        }
+
+        requirement <'CT-USE-009'> concurrentUse : ProductRequirement {
+            doc /* The application and the CLI shall work on the same project at the same time without errors or lost work. */
             attribute :>> verificationMethod = "Test";
             attribute :>> phase = 2;
         }
@@ -145,7 +151,7 @@ package ClewtraceRequirements {
         requirement <'CT-TRC-003'> traceMatrix : ProductRequirement {
             doc /* The application shall display a filterable, exportable trace matrix between any two sets of elements. */
             attribute :>> verificationMethod = "Demonstration";
-            attribute :>> phase = 2;
+            attribute :>> phase = 3;
         }
 
         requirement <'CT-TRC-004'> coverageGaps : ProductRequirement {
@@ -169,7 +175,7 @@ package ClewtraceRequirements {
         requirement <'CT-TRC-007'> baselines : ProductRequirement {
             doc /* The application shall create named baselines tied to a Git commit and compare any two baselines. */
             attribute :>> verificationMethod = "Test";
-            attribute :>> phase = 2;
+            attribute :>> phase = 4;
         }
 
         requirement <'CT-TRC-008'> headlessCli : ProductRequirement {
@@ -201,21 +207,21 @@ package ClewtraceRequirements {
         }
 
         requirement <'CT-MOD-003'> fastDiagnostics : ProductRequirement {
-            doc /* The parser shall report syntax and reference errors with file, line, and column within 1 s of saving a file of up to 10,000 lines. */
+            doc /* The parser shall report syntax and reference errors with file, line, and column within 1 s of an edit or save in a file of up to 10,000 lines. */
             attribute :>> verificationMethod = "Test";
-            attribute :>> phase = 3;
+            attribute :>> phase = 2;
         }
 
         requirement <'CT-MOD-004'> textEditor : ProductRequirement {
             doc /* The text editor shall provide SysML v2 syntax highlighting, completion, and go-to-definition. */
             attribute :>> verificationMethod = "Demonstration";
-            attribute :>> phase = 3;
+            attribute :>> phase = 2;
         }
 
         requirement <'CT-MOD-005'> modelBrowser : ProductRequirement {
             doc /* A model browser tree shall stay synchronized with the text as the user edits. */
             attribute :>> verificationMethod = "Demonstration";
-            attribute :>> phase = 3;
+            attribute :>> phase = 2;
         }
 
         requirement <'CT-MOD-006'> generatedDiagrams : ProductRequirement {
@@ -237,19 +243,19 @@ package ClewtraceRequirements {
         requirement <'CT-XCH-001'> reqif : ProductRequirement {
             doc /* The application shall import and export requirements and trace links as ReqIF 1.2. */
             attribute :>> verificationMethod = "Test";
-            attribute :>> phase = 2;
+            attribute :>> phase = 3;
         }
 
         requirement <'CT-XCH-002'> csvXlsx : ProductRequirement {
             doc /* The application shall import and export requirements as CSV and export reports as XLSX. */
             attribute :>> verificationMethod = "Test";
-            attribute :>> phase = 2;
+            attribute :>> phase = 3;
         }
 
         requirement <'CT-XCH-003'> htmlReports : ProductRequirement {
             doc /* Every report shall be exportable as a self-contained, printable HTML file. */
             attribute :>> verificationMethod = "Test";
-            attribute :>> phase = 2;
+            attribute :>> phase = 3;
         }
 
         requirement <'CT-XCH-004'> v1Import : ProductRequirement {
@@ -327,9 +333,9 @@ package ClewtraceRequirements {
         }
 
         requirement <'CT-SEC-002'> offlineEdition : ProductRequirement {
-            doc /* A build option shall produce an offline edition with all network code compiled out. */
+            doc /* Any network code shall be behind a build option that is off by default, so that a build without it is an offline edition with no network code. */
             attribute :>> verificationMethod = "Inspection";
-            attribute :>> phase = 2;
+            attribute :>> phase = 3;
         }
 
         requirement <'CT-SEC-003'> localData : ProductRequirement {
@@ -341,13 +347,13 @@ package ClewtraceRequirements {
         requirement <'CT-SEC-004'> changeLog : ProductRequirement {
             doc /* Each project shall keep an append-only, hash-chained change log (who, when, what) whose integrity is verified on open. */
             attribute :>> verificationMethod = "Test";
-            attribute :>> phase = 2;
+            attribute :>> phase = 4;
         }
 
         requirement <'CT-SEC-005'> osEncryption : ProductRequirement {
             doc /* The application shall rely on OS full-disk encryption for data at rest and document how to enable FIPS-validated encryption on each platform. */
             attribute :>> verificationMethod = "Inspection";
-            attribute :>> phase = 2;
+            attribute :>> phase = 3;
         }
 
         requirement <'CT-SEC-006'> noCustomCrypto : ProductRequirement {
@@ -365,6 +371,12 @@ package ClewtraceRequirements {
         requirement <'CT-SEC-008'> safeImport : ProductRequirement {
             doc /* Importers shall be fuzz-tested and shall never execute content from imported files. */
             attribute :>> verificationMethod = "Test";
+            attribute :>> phase = 3;
+        }
+
+        requirement <'CT-SEC-009'> robustInput : ProductRequirement {
+            doc /* The application and CLI shall reject malformed, deeply nested, or oversized input files with an actionable error, and shall not crash, hang, or exceed their memory budgets. */
+            attribute :>> verificationMethod = "Test";
             attribute :>> phase = 2;
         }
     }
@@ -373,7 +385,7 @@ package ClewtraceRequirements {
         doc /* Installs on mainstream desktops, runs offline, and licenses without phoning home. */
 
         requirement <'CT-PLT-001'> installers : ProductRequirement {
-            doc /* CI shall produce installers for Windows 10 and newer (MSI), macOS 13 and newer (DMG), and Linux (deb, rpm) on x64, plus ARM64 where supported. */
+            doc /* CI shall produce installers for Windows 10 and newer (MSI) on x64, macOS 13 and newer (a universal DMG for x64 and Apple silicon), and Linux (deb, rpm) on x64 and ARM64. A Windows ARM64 installer is optional. */
             attribute :>> verificationMethod = "Test";
             attribute :>> phase = 0;
         }
@@ -381,7 +393,7 @@ package ClewtraceRequirements {
         requirement <'CT-PLT-002'> perUserInstall : ProductRequirement {
             doc /* The application shall install per user without administrator rights where the OS allows. */
             attribute :>> verificationMethod = "Demonstration";
-            attribute :>> phase = 2;
+            attribute :>> phase = 3;
         }
 
         requirement <'CT-PLT-003'> offline : ProductRequirement {
@@ -393,25 +405,25 @@ package ClewtraceRequirements {
         requirement <'CT-PLT-004'> manualUpdates : ProductRequirement {
             doc /* Update checks shall be off by default and run only when the user asks. */
             attribute :>> verificationMethod = "Demonstration";
-            attribute :>> phase = 2;
+            attribute :>> phase = 5;
         }
 
         requirement <'CT-PLT-005'> offlineLicense : ProductRequirement {
             doc /* The application shall validate a signed license file offline, with no network connection, and show the license status and any remaining trial time. */
             attribute :>> verificationMethod = "Test";
-            attribute :>> phase = 2;
+            attribute :>> phase = 3;
         }
 
         requirement <'CT-PLT-006'> trialTerms : ProductRequirement {
             doc /* The application shall allow unlimited personal, non-commercial use and 90 days of commercial evaluation without a license file, matching the license's Additional Use Grant. */
             attribute :>> verificationMethod = "Test";
-            attribute :>> phase = 2;
+            attribute :>> phase = 3;
         }
 
         requirement <'CT-PLT-007'> noDataLockout : ProductRequirement {
             doc /* When a trial or license expires, the application shall keep every project readable and exportable and disable only editing. */
             attribute :>> verificationMethod = "Test";
-            attribute :>> phase = 2;
+            attribute :>> phase = 3;
         }
     }
 
@@ -451,7 +463,7 @@ package ClewtraceRequirements {
         requirement <'CT-DEV-006'> releaseEvidence : ProductRequirement {
             doc /* Each release shall publish a CycloneDX SBOM, build provenance attestation, SHA-256 checksums, and the full trace report. */
             attribute :>> verificationMethod = "Inspection";
-            attribute :>> phase = 2;
+            attribute :>> phase = 3;
         }
 
         requirement <'CT-DEV-007'> reproducibleBuilds : ProductRequirement {
@@ -481,7 +493,7 @@ package ClewtraceRequirements {
         requirement <'CT-DEV-011'> ssdf : ProductRequirement {
             doc /* Development practices shall be mapped to NIST SP 800-218 (SSDF) in docs/SSDF.md. */
             attribute :>> verificationMethod = "Inspection";
-            attribute :>> phase = 2;
+            attribute :>> phase = 3;
         }
 
         requirement <'CT-DEV-012'> releasesFromCi : ProductRequirement {

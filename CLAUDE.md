@@ -35,6 +35,9 @@ in `model/requirements.sysml` are the authority once code exists.
 - **No network code, no telemetry** (CT-SEC-001). Do not add HTTP clients, analytics, crash
   reporters, activation servers, or update checkers unless a task names the requirement that
   allows it. Licensing works offline from a signed file (CT-PLT-005).
+- **Network code is opt-in** (CT-SEC-002). Any future network code goes behind a Cargo
+  feature that is off by default, so a build without it has no network code. Every current
+  build is the offline edition.
 - **No cryptography of our own** (CT-SEC-006). Hash with `sha2`; verify license signatures
   with `ed25519-dalek`. Never hand-roll crypto.
 - **Never lock users out of their data** (CT-PLT-007). An expired license disables editing

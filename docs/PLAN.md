@@ -341,9 +341,9 @@ requirement is implemented and verified or formally waived.
       `parse_requirements` uses a map instead of comparing every pair.
       John approved `systemd-run` instead of a container and the new CT-EFF-009 text
       (2026-10-22, ADR-0001).
-      Follow-ups: `perf (4 GB, 2 CPUs)` is not a required check yet; CT-EFF-004 is measured on the core
-      library only, since the app does not open projects until phase 2; peak memory is read
-      only on Linux.
+      Follow-ups: CT-EFF-004 is measured on the core library only, since the app does not
+      open projects until phase 2; peak memory is read only on Linux (task 2.5 adds
+      Windows and macOS idle memory). `perf (4 GB, 2 CPUs)` is in the `main` ruleset now.
 - [x] **1.9 Requirement coverage gate.** Turn on the phase-aware requirement coverage check
       in CI and add waivers only with John's approval.
       Refs: CT-DEV-003, CT-DEV-004
@@ -389,21 +389,389 @@ requirement is implemented and verified or formally waived.
          is report-only until John sets a minimum, which then only goes up.
       3. No laptop test at Gate 1, since it does not change the desktop app. ADR-0001 now
          says the laptop check runs at each gate that changes the desktop app.
-      Follow-ups: the CT-PLT-001 ARM64 waiver says "until phase 2", which is now; ADR-0002
-      still says the gate fails on any requirement due in a started phase.
+      Follow-ups: both were cleared in task 2.0: the CT-PLT-001 ARM64 waiver now ends at
+      Gate 2, and ADR-0002 states the Gate 1 phase rule.
 
-## Before the first business pilot
+## Phase 2: Modeling MVP
 
-- [ ] **Code-signed installers.** Every installer is code-signed before the first business
-      pilot. Plan on Microsoft Artifact Signing (Basic, about $10 a month) for the Windows MSI
-      and the Apple Developer Program ($99 a year) to sign and notarize the macOS DMG. Free
-      open-source signing programs do not apply, because Clewtrace uses the Business Source
-      License (John, 2026-10-21).
-      Refs: CT-PLT-001, CT-DEV-012
+Exit gate: John models in Clewtrace on his 4 GB laptop. The app opens a project, shows parse
+and name errors as he types, browses the model, follows trace links to code and tests, and
+autosaves without loss. Every phase 2 budget passes in CI with the app measured, not only the
+core library.
 
-## Later phases
+Planned in `docs/planning/phase-2-3-plan.md` and reviewed in `docs/planning/phase-2-3-review.md`.
+John approved the plan and the review's splits and fixes on PR #27 (2026-10-31). A task that
+fails twice moves to Opus. A dependency marked "PR #27" was approved in intent there; the task
+still adds its `deps.toml` entry with the settings shown, and confirms its license against the
+tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone A is after
+2.7b, and Milestone B (John models in Clewtrace) is after 2.10b, the 16th session.
 
-Phase 2 (desktop MVP, including offline license files, trial terms, and read-only expiry per
-CT-PLT-005 to CT-PLT-007), phase 3 (SysML v2 editor), phase 4 (CMMC pack), and phase 5
-(diagrams, v1 import, API, AI assist) are broken into tasks when the previous gate passes,
-using the phase column in `model/requirements.sysml`.
+- [x] **2.0 Phase 2 housekeeping.** Applied John's decisions on PR #27.
+      Requirements in `model/requirements.sysml`: CT-MOD-003 (reworded to "an edit or save"),
+      CT-MOD-004, and CT-MOD-005 moved to phase 2; 15 requirements moved to phase 3
+      (CT-USE-001, -006, CT-TRC-003, CT-XCH-001 to -003, CT-SEC-002, -005, -008, CT-PLT-002,
+      -005 to -007, CT-DEV-006, -011); CT-TRC-007 and CT-SEC-004 moved to phase 4 and
+      CT-PLT-004 to phase 5; CT-PLT-001 reworded (universal DMG, Linux deb and rpm on x64 and
+      ARM64, Windows ARM64 optional); CT-USE-001 now includes trace links; CT-SEC-002 reworded
+      to "any network code behind an off-by-default build option"; CT-SEC-009 and CT-USE-009
+      added. Phase counts are now 16, 14, 16, 17, 9, 5 (77 requirements). The CT-PLT-001 waiver now ends at Gate 2.
+      ADR-0001 has "Status after phase 1", workflow step scanning, the ARM64 decision, and the
+      new CI jobs. ADR-0002 has the Gate 1 phase rule and the phase 1 additions. ADR-0003
+      records the pending exceptions (ed25519-dalek and its BSD-3-Clause crates, notify,
+      inotify and inotify-sys, libfuzzer-sys) and the EPL-2.0 test-input rule. CLAUDE.md has the
+      rule that network code goes behind an off-by-default Cargo feature (CT-SEC-002). CI: the
+      `coverage` job fails under 95% of lines for clew-core and clew-cli; a WebKitGTK apt cache
+      kept under `$HOME`, keyed on the runner image and package list, with a step timeout; and
+      a parallel `installer-size` job on `ubuntu-22.04` that builds the deb with
+      `tauri.release.conf.json` and fails over 20 MB, so the size is recorded before 2.3a links
+      clew-core into the app.
+      Refs: CT-DEV-001, CT-DEV-003, CT-DEV-010, CT-PLT-001, CT-SEC-002, CT-EFF-001
+      Follow-ups:
+      - John to add `coverage` and `installer-size` to the "CI must pass" ruleset. The job
+        `coverage (report only)` no longer exists.
+      - The CI changes could not run in the cloud session. Check the first PR run of the apt
+        cache, the coverage floor, and the `installer-size` job.
+      - The review counted 22 phase 2 tasks. After its five phase 2 splits there are 20; the
+        two other splits (3.1 and 3.7) are in phase 3.
+- [ ] **2.1a Project opener and CLI tests.** A shared `Project::open(path)` that finds the
+      project root (nearest folder with `trace.toml` or `.clewtrace/`, else the given
+      folder), used by every `clew` command and later by the app. Move logic out of
+      `clew-cli/src/main.rs` (50.7% test coverage) into tested functions.
+      Refs: CT-TRC-008, CT-USE-007, CT-DEV-003
+      Model: Sonnet
+- [ ] **2.1b Model checks.** Read a phase given only as a default on a requirement
+      definition. Warn on an ambiguous name. Report an import of a standard library package
+      that is not built in (such as ISQ or SI) once, as a warning that its names are not
+      checked, instead of one error per name. Check that satisfy and verify targets are
+      requirements. Report a short name used by two requirements as an error.
+      Refs: CT-MOD-002, CT-TRC-001, CT-TRC-002, CT-DEV-003, CT-USE-007
+      Model: Sonnet
+- [ ] **2.2 Svelte script scanning.** Scan `<script lang="ts">` blocks with the TypeScript
+      grammar, offsetting line numbers, so functions in components get item-level tags.
+      Markup stays covered by the component tag or regions. Read `<!-- @file -->` in HTML
+      files. Add `html` to `languages` and `app/index.html` to the source roots in
+      `trace.toml`. Split `impl Scanner` under max_scope_lines. Update
+      `docs/TRACEABILITY.md`, the "Code scanning" row of ADR-0001, and "As built" in
+      ADR-0002, and add to CLAUDE.md: keep component logic in `.ts` modules and components
+      thin.
+      Refs: CT-DEV-002, CT-TRC-006
+      Model: Sonnet
+- [ ] **2.3a App data layer.** The Rust side of the app owns the open project (model, trace
+      graph, coverage, index). Tauri commands return pages of rows: tree children, element
+      detail, links to and from, problems, search hits. A typed client in
+      `app/src/lib/api.ts`. Load on a background thread so the window stays responsive.
+      Open a project from a path on the command line. Errors carry what, where, and how to
+      fix. ADR-0004 records the command and paging design. Extend the no-network manifest
+      check to read `crates/clew-core/Cargo.toml` too. Add `app/src-tauri` to the coverage
+      job, report-only until Gate 2. Tests run the commands on the 205-requirement generated
+      project.
+      Refs: CT-EFF-004, CT-EFF-005, CT-MOD-001, CT-EFF-001, CT-SEC-001
+      Model: Opus
+- [ ] **2.3b Opening projects.** A folder dialog (rfd 0.17.2 with `default-features = false`
+      and the `gtk3` feature only, MIT, PR #27; add `("rfd", &["gtk3"])` to the no-network
+      test's allowed features). A recent-projects list that stores folder paths only, never
+      project content, in the app config folder, with a "Clear recent" action.
+      `docs/INSTALL.md` says where it lives.
+      Refs: CT-SEC-003, CT-USE-007, CT-EFF-005
+      Model: Sonnet
+- [ ] **2.4 App shell.** Pane layout (model browser, main view, trace panel, problems). Light
+      and dark themes from CSS tokens, following the OS setting, with a manual override. A
+      command palette with an action registry that every later action joins. One shared
+      virtual list component for any list that can pass 200 rows. Keyboard focus order and
+      ARIA landmarks from the start. Adds vitest with happy-dom or jsdom for UI tests
+      (build-only, MIT, PR #27). Add to CLAUDE.md: the UI never puts project content in
+      localStorage, sessionStorage, or IndexedDB; it asks the Rust core each time. A test
+      fails on any use of those APIs in `app/src` outside UI preferences such as the theme.
+      Split into two sessions if the first attempt overruns.
+      Refs: CT-USE-002, CT-USE-005, CT-USE-004, CT-EFF-005, CT-SEC-003
+      Model: Sonnet
+- [ ] **2.5 App performance probes.** A `perf-probe` Cargo feature, off in release builds (a
+      test checks that `release.yml` passes no `--features` and that `default` does not
+      include it). All timing and memory reading is on the Rust side, so no probe code is in
+      the UI bundle. It reports time to an interactive window and the resident memory of the
+      app and its web view processes when idle with an empty project. The perf job measures
+      on Linux under the existing systemd-run limits; run `xvfb-run` inside the `systemd-run`
+      scope, since `sudo` drops `DISPLAY` (xvfb is an apt CI tool, PR #27). Windows and macOS
+      jobs measure idle memory from a workflow step (PowerShell `Get-Process` summing the app
+      and its `msedgewebview2` children, and `ps -o rss` on macOS), so no new crate is
+      needed. CI fails on CT-EFF-002 and CT-EFF-003. `docs/verification/idle-cpu.md` gives the
+      CT-EFF-008 analysis: every timer, listener, and thread, and why none polls. It supports
+      the review but does not count as verification, since checklists count only for
+      Inspection and Demonstration. The verification is a test tagged `@verifies CT-EFF-008`.
+      It fails on `setInterval`, `requestAnimationFrame` loops, `thread::sleep`, and
+      `recv_timeout` in first-party code outside an allowlist in the test, where each entry
+      gives its reason. Later UI tasks add their probes here. With `perf-probe` on, the app
+      can run a fixed script of actions through the 2.4 action registry, log the time from
+      each action to the next painted frame, and exit. No new dependency.
+      Refs: CT-EFF-002, CT-EFF-003, CT-EFF-008, CT-EFF-009
+      Model: Sonnet
+- [ ] **2.6 Model browser and problems.** A lazy, virtualized tree of packages, definitions,
+      and usages. Element detail: kind, qualified name, doc, attributes, file and line. A
+      problems panel with every syntax, name, and trace problem as file:line:column with its
+      fix hint; click to select. Probe: open the 10,000-requirement project in the app within
+      3 s and 400 MB.
+      Refs: CT-MOD-005, CT-USE-007, CT-EFF-004
+      Model: Sonnet
+- [ ] **2.7a Traces and impact.** Trace panel for the selected element: links to and from,
+      grouped by kind, including code tags with file and line; click to follow; back and
+      forward. Impact view, upstream and downstream. Probe: select and navigate within
+      100 ms in the app.
+      Refs: CT-TRC-005, CT-TRC-006, CT-EFF-005
+      Model: Sonnet
+- [ ] **2.7b Coverage, search, and source view.** Coverage view (no parent, no
+      implementation, no verification, untraced elements) with filters. Search box over the
+      FTS5 index with paged results. Read-only source view that opens a code file at the
+      tagged line. Probes: filter within 100 ms; search within 200 ms, in the app.
+      Refs: CT-TRC-004, CT-EFF-005, CT-EFF-006
+      Model: Sonnet
+      Milestone A: Clewtrace can open and trace its own repo, read-only. Optional
+      pre-release for a laptop check.
+- [ ] **2.8 Text editor.** CodeMirror 6 for `.sysml` files (@codemirror/state, view,
+      commands, language, lint, autocomplete, search; MIT, bundled locally, PR #27).
+      Syntax highlighting from a keyword list that a core command serves from the Rust lexer
+      at run time, so the two cannot drift. Open a file at a position from the browser,
+      problems, or trace panel. Explicit save through Rust with an atomic write in a new
+      `clew-core/src/io.rs`: a temp file in the same folder as the target, flush, then
+      rename. Never the system temp folder. Undo and redo, with tests.
+      Refs: CT-MOD-004, CT-USE-003, CT-USE-008, CT-EFF-005, CT-SEC-003
+      Model: Sonnet
+- [ ] **2.9a Incremental validation in the core.** An API that takes one file's new text,
+      re-parses only that file, then re-resolves names and rebuilds the trace graph from the
+      cached syntax trees of the other files. Perf tests: an edit in a 10,000-line file is
+      validated within 1 s on the 4 GB, 2 CPU job, and the 10,000-requirement project stays
+      within the CT-EFF-004 memory budget. ADR-0005 records the incremental design.
+      Refs: CT-MOD-003, CT-EFF-007, CT-EFF-004
+      Model: Opus
+- [ ] **2.9b Live validation in the app.** After a short pause in typing (a one-shot timer
+      reset by each keystroke, never a poll), send the buffer to the 2.9a API. Return
+      diagnostics as editor markers with help text, and refresh the browser, problems, and
+      trace panel.
+      Refs: CT-MOD-003, CT-MOD-005, CT-EFF-005
+      Model: Sonnet
+- [ ] **2.10a Autosave and concurrent use.** Autosave after a short pause and on blur and
+      close, through the 2.8 atomic write. A test kills the writer mid-save and finds the
+      old or the new content, never a torn file. Set the SQLite busy_timeout, and test
+      `clew index` running while the app holds the index.
+      Refs: CT-USE-008, CT-USE-009
+      Model: Opus
+- [ ] **2.10b File watching.** Watch the project folder with OS file events through notify
+      8.2.1 alone, using its recommended watcher only (CC0-1.0 for notify and ISC for
+      inotify and inotify-sys as per-crate exceptions, PR #27). Debounce with a one-shot
+      timer that starts on the first event and ends after the burst; nothing runs while no
+      files change. Never use notify's polling watcher or any notify-debouncer crate (its
+      thread wakes on a timer forever, CT-EFF-008). If the OS runs out of file watches,
+      report it with how to raise the limit instead of falling back to polling. On events:
+      re-index changed files, reload clean buffers, and ask when a file with unsaved edits
+      changed on disk (git pull, another editor). Add the file watcher to
+      `docs/verification/idle-cpu.md`.
+      Refs: CT-EFF-007, CT-EFF-008, CT-USE-008, CT-USE-009
+      Model: Opus
+      Milestone B: John models in Clewtrace. From here, edit `model/requirements.sysml` in
+      the app; changes still go through pull requests.
+- [ ] **2.11 Go to definition and completion.** F12 and Ctrl or Cmd+click go to the
+      definition. Find references from the model and trace links. Completion for keywords,
+      names in scope, and requirement short names after `satisfy` and `verify`.
+      Refs: CT-MOD-004, CT-EFF-005
+      Model: Sonnet
+- [ ] **2.12 Hardening for files from other people.** A parser recursion depth limit with an
+      actionable error. An unreadable subfolder is reported and skipped instead of stopping
+      `clew index`, with a test of the `sysml_files` error path in `load_project`. Very long
+      lines, invalid UTF-8, and very large files are reported, not fatal. A fixed-seed stress
+      test (deep nesting, random bytes, truncated files) runs in `cargo test` with no new
+      dependency. Full fuzzing comes with the importers in 3.8.
+      Refs: CT-SEC-009, CT-USE-007
+      Model: Sonnet
+- [ ] **2.13 Accessibility and keyboard pass.** `docs/verification/accessibility.md`: WCAG 2.1
+      AA checks for contrast in both themes, visible focus, keyboard paths through every pane,
+      and screen reader labels, with Narrator on Windows and VoiceOver on macOS checked by
+      John and recorded in the checklist. `docs/verification/command-palette.md`: every
+      action is in the palette. `docs/verification/themes.md`: light and dark themes,
+      following the OS setting and the manual override. `docs/verification/editor.md`:
+      highlighting, completion, go to definition, and the browser staying in step with
+      edits. Fix what fails.
+      Refs: CT-USE-004, CT-USE-002, CT-USE-005, CT-MOD-004, CT-MOD-005
+      Model: Sonnet
+- [ ] **2.14 Linux ARM64 installers and notices.** Build deb and rpm on `ubuntu-22.04-arm` in
+      the release workflow with the same 20 MB check and checksums. Add an `ubuntu-22.04-arm`
+      entry to the `installer-size` job, so the arm64 build is tested on every pull request
+      and not only on a release tag. Remove the CT-PLT-001 ARM64 waiver. Fetch license files
+      for the 16 shipped packages that publish none and add them to the notices file.
+      Refs: CT-PLT-001, CT-EFF-001, CT-DEV-014
+      Model: Sonnet
+- [ ] **Gate 2 check.** `clew check --self` shows 0 errors and 0 phase 2 coverage warnings
+      (CT-MOD-003, -004, -005, CT-SEC-009, and CT-USE-009 are phase 2 warnings from task 2.0
+      until their tasks land). The perf job passes every phase 2 budget with the app measured
+      (CT-EFF-002 to CT-EFF-006, CT-MOD-003). John installs the release build on his Windows 10
+      laptop (4 GB), opens the Clewtrace repo, edits `model/requirements.sysml` with live
+      errors, follows a requirement to its code and tests, ends the app in Task Manager during
+      an edit and loses no saved work, and records idle memory including the WebView2
+      processes. The accessibility, command palette, themes, and editor checklists pass. Raise
+      the test coverage minimum to the measured value rounded down, and make the `app/src-tauri`
+      coverage enforced. Then set `current_phase = 3`.
+
+## Phase 3: Requirements product and pilot readiness
+
+Exit gate: a requirements engineer with no SysML knowledge can create, trace, and exchange
+requirements. Licensing and the trial work fully offline and never lock anyone out of their
+data. A signed release carries its full evidence, installs and runs on an offline machine, and
+builds reproducibly. Ready for the first business pilot. Phase 3 has 17 tasks plus code
+signing and the gate.
+
+- [ ] **3.1a Minimal-edit writer.** The core makes minimal text edits that create, change,
+      and delete a requirement with the CT-TRC-001 fields (ID, title, statement, rationale,
+      verification method, status, owner), keeping surrounding text and comments. Every
+      write re-parses to the same fields (round-trip test over the repo's own model and
+      the generated project).
+      Refs: CT-USE-001, CT-TRC-001
+      Model: Opus
+- [ ] **3.1b Requirement forms.** Create, edit, and delete a requirement through a form on
+      the 3.1a writer. Form edits join undo, redo, and autosave.
+      `docs/verification/form-editing.md` is the Demonstration checklist.
+      Refs: CT-USE-001, CT-USE-003, CT-USE-008
+      Model: Sonnet
+- [ ] **3.2 Trace link forms.** Add and remove satisfy, verify, derivation, refinement, and
+      evidence links with pickers and search, through the same minimal-edit writer.
+      Refs: CT-USE-001, CT-TRC-002
+      Model: Sonnet
+- [ ] **3.3 First-run sample project.** A bundled sample opens on first launch, with short
+      guided steps to create and trace a first requirement. Demonstration checklist timed with
+      one new user, 5 minutes or less.
+      Refs: CT-USE-006
+      Model: Sonnet
+- [ ] **3.4 Trace matrix.** Rows and columns from any two element sets (by package, kind, or
+      ID pattern). Cells show link kinds. Filters. Virtualized in both directions. Export to
+      CSV here and to HTML in 3.5. `docs/verification/trace-matrix.md` is the Demonstration
+      checklist.
+      Refs: CT-TRC-003, CT-EFF-005
+      Model: Sonnet
+- [ ] **3.5 HTML reports.** Coverage, impact, and the trace matrix export as self-contained,
+      printable HTML with the provenance header, from the app and with `--html` on the CLI.
+      `clew report verify` checks HTML reports too. Store per-file hashes so verify can name the
+      file that changed, and hash non-UTF-8 files. Old reports still verify: `clew report
+      verify` reads both header forms.
+      Refs: CT-XCH-003, CT-TRC-009
+      Model: Sonnet
+- [ ] **3.6 CSV and XLSX.** CSV import and export of requirements with a standard-library RFC
+      4180 reader and writer. Import goes through the 3.1a writer, so imported requirements
+      are valid SysML. The user picks the target file; the default is a new file named after
+      the CSV. XLSX export of reports (rust_xlsxwriter 0.102.0 with default features off,
+      MIT OR Apache-2.0, PR #27; add `("rust_xlsxwriter", &[])` to the no-network test's
+      allowed features). Exported cells that start with `=`, `+`, `-`, or `@` are escaped so
+      spreadsheets never run them.
+      Refs: CT-XCH-002, CT-SEC-008
+      Model: Sonnet
+- [ ] **3.7a ReqIF export.** Export requirements and trace links as ReqIF 1.2 through
+      quick-xml 0.42.0 (MIT, PR #27). Map the requirement fields to ReqIF spec types.
+      Refs: CT-XCH-001
+      Model: Sonnet
+- [ ] **3.7b ReqIF import.** Import requirements and trace links through the 3.1a writer.
+      Map ReqIF spec types to the requirement fields and keep unknown attributes. Round-trip
+      test with 3.7a. No DTD processing or entity expansion: a test imports a file whose
+      DOCTYPE declares an external entity and confirms nothing is fetched or expanded.
+      Refs: CT-XCH-001, CT-SEC-008, CT-SEC-001
+      Model: Opus
+- [ ] **3.8 Importer fuzzing.** cargo-fuzz targets (nightly toolchain, fuzz job only; NCSA
+      for libfuzzer-sys is a build-only per-crate exception, PR #27; release builds stay on
+      the pinned stable toolchain) in `crates/clew-core/fuzz`, listed under `exclude` in the
+      workspace `Cargo.toml` so stable builds never see it. Targets for the lexer and parser,
+      CSV, and ReqIF, with seed corpora. A short fuzz run in CI. An inspection checklist that
+      no importer executes content.
+      Refs: CT-SEC-008, CT-SEC-009
+      Model: Sonnet
+- [ ] **3.9 Offline license file.** First bump clew-core to sha2 0.11 in its own commit, with
+      a test that report input hashes are unchanged, so only one sha2 ships. Then a signed
+      license file (licensee, edition, seats, expiry, license ID) verified offline with
+      ed25519-dalek 3 (default features off, verify only, no OS random generator in the app;
+      BSD-3-Clause per-crate exceptions for ed25519-dalek, curve25519-dalek, and subtle, PR #27;
+      add `("ed25519-dalek", &[])` to the no-network test's allowed features) against a public
+      key compiled into the app. A license status view. The signing tool is a separate crate
+      that never ships, and the private key stays offline with John. ADR-0006 records the
+      format.
+      Refs: CT-PLT-005, CT-SEC-006, CT-SEC-001
+      Model: Opus
+- [ ] **3.10 Trial terms and read-only expiry.** First-run choice of personal, non-commercial
+      use (no time limit) or commercial evaluation (90 days from the first commercial start).
+      Remaining days shown in the status view. At expiry, pending edits are saved first, then
+      editing, forms, and autosave turn off; browsing, search, reports, and every export keep
+      working. Tests use an injected clock.
+      Refs: CT-PLT-006, CT-PLT-007
+      Model: Sonnet
+- [ ] **3.11 Per-user install.** Windows installs per user without administrator rights;
+      macOS runs from `~/Applications`; Linux documents the limits of deb and rpm. Tauri's
+      own WiX template is per-machine, so a per-user MSI needs a custom template set with
+      `bundle.windows.wix.template`, which keeps the MSI (John chose this route, decision 22
+      on PR #27). Add a `trace.toml` exclude or file type for the template. If the template
+      cannot be made per-user, stop and ask John about NSIS, which would reword CT-PLT-001.
+      Demonstration checklist.
+      Refs: CT-PLT-002, CT-PLT-001
+      Model: Sonnet
+- [ ] **3.12 Release evidence.** Build provenance attestation (actions/attest-build-provenance,
+      pinned by commit, PR #27), the full trace report (`clew check --self` and
+      `clew report coverage` with provenance) attached to each release, and a verification
+      checklist. Attach the attestation bundle to the release, and the checklist explains how
+      an air-gapped customer verifies the SHA-256 checksums and the attestation offline. CI
+      launches the installed DMG, deb, and rpm as a smoke test.
+      Refs: CT-DEV-006, CT-DEV-012, CT-PLT-001
+      Model: Sonnet
+- [ ] **3.13 SSDF, encryption, and offline edition docs.** `docs/SSDF.md` maps development
+      practices to NIST SP 800-218. `docs/ENCRYPTION.md` explains BitLocker, FileVault, and
+      LUKS, and how to enable FIPS-validated modes on each. `docs/verification/offline-edition.md`
+      shows that every current build is the offline edition: it contains no network code, the
+      no-network tests prove it on every pull request, and `docs/OFFLINE-EDITION.md`
+      (`<!-- @implements CT-SEC-002 -->`) states the rule that CLAUDE.md points to. The
+      checklist explains the WebKitGTK network process and shows it opens no connections.
+      Inspection checklists for all three.
+      Refs: CT-DEV-011, CT-SEC-005, CT-SEC-002
+      Model: Sonnet
+- [ ] **3.14 Parser conformance.** Run the example models from the OMG SysML v2 release
+      (EPL-2.0, test inputs only, fetched pinned by hash in a CI job, never committed or
+      shipped; ADR-0003) and report results per release. Check the lexer keyword list against
+      the spec's table.
+      Refs: CT-MOD-007, CT-MOD-002
+      Model: Sonnet
+- [ ] **3.15 Reproducible builds.** CI builds the same tag twice and compares every artifact.
+      Document each exception and why. Byte-identical MSI and DMG are not promised.
+      Refs: CT-DEV-007, CT-DEV-012
+      Model: Sonnet
+- [ ] **Code-signed installers.** Every Windows and macOS installer is code-signed before the
+      first business pilot. The Linux deb and rpm are verified by `SHA256SUMS.txt` and the
+      3.12 attestation (John, decision 23, PR #27). Plan on Microsoft Artifact Signing (Basic,
+      about $10 a month) for the Windows MSI and the Apple Developer Program ($99 a year) to
+      sign and notarize the macOS DMG. Free open-source signing programs do not apply,
+      because Clewtrace uses the Business Source License (John, 2026-10-21). So that signed
+      installers work offline: timestamp every Windows signature, so it stays valid after the
+      short-lived signing certificate expires, and staple the notarization ticket to the app
+      and the DMG, so macOS needs no network to check it. Artifact Signing goes through
+      Tauri's `signCommand`, so the RFC 3161 timestamp flags go in that command (Tauri's
+      `timestampUrl` and `tsp` may not apply to it). A release step runs
+      `signtool verify /pa /v` and fails if the signature has no timestamp. For macOS,
+      notarize the DMG itself, not only the app inside, then `xcrun stapler staple` and
+      `xcrun stapler validate` both. Verify both on a machine with networking turned off.
+      John sets up the accounts and CI secrets first.
+      Refs: CT-PLT-001, CT-DEV-012, CT-PLT-003
+      Model: Sonnet
+- [ ] **Gate 3 check.** `clew check --self` shows 0 errors and 0 phase 3 coverage warnings.
+      John installs the signed MSI per user on his laptop with no administrator prompt and with
+      networking turned off. A new user finishes the first-run steps within 5 minutes. A
+      license file from the signing tool is accepted offline, and an expired test license
+      leaves the project readable and exportable. Raise the test coverage minimum. Then set
+      `current_phase = 4`.
+
+## Deferred follow-ups
+
+From the phase 2 planning (John, PR #27, decision 4). None puts a budget or a requirement at
+risk.
+
+- Links are not stored in the index: the app holds the graph in memory (132 MB peak at
+  10,000 requirements, measured in 1.8).
+- Reports parse the text on every run: 554 ms at 10,000 requirements is fine for the CLI.
+- `check --self` reads the project twice: no budget at risk.
+- `clew impact` misses document `@implements` links: cosmetic.
+- Symbolic links under source roots: none in the repo.
+- Expression parser, `assert`, metadata, aliases, filtered imports, and conjugation: phase 4
+  or later, and they grow only through requirements.
+- Built-in libraries are not hashed: they are fixed by the tool version, which reports record.
+
+Phase 4 (CMMC pack, plus baselines CT-TRC-007 and the change log CT-SEC-004) and phase 5
+(diagrams, v1 import, API, AI assist, plus manual update checks CT-PLT-004) are broken into
+tasks when the previous gate passes, using the phase column in `model/requirements.sysml`.

@@ -2,7 +2,8 @@
 
 - Status: Accepted (John, 2026-10-21)
 - Date: 2026-10-20
-- Updated: 2026-10-21 (task 0.10, reviewed against what was built in phase 0)
+- Updated: 2026-10-21 (task 0.10, reviewed against what was built in phase 0);
+  2026-10-31 (task 2.0, Gate 1 rule and phase 1 additions)
 - Serves: CT-DEV-002, CT-DEV-003, CT-DEV-004, CT-DEV-005, CT-TRC-006
 
 ## Context
@@ -18,7 +19,11 @@ the logic, and invite copied tags nobody reads.
 - The checker still accounts for every line and fails on any line outside a tagged scope.
 - Commits carry a `Refs:` trailer, so `git blame` links any line to the change and requirement
   that produced it.
-- Coverage of requirements is enforced only for phases that have started (`current_phase`).
+- Coverage of requirements follows the phase rule John set at Gate 1 (2026-10-22). A gap
+  (no implementation, no verification, and no waiver) in a requirement from a finished
+  phase, or with no phase, is an error. A gap in a current-phase requirement is a warning.
+  Later phases are not checked. A Gate N check needs zero warnings before `current_phase`
+  is raised. Performance budgets are enforced from the start of their phase.
 - Scopes longer than `max_scope_lines` in `trace.toml` (200) warn, to keep tags meaningful.
   Scopes that carry only `@verifies` tags, such as test modules, are exempt.
 
@@ -47,6 +52,18 @@ Full grammar: `docs/TRACEABILITY.md`.
   fails on a requirement due in a started phase that has no implementation or no
   verification and no waiver. The rules, including Markdown documents that implement,
   workflow steps that verify, and waivers, are in `docs/TRACEABILITY.md`.
+
+## Added in phase 1
+
+- A Markdown document may carry `@implements` for an Inspection or Demonstration
+  requirement (`LICENSING.md` for CT-CMP-008, `CONTRIBUTING.md` for CT-DEV-013).
+- A workflow step whose failure fails the build may carry `@verifies` (the release
+  workflow's Installer size step for CT-EFF-001 and CT-PLT-001).
+- A `[[waiver]]` in `trace.toml` records why a due requirement lacks an implementation or
+  verification. It may name a `part`, which excuses no gap.
+- Each ADR must cite a requirement (CT-DEV-010).
+- Svelte `<script lang="ts">` scanning and `<!-- @file -->` in HTML are planned for task 2.2,
+  which will update the phase 0 text above.
 
 ## Consequences
 

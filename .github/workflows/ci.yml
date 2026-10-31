@@ -1,11 +1,12 @@
-# @file CT-DEV-003, CT-DEV-004, CT-DEV-005, CT-DEV-008, CT-DEV-014, CT-PLT-001, CT-EFF-009
+# @file CT-DEV-003, CT-DEV-004, CT-DEV-005, CT-DEV-008, CT-DEV-014, CT-PLT-001, CT-EFF-009, CT-EFF-001
 # CI gate on Ubuntu, Windows, and macOS: builds the desktop app (UI and Tauri crate), then
 # format, lint, tests, the trace gate, the license notices check, the commit hook, and (on
-# Ubuntu) commit trailers, cargo-deny, the performance budgets on 4 GB and 2 CPUs, and a
-# report-only test coverage summary.
+# Ubuntu) commit trailers, cargo-deny, the performance budgets on 4 GB and 2 CPUs, the test
+# coverage minimum, and the 20 MB installer size check on the release image.
 # The trace gate fails on untraced lines, unknown IDs, and requirements from a finished
 # phase with no implementation, verification, or waiver (current-phase gaps are warnings).
-# Installers are built by the release workflow. Rules: docs/TRACEABILITY.md.
+# Release installers are built by the release workflow; the installer-size job builds the
+# Linux deb on every pull request. Rules: docs/TRACEABILITY.md.
 name: ci
 
 on:
@@ -27,6 +28,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      TAURI_APT_PACKAGES: >-
+        libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev
+        libayatana-appindicator3-dev librsvg2-dev
     steps:
       # actions/checkout v7.0.1, pinned by commit.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -47,12 +52,32 @@ jobs:
           restore-keys: cargo-${{ runner.os }}-
 
       # The web view and GTK libraries Tauri links on Linux (same list as README.md).
+      # The .deb files are kept in a folder under $HOME (actions/cache cannot write to the
+      # root-owned /var/cache/apt/archives) and cached by runner image and package list.
+      # apt-get update still runs, so apt only reuses a cached file whose version matches.
+      # The timeout makes a slow mirror fail in minutes, not after half an hour.
+      - name: Tauri Linux packages cache key
+        id: apt
+        if: runner.os == 'Linux'
+        run: echo "image=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+
+      - name: Tauri Linux packages cache
+        if: runner.os == 'Linux'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/apt-archives
+          key: apt-${{ steps.apt.outputs.image }}-${{ env.TAURI_APT_PACKAGES }}
+
       - name: Tauri Linux packages
         if: runner.os == 'Linux'
+        timeout-minutes: 10
         run: |
+          mkdir -p "$HOME/apt-archives/partial"
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
-            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y -o Dir::Cache::archives="$HOME/apt-archives" \
+            -o APT::Sandbox::User=root -o APT::Keep-Downloaded-Packages=true \
+            $TAURI_APT_PACKAGES
+          sudo chown -R "$USER" "$HOME/apt-archives"
 
       # Node.js comes with the runner image. Vite 7 needs 20.19 or newer.
       - name: UI install
@@ -227,15 +252,16 @@ jobs:
           fi
           echo "the 5 GiB canary was killed: the 4 GB limit is enforced"
 
-  # Test coverage of clew-core and clew-cli, measured by cargo-llvm-cov. Report only: the
-  # job prints the total line coverage and writes it with a per-file table to the job
-  # summary, and never fails on the number (docs/TRACEABILITY.md). It fails only when the
-  # tests or the tool fail. Not a required check.
+  # Test coverage of clew-core and clew-cli, measured by cargo-llvm-cov. The job prints the
+  # total line coverage, writes it with a per-file table to the job summary, and fails when
+  # the total is under the minimum (docs/TRACEABILITY.md). The minimum only goes up: John
+  # raises it at each gate. John adds this job to the "CI must pass" ruleset.
   coverage:
-    name: coverage (report only)
+    name: coverage
     runs-on: ubuntu-latest
     env:
       LLVM_COV_VERSION: 0.9.1
+      MIN_LINE_COVERAGE: 95
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -267,17 +293,109 @@ jobs:
       - name: Test coverage
         shell: bash
         run: |
+          status=0
           cargo llvm-cov --locked -p clew-core -p clew-cli --summary-only \
-            | tee "$RUNNER_TEMP/coverage.txt"
+            --fail-under-lines "$MIN_LINE_COVERAGE" | tee "$RUNNER_TEMP/coverage.txt" || status=$?
           lines=$(awk '$1 == "TOTAL" { print $10 }' "$RUNNER_TEMP/coverage.txt")
           echo "Total line coverage (clew-core and clew-cli): ${lines:-unknown}"
           {
-            echo "## Test coverage (report only)"
+            echo "## Test coverage"
             echo
             echo "Total line coverage of clew-core and clew-cli: **${lines:-unknown}**."
-            echo "Measured by cargo-llvm-cov $LLVM_COV_VERSION. No minimum is set yet."
+            echo "Measured by cargo-llvm-cov $LLVM_COV_VERSION. Minimum: ${MIN_LINE_COVERAGE}% of lines."
             echo
             echo '```'
             grep -E '^(Filename|-{10}|clew-|TOTAL)' "$RUNNER_TEMP/coverage.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
+  # CT-EFF-001: the Linux deb is built on every pull request, on the release image (Ubuntu
+  # 22.04) with the release config and the notices file, so a size regression shows up
+  # before a release tag. It uses the same 20 MB check as release.yml. John adds this job to
+  # the "CI must pass" ruleset.
+  installer-size:
+    name: installer-size
+    runs-on: ubuntu-22.04
+    env:
+      TAURI_APT_PACKAGES: >-
+        libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev
+        libayatana-appindicator3-dev librsvg2-dev
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-size-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-size-${{ runner.os }}-
+
+      # The web view and GTK libraries Tauri links on Linux (same list as release.yml).
+      # The .deb files are kept in a folder under $HOME (actions/cache cannot write to the
+      # root-owned /var/cache/apt/archives) and cached by runner image and package list.
+      # apt-get update still runs, so apt only reuses a cached file whose version matches.
+      # The timeout makes a slow mirror fail in minutes, not after half an hour.
+      - name: Tauri Linux packages cache key
+        id: apt
+        if: runner.os == 'Linux'
+        run: echo "image=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+
+      - name: Tauri Linux packages cache
+        if: runner.os == 'Linux'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/apt-archives
+          key: apt-${{ steps.apt.outputs.image }}-${{ env.TAURI_APT_PACKAGES }}
+
+      - name: Tauri Linux packages
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$HOME/apt-archives/partial"
+          sudo apt-get update
+          sudo apt-get install -y -o Dir::Cache::archives="$HOME/apt-archives" \
+            -o APT::Sandbox::User=root -o APT::Keep-Downloaded-Packages=true \
+            $TAURI_APT_PACKAGES
+          sudo chown -R "$USER" "$HOME/apt-archives"
+
+      - name: UI install
+        working-directory: app
+        run: npm ci --no-audit --no-fund
+
+      # Writes target/notices/THIRD-PARTY-NOTICES.txt, which tauri.release.conf.json bundles.
+      - name: Notices
+        run: cargo run --locked -p clew-cli -- notices --out target/notices
+
+      - name: Installer
+        working-directory: app
+        run: |
+          npm run tauri build -- --ci --bundles deb \
+            --config src-tauri/tauri.release.conf.json
+
+      # CT-EFF-001: the deb is 20 MB (20,000,000 bytes) or smaller. Exits 1 if it is larger
+      # or was not built, so the pull request fails.
+      # @verifies CT-EFF-001
+      - name: Installer size
+        run: |
+          failed=0
+          found=0
+          for f in $(find target -path '*/release/bundle/deb/*' -type f -name '*.deb'); do
+            found=1
+            size=$(wc -c < "$f" | tr -d ' ')
+            echo "$f: $size bytes"
+            if [ "$size" -gt 20000000 ]; then
+              echo "::error::$f is $size bytes, over the 20 MB budget (CT-EFF-001)"
+              failed=1
+            fi
+          done
+          if [ "$found" = 0 ]; then
+            echo "::error::no .deb installer was built"
+            failed=1
+          fi
+          exit $failed
