@@ -652,13 +652,35 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
         measured, so CT-EFF-003 is a Linux CI number.
       - The DMABUF setting is not measured on real hardware with a GPU. Gate 2 should check
         that the window still renders and scrolls smoothly on the reference machine.
-- [ ] **2.6 Model browser and problems.** A lazy, virtualized tree of packages, definitions,
+- [x] **2.6 Model browser and problems.** A lazy, virtualized tree of packages, definitions,
       and usages. Element detail: kind, qualified name, doc, attributes, file and line. A
       problems panel with every syntax, name, and trace problem as file:line:column with its
       fix hint; click to select. Probe: open the 10,000-requirement project in the app within
       3 s and 400 MB.
       Refs: CT-MOD-005, CT-USE-007, CT-EFF-004
       Model: Sonnet
+      Done: `lib/tree.ts` (`TreeModel`) is a flat tree of slots that fetches one page of
+      children per expanded package and more pages only as rows scroll into view.
+      `lib/pages.ts` (`PagedRows`) does the same for the problems list. `ModelBrowser`,
+      `DetailView`, and `ProblemsPanel` are thin components on the shared `VirtualList`;
+      `lib/describe.ts` builds their text. Right and Left open and close, Enter selects.
+      `CLEW_PROBE=project` in `probe.rs` opens the project named on the command line and
+      times the first tree row painted; `perf_probe.rs` opens a generated 10,000-requirement,
+      50,000-link project four times (one warm-up). Linux result: about 0.8 s warm (2.0 s
+      cold) and 333 MB total PSS, against 3 s and 400 MB. The CI perf job runs it with the
+      other app probes. Checklist: `docs/verification/model-browser-demo.md`.
+      Follow-ups:
+      - CT-MOD-005 asks for the tree to follow the text as the user edits. There is no
+        editor yet, so only the tree itself is built and tested; the sync item in the
+        checklist stays unticked until the editor task.
+      - Selecting a problem shows its place, cause, and fix in the main view. It does not
+        jump to the file and line, which needs the source view (2.7b) or the editor.
+      - The probe checks Linux PSS only. Windows and macOS memory with a project open is
+        not measured. RSS total on Linux was about 484 MB, over 400 MB, but the budgets
+        have used PSS since 2.5b.
+      - The tree rows show the kind only as a tooltip. A visible kind icon or badge needs
+        John's call on design.
+      - Arrow keys move the selection and load detail on every press, with no debounce.
 - [ ] **2.7a Traces and impact.** Trace panel for the selected element: links to and from,
       grouped by kind, including code tags with file and line; click to follow; back and
       forward. Impact view, upstream and downstream. Probe: select and navigate within

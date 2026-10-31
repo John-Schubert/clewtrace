@@ -8,6 +8,12 @@ use std::process::Command;
 
 use clew_core::json::{Json, parse};
 
+// @begin CT-EFF-004
+// Writes the 10,000-requirement project the CT-EFF-004 probe opens.
+#[path = "../../../crates/clew-core/tests/generate/mod.rs"]
+mod generate;
+// @end
+
 /// CT-EFF-003: the median time to an interactive window is within 1.5 s on the CI runner.
 // @verifies CT-EFF-003
 const MAX_INTERACTIVE_MS: f64 = 1500.0;
@@ -188,5 +194,96 @@ fn the_app_meets_its_start_and_idle_memory_budgets() {
     let median_ms = median(&times).expect("a measured launch reported a time");
     println!("median time to interactive over {MEASURED_LAUNCHES} launches: {median_ms} ms");
     failures.extend(start_failures(median_ms));
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// CT-EFF-004: the time from launch to the first tree row of a 10,000-requirement,
+/// 50,000-link project on screen, in milliseconds.
+// @verifies CT-EFF-004
+const MAX_PROJECT_OPEN_MS: f64 = 3000.0;
+
+/// CT-EFF-004 on Linux: total PSS of the app and its web view with that project open.
+/// Windows and macOS are not measured yet (see the 2.6 follow-ups in docs/PLAN.md).
+// @verifies CT-EFF-004
+const MAX_PROJECT_PSS_BYTES: u64 = 400 * 1_000_000;
+
+/// What is wrong with a project-open probe report, empty when it meets CT-EFF-004.
+// @verifies CT-EFF-004
+fn project_failures(report: &str) -> Vec<String> {
+    let json = match parse(report) {
+        Ok(json) => json,
+        Err(e) => return vec![format!("the report is not JSON: {e:?}")],
+    };
+    let mut failures = Vec::new();
+    match number(&json, "time_to_interactive_ms") {
+        Ok(ms) if ms > MAX_PROJECT_OPEN_MS => failures.push(format!(
+            "CT-EFF-004: the project took {ms} ms to show, over the {MAX_PROJECT_OPEN_MS} ms budget"
+        )),
+        Ok(_) => {}
+        Err(e) => failures.push(e),
+    }
+    // Windows and macOS report no memory from the app itself.
+    if cfg!(target_os = "linux") {
+        match json
+            .get("idle_memory")
+            .map(|m| number(m, "pss_total_bytes"))
+        {
+            Some(Ok(bytes)) if bytes > MAX_PROJECT_PSS_BYTES as f64 => failures.push(format!(
+                "CT-EFF-004: the open project held {:.0} MB, over the {} MB budget",
+                bytes / 1e6,
+                MAX_PROJECT_PSS_BYTES / 1_000_000
+            )),
+            Some(Ok(_)) => {}
+            Some(Err(e)) => failures.push(e),
+            None => failures.push("the report has no idle_memory".into()),
+        }
+    }
+    failures
+}
+
+// @verifies CT-EFF-004
+#[test]
+fn the_project_check_passes_on_the_budget_and_fails_one_unit_over() {
+    let report = |ms: &str, pss: u64| {
+        format!(r#"{{"time_to_interactive_ms":{ms},"idle_memory":{{"pss_total_bytes":{pss}}}}}"#)
+    };
+    assert!(project_failures(&report("3000.0", 400_000_000)).is_empty());
+    let failures = project_failures(&report("3000.1", 400_000_001));
+    assert_eq!(
+        failures.len(),
+        if cfg!(target_os = "linux") { 2 } else { 1 }
+    );
+    assert!(failures.iter().all(|f| f.starts_with("CT-EFF-004")));
+    assert_eq!(project_failures("not json").len(), 1);
+}
+
+// @verifies CT-EFF-004
+#[test]
+#[ignore = "needs a display and the perf CI limits: run under xvfb-run, see the module docs"]
+fn the_app_opens_ten_thousand_requirements_within_its_budgets() {
+    let dir = std::env::temp_dir().join(format!("clew-open-{}", std::process::id()));
+    generate::generate(&dir, 10_000, 50_000);
+    let mut failures = Vec::new();
+    for run in 0..=MEASURED_LAUNCHES {
+        let output = Command::new(env!("CARGO_BIN_EXE_clewtrace"))
+            .env("CLEW_PROBE", "project")
+            .arg(&dir)
+            .output()
+            .expect("the app starts");
+        assert!(
+            output.status.success(),
+            "the probe failed ({}). Is a display set? Run under xvfb-run.\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let report = stdout.lines().last().expect("the probe prints a report");
+        println!("{report}");
+        // The first launch is a warm-up, as for CT-EFF-003.
+        if run > 0 {
+            failures.extend(project_failures(report));
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

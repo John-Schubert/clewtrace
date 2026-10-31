@@ -244,22 +244,54 @@ fn read_processes() -> Vec<Proc> {
 }
 
 /// How the app was asked to probe itself, from `CLEW_PROBE`.
-// @implements CT-EFF-002, CT-EFF-003
-#[derive(Clone, Copy, PartialEq, Eq)]
+// @implements CT-EFF-002, CT-EFF-003, CT-EFF-004
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
     /// Report start time and idle memory.
     Idle,
     /// Also run `SCRIPT` and report the time of each action.
     Script,
+    /// Open the project given on the command line, and report the time to its first tree
+    /// row on screen and the memory then (CT-EFF-004).
+    Project,
 }
 
-// @implements CT-EFF-002, CT-EFF-003
-fn mode() -> Option<Mode> {
-    match std::env::var("CLEW_PROBE").as_deref() {
-        Ok("idle") => Some(Mode::Idle),
-        Ok("script") => Some(Mode::Script),
+// @implements CT-EFF-002, CT-EFF-003, CT-EFF-004
+fn parse_mode(value: Option<&str>) -> Option<Mode> {
+    match value {
+        Some("idle") => Some(Mode::Idle),
+        Some("script") => Some(Mode::Script),
+        Some("project") => Some(Mode::Project),
         _ => None,
     }
+}
+
+// @implements CT-EFF-002, CT-EFF-003, CT-EFF-004
+fn mode() -> Option<Mode> {
+    parse_mode(std::env::var("CLEW_PROBE").ok().as_deref())
+}
+
+/// The script the web view runs when the page has loaded. It sets the document title to
+/// `clew-probe:ready` after the second painted frame. With a project, it first waits for
+/// the model browser to hold a row, so the time covers loading the project and drawing it.
+// @implements CT-EFF-003, CT-EFF-004
+pub fn ready_script(project: bool) -> String {
+    let frames = "requestAnimationFrame(() => requestAnimationFrame(() => { document.title = 'clew-probe:ready'; }));";
+    if !project {
+        return frames.to_string();
+    }
+    format!(
+        r#"(() => {{
+  const shown = () => {{
+    const row = document.querySelector('#pane-browser [role=option]');
+    return row !== null && !row.textContent.includes('Loading');
+  }};
+  if (shown()) {{ {frames} return; }}
+  new MutationObserver((_, observer) => {{
+    if (shown()) {{ observer.disconnect(); {frames} }}
+  }}).observe(document.body, {{ childList: true, subtree: true, characterData: true }});
+}})();"#
+    )
 }
 
 /// What has been measured so far.
@@ -287,7 +319,7 @@ pub fn prepare(context: &mut tauri::Context<tauri::Wry>) {
 
 /// Opens the window with the probe hooks when a probe was requested; otherwise does nothing,
 /// since the window came from the config.
-// @implements CT-EFF-002, CT-EFF-003
+// @implements CT-EFF-002, CT-EFF-003, CT-EFF-004
 pub fn start(app: &tauri::App, started: Instant) -> Result<(), Box<dyn std::error::Error>> {
     let Some(mode) = mode() else {
         return Ok(());
@@ -314,12 +346,12 @@ pub fn start(app: &tauri::App, started: Instant) -> Result<(), Box<dyn std::erro
             on_event(&run, &finished, &window, event);
         }
     };
-    let on_load = |window: tauri::WebviewWindow, payload: tauri::webview::PageLoadPayload<'_>| {
+    let on_load = move |window: tauri::WebviewWindow,
+                        payload: tauri::webview::PageLoadPayload<'_>| {
         if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
-            // Ready when the second frame after the load has been painted.
-            let _ = window.eval(
-                "requestAnimationFrame(() => requestAnimationFrame(() => { document.title = 'clew-probe:ready'; }));",
-            );
+            // Ready when the second frame after the load has been painted (with a project,
+            // after its first tree row is on screen).
+            let _ = window.eval(ready_script(mode == Mode::Project));
         }
     };
     tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?
@@ -400,7 +432,7 @@ fn finish(run: &Run, finished: &AtomicBool, window: &tauri::WebviewWindow) {
     window.app_handle().exit(0);
 }
 
-// @verifies CT-EFF-002, CT-EFF-003, CT-EFF-010
+// @verifies CT-EFF-002, CT-EFF-003, CT-EFF-004, CT-EFF-010
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -413,6 +445,28 @@ mod tests {
             rss_bytes: kb * 1024,
             pss_bytes: kb * 512,
         }
+    }
+
+    // @verifies CT-EFF-004
+    #[test]
+    fn the_project_ready_script_waits_for_the_first_tree_row_to_be_painted() {
+        let script = ready_script(true);
+        assert!(script.contains("#pane-browser [role=option]"));
+        assert!(script.contains("MutationObserver"));
+        assert!(script.contains("clew-probe:ready"));
+        // Without a project the window is ready two frames after the page loads.
+        let plain = ready_script(false);
+        assert!(!plain.contains("MutationObserver"));
+        assert!(plain.contains("clew-probe:ready"));
+    }
+
+    // @verifies CT-EFF-004
+    #[test]
+    fn the_project_mode_is_named_by_the_environment() {
+        assert_eq!(parse_mode(Some("project")), Some(Mode::Project));
+        assert_eq!(parse_mode(Some("idle")), Some(Mode::Idle));
+        assert_eq!(parse_mode(Some("other")), None);
+        assert_eq!(parse_mode(None), None);
     }
 
     // @verifies CT-EFF-002
