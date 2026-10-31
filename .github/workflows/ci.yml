@@ -1,8 +1,10 @@
-# @file CT-DEV-003, CT-DEV-004, CT-DEV-005, CT-DEV-008, CT-DEV-014, CT-PLT-001, CT-EFF-009, CT-EFF-001
+# @file CT-DEV-003, CT-DEV-004, CT-DEV-005, CT-DEV-008, CT-DEV-014, CT-PLT-001, CT-EFF-009, CT-EFF-001, CT-EFF-002, CT-EFF-003
 # CI gate on Ubuntu, Windows, and macOS: builds the desktop app (UI and Tauri crate), then
 # format, lint, tests, the trace gate, the license notices check, the commit hook, and (on
 # Ubuntu) commit trailers, cargo-deny, the performance budgets on 4 GB and 2 CPUs, the test
-# coverage minimum, and the 20 MB installer size check on the release image.
+# coverage minimum, and the 20 MB installer size check on the release image. The app's own
+# start time and idle memory are measured on Ubuntu inside the perf limits (under xvfb), and
+# idle memory on Windows and macOS in the app-idle-memory job.
 # The trace gate fails on untraced lines, unknown IDs, and requirements from a finished
 # phase with no implementation, verification, or waiver (current-phase gaps are warnings).
 # Release installers are built by the release workflow; the installer-size job builds the
@@ -110,6 +112,13 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
+      # The perf-probe feature is off in every other step and in release builds. This builds,
+      # lints, and tests it so the probes cannot rot between the runs of the perf job.
+      - name: Perf probe lint and tests
+        run: |
+          cargo clippy --locked -p clewtrace --all-targets --features perf-probe -- -D warnings
+          cargo test --locked -p clewtrace --features perf-probe
+
       - name: Desktop app build
         run: cargo build --locked -p clewtrace
 
@@ -204,6 +213,10 @@ jobs:
   perf:
     name: perf (4 GB, 2 CPUs)
     runs-on: ubuntu-latest
+    env:
+      TAURI_APT_PACKAGES: >-
+        libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev
+        libayatana-appindicator3-dev librsvg2-dev
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -256,6 +269,119 @@ jobs:
             exit 1
           fi
           echo "the 5 GiB canary was killed: the 4 GB limit is enforced"
+
+      # CT-EFF-002, CT-EFF-003: the app measures its own start time and idle memory (probe.rs,
+      # built with the perf-probe feature). xvfb gives it a display; it runs inside the
+      # systemd-run scope because sudo drops DISPLAY, so a display started outside would
+      # not reach it. Built outside the limits, like the core perf tests. Windows and macOS
+      # memory is measured by the app-idle-memory job. xvfb is a CI tool and does not ship.
+      - name: Tauri Linux packages and xvfb
+        timeout-minutes: 10
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $TAURI_APT_PACKAGES xvfb xauth
+
+      - name: UI build
+        working-directory: app
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Build the app probe test
+        run: |
+          cargo test --locked --release -p clewtrace --features perf-probe --test perf_probe --no-run --message-format=json \
+            | grep -o '"executable":"[^"]*"' | grep '/perf_probe-' | cut -d'"' -f4 > "$RUNNER_TEMP/probe-bin"
+          test -x "$(cat "$RUNNER_TEMP/probe-bin")"
+
+      - name: App start time and idle memory
+        run: |
+          bin=$(cat "$RUNNER_TEMP/probe-bin")
+          sudo systemd-run --scope --quiet \
+            -p MemoryMax=4G -p MemorySwapMax=0 -p AllowedCPUs=0-1 \
+            -- xvfb-run -a --server-args="-screen 0 1280x800x24" \
+            "$bin" --ignored --nocapture
+
+  # CT-EFF-002: idle memory of the shipped build on Windows and macOS, read from a workflow
+  # step so no new crate is needed. The build is the release build without installers and
+  # without the perf-probe feature. The step starts the app with no project, waits for it to
+  # settle, and sums the resident memory of the app and its web view processes. Fails over
+  # 200 MB, or when no web view process is found (which would undercount).
+  app-idle-memory:
+    name: app idle memory (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-idle-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-idle-${{ runner.os }}-
+
+      - name: UI install and build
+        working-directory: app
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      # The Tauri CLI adds the custom-protocol feature, so the binary loads the embedded UI.
+      - name: Release build
+        working-directory: app
+        run: npm run tauri build -- --ci --no-bundle
+
+      # Fails (exit 1) over 200 MB or with no web view process counted.
+      # @verifies CT-EFF-002
+      - name: Idle memory (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $app = Start-Process -FilePath "target\release\clewtrace.exe" -PassThru
+          Start-Sleep -Seconds 10
+          $all = Get-CimInstance Win32_Process
+          $ids = [System.Collections.Generic.HashSet[int]]::new()
+          [void]$ids.Add($app.Id)
+          do {
+            $before = $ids.Count
+            foreach ($p in $all) { if ($ids.Contains([int]$p.ParentProcessId)) { [void]$ids.Add([int]$p.ProcessId) } }
+          } while ($ids.Count -ne $before)
+          $mine = $all | Where-Object { $ids.Contains([int]$_.ProcessId) }
+          $mine | ForEach-Object { "{0,6} {1,-24} {2,8:N0} KB" -f $_.ProcessId, $_.Name, ($_.WorkingSetSize / 1KB) }
+          $webview = @($mine | Where-Object { $_.Name -eq "msedgewebview2.exe" }).Count
+          $total = ($mine | Measure-Object -Property WorkingSetSize -Sum).Sum
+          Stop-Process -Id $app.Id -Force
+          "idle memory: {0:N0} MB in {1} processes ({2} web view)" -f ($total / 1e6), $mine.Count, $webview
+          if ($webview -eq 0) { Write-Error "No msedgewebview2 process under the app, so the total is too low."; exit 1 }
+          if ($total -gt 200e6) { Write-Error "CT-EFF-002: idle memory is over 200 MB."; exit 1 }
+
+      # Fails (exit 1) over 200 MB or with no web view process counted. WKWebView runs its
+      # processes outside the app's process tree, so they are summed by name; a runner with
+      # no other web content has only the app's.
+      # @verifies CT-EFF-002
+      - name: Idle memory (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          target/release/clewtrace &
+          pid=$!
+          sleep 10
+          app_kb=$(ps -o rss= -p "$pid")
+          web=$(ps -axo rss=,comm= | grep -E 'com\.apple\.WebKit\.(WebContent|Networking|GPU)' || true)
+          echo "$web"
+          web_kb=$(echo "$web" | awk '{s+=$1} END{print s+0}')
+          kill "$pid"
+          total=$(( (app_kb + web_kb) * 1024 ))
+          echo "idle memory: $(( total / 1000000 )) MB (app $app_kb KB, web view $web_kb KB)"
+          if [ "$web_kb" -eq 0 ]; then echo "No WebKit process found, so the total is too low." >&2; exit 1; fi
+          if [ "$total" -gt 200000000 ]; then echo "CT-EFF-002: idle memory is over 200 MB." >&2; exit 1; fi
 
   # Test coverage of clew-core and clew-cli, measured by cargo-llvm-cov. The job prints the
   # total line coverage, writes it with a per-file table to the job summary, and fails when

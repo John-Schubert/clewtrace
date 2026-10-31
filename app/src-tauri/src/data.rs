@@ -446,7 +446,7 @@ struct Opened {
     generation: u64,
 }
 
-// @implements CT-EFF-004, CT-EFF-005
+// @implements CT-EFF-004, CT-EFF-005, CT-EFF-008
 /// The app's open project. Loading runs on its own thread, so the window stays responsive,
 /// and anyone waiting is woken when it ends: no polling.
 #[derive(Default)]
@@ -455,7 +455,7 @@ pub struct AppState {
     changed: Condvar,
 }
 
-// @implements CT-EFF-004, CT-EFF-005, CT-USE-007
+// @implements CT-EFF-004, CT-EFF-005, CT-USE-007, CT-EFF-008
 impl AppState {
     /// Starts loading the project that holds `path` on a background thread and returns at
     /// once. The status is `loading` until the thread ends. Returns the thread, or `None`
