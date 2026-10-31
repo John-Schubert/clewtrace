@@ -143,6 +143,22 @@ scope = "build-only"
 serves = ["CT-DEV-004"]
 why = "Type and Svelte diagnostics for the UI in CI (`npm run check`)"
 
+[[dep]]
+name = "vitest"
+ecosystem = "npm"
+license = "MIT"
+scope = "build-only"
+serves = ["CT-USE-002", "CT-USE-005", "CT-EFF-005", "CT-SEC-003"]
+why = "Test runner for the UI (`npm test`). Approved by John for task 2.4. Version 5, built on Vite 7"
+
+[[dep]]
+name = "happy-dom"
+ecosystem = "npm"
+license = "MIT"
+scope = "build-only"
+serves = ["CT-USE-002", "CT-USE-005", "CT-EFF-005"]
+why = "Fake DOM for UI tests under vitest, so no browser is needed. Approved by John for task 2.4"
+
 # [[dep]]
 # name = "codemirror"
 # ecosystem = "npm"
