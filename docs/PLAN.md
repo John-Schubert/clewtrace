@@ -583,19 +583,22 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       no new command, capability, or UI code (a test checks the bundle has none). xvfb is in
       `deps.toml` as a CI tool.
       Follow-ups:
-      - **CT-EFF-002 fails on Linux, so the perf job is red until John decides.** Measured
-        here in a release build under xvfb with software rendering: 507 MB resident (app
-        166 MB, WebKitWebProcess 286 MB, WebKitNetworkProcess 49 MB) against the 250 MB
-        budget. Proportional memory (PSS, shared pages counted once) is about 333 MB, also
-        over. The probe reports both and the gate uses resident memory, as the requirement
-        says. Options: raise the budget, define the budget on PSS, or cut memory. Not
-        decided here, since it changes a CI gate.
-      - Time to interactive is about 1.0 s in the same run (budget 2 s). Scripted actions
-        took 28 to 48 ms each in a debug build. They are logged, not gated.
-      - Not run here: the `systemd-run` limits (no systemd in this sandbox), and the Windows
-        and macOS idle-memory steps. The new `app-idle-memory` job and the xvfb step in
-        the `perf` job need a first CI run. macOS sums the `com.apple.WebKit.*` processes by
-        name, since WKWebView runs them outside the app's process tree.
+      - **CT-EFF-002 and CT-EFF-003 fail in CI, so three jobs are red until John decides.**
+        The pipeline works (xvfb inside systemd-run, and the Windows and macOS steps all
+        measured). The numbers are over budget on every OS. First CI run, 2026-10-31:
+        - Linux (`perf`): 537 MB resident against 250 MB (PSS 350 MB), and 3292 ms to an
+          interactive window against 2000 ms. On a dev box with no CPU limit the same build
+          took about 1000 ms and used 507 MB, so the start time depends a lot on the
+          2-CPU limit and the cold start.
+        - Windows: 325 MB against 200 MB (app 30 MB, six `msedgewebview2` processes 295 MB).
+        - macOS: 210 MB against 200 MB (app 93 MB, WebKit processes 108 MB).
+        The gates are as the requirements say, and I did not loosen them. Options: raise
+        the budgets, define memory on PSS, measure warm starts, or cut memory.
+      - Scripted actions took 32 to 40 ms each on the Linux runner. They are logged, not
+        gated. The probe's second-frame measure is the only start-time definition so far.
+      - macOS sums the `com.apple.WebKit.*` processes by name, since WKWebView runs them
+        outside the app's process tree. The runner showed exactly three, so it did not
+        pick up other apps.
       - John adds `app idle memory (windows-latest)` and `(macos-latest)` to the "CI must
         pass" ruleset once they pass.
       - Web view idle CPU is not measured, only first-party code is checked (see
