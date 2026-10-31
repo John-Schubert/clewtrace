@@ -11,6 +11,7 @@
 // @begin CT-EFF-004, CT-EFF-005
 mod commands;
 mod data;
+mod recent;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -60,6 +61,10 @@ fn main() {
             commands::element_links,
             commands::problems,
             commands::search,
+            commands::pick_folder,
+            commands::open_project,
+            commands::recent_projects,
+            commands::clear_recent,
         ])
         .run(context())
         .expect("Clewtrace could not start its window");
@@ -136,8 +141,9 @@ mod no_network {
     /// Permissions reviewed as granting no network access. Adding one here needs the same
     /// review, recorded in docs/verification/no-network.md.
     /// The `allow-` permissions of the app's own commands (build.rs) only read the project
-    /// the app has open; none of them opens a connection.
-    const OFFLINE_PERMISSIONS: [&str; 9] = [
+    /// the app has open, show the folder dialog, or read and write the recent-projects
+    /// file; none of them opens a connection.
+    const OFFLINE_PERMISSIONS: [&str; 13] = [
         "core:app:allow-name",
         "core:app:allow-version",
         "allow-project-status",
@@ -147,14 +153,19 @@ mod no_network {
         "allow-element-links",
         "allow-problems",
         "allow-search",
+        "allow-pick-folder",
+        "allow-open-project",
+        "allow-recent-projects",
+        "allow-clear-recent",
     ];
 
     /// Features each pinned crate may enable, with its default features off. None of them
     /// pulls in a TLS stack, an HTTP client, or a plugin. The Tauri crates are in the app's
     /// manifest; the others are in clew-core's, which the app links.
-    const ALLOWED_FEATURES: [(&str, &[&str]); 5] = [
+    const ALLOWED_FEATURES: [(&str, &[&str]); 6] = [
         ("tauri", &["wry"]),
         ("tauri-build", &["config-json"]),
+        ("rfd", &["gtk3"]),
         ("rusqlite", &["bundled"]),
         ("tree-sitter", &[]),
         ("sha2", &[]),
@@ -454,12 +465,14 @@ rusqlite = { version = "0.40", default-features = false, features = ["bundled", 
 sha2 = "0.10"
 tree-sitter = { version = "0.27", default-features = false }
 tree-sitter-rust = "0.24"
+rfd = { version = "0.17", default-features = false, features = ["gtk3", "xdg-portal"] }
 "#;
         assert_eq!(
             manifest_problems(manifest),
             [
                 "line 3: `rusqlite` enables feature `url`",
                 "line 4: `sha2` keeps default features",
+                "line 7: `rfd` enables feature `xdg-portal`",
             ]
         );
     }

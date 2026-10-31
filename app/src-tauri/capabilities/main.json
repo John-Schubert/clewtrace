@@ -1,6 +1,6 @@
 {
   "identifier": "main",
-  "description": "The main window may read the app name and version and call the app's own read-only project commands, and nothing else.",
+  "description": "The main window may read the app name and version and call the app's own project commands (read-only, plus the folder dialog and recent-projects list), and nothing else.",
   "windows": ["main"],
   "permissions": [
     "core:app:allow-name",
@@ -11,6 +11,10 @@
     "allow-element-detail",
     "allow-element-links",
     "allow-problems",
-    "allow-search"
+    "allow-search",
+    "allow-pick-folder",
+    "allow-open-project",
+    "allow-recent-projects",
+    "allow-clear-recent"
   ]
 }

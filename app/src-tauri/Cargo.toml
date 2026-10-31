@@ -16,3 +16,4 @@ tauri-build = { version = "2.7.3", default-features = false, features = ["config
 [dependencies]
 clew-core = { version = "0.1.0", path = "../../crates/clew-core" }
 tauri = { version = "2.12.4", default-features = false, features = ["wry"] }
+rfd = { version = "0.17.2", default-features = false, features = ["gtk3"] }

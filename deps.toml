@@ -25,6 +25,14 @@ serves = ["CT-PLT-001", "CT-SEC-001"]
 why = "Build script for the app: reads tauri.conf.json and compiles the capability files. Default features off; config-json only"
 
 [[dep]]
+name = "rfd"
+ecosystem = "cargo"
+license = "MIT"
+scope = "shipped"
+serves = ["CT-SEC-003", "CT-USE-007"]
+why = "Native folder dialog for opening a project (approved by John, task 2.3b). Chosen over tauri-plugin-dialog so the no-plugin check stays intact. Version 0.17.2, default features off (they add the XDG portal and Wayland crates); gtk3 only"
+
+[[dep]]
 name = "rusqlite"
 ecosystem = "cargo"
 license = "MIT"

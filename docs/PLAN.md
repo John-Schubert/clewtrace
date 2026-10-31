@@ -513,13 +513,24 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       - Element IDs are model indexes and change on a rebuild. 2.9a provides stable IDs,
         since 2.9b rebuilds the model while the user types (ADR-0004).
       - `api.ts` has no unit tests until vitest arrives in 2.4.
-- [ ] **2.3b Opening projects.** A folder dialog (rfd 0.17.2 with `default-features = false`
+- [x] **2.3b Opening projects.** A folder dialog (rfd 0.17.2 with `default-features = false`
       and the `gtk3` feature only, MIT, PR #27; add `("rfd", &["gtk3"])` to the no-network
       test's allowed features). A recent-projects list that stores folder paths only, never
       project content, in the app config folder, with a "Clear recent" action.
       `docs/INSTALL.md` says where it lives.
       Refs: CT-SEC-003, CT-USE-007, CT-EFF-005
       Model: Sonnet
+      Done: `recent.rs` keeps up to 10 folder paths, one per line, in
+      `recent-projects.txt` in the app config folder. Four commands (`pick_folder`,
+      `open_project`, `recent_projects`, `clear_recent`) are in `build.rs`, the capability,
+      and `OFFLINE_PERMISSIONS`. `rfd` is in `deps.toml`, the allowed features, and
+      `docs/verification/no-network.md`. The window has an open button, the list, and
+      "Clear recent". A project is recorded only after it opens.
+      Follow-ups:
+      - A project given on the command line is not added to the recent list yet.
+      - `commands.rs` and the folder dialog are not covered by tests, and `api.ts` has none
+        until vitest arrives in 2.4. The dialog needs a manual check on each OS.
+      - The recent tests were written together with the code, not seen failing first.
 - [ ] **2.4 App shell.** Pane layout (model browser, main view, trace panel, problems). Light
       and dark themes from CSS tokens, following the OS setting, with a manual override. A
       command palette with an action registry that every later action joins. One shared

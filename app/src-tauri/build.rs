@@ -12,6 +12,10 @@ const COMMANDS: &[&str] = &[
     "element_links",
     "problems",
     "search",
+    "pick_folder",
+    "open_project",
+    "recent_projects",
+    "clear_recent",
 ];
 
 // @implements CT-PLT-001, CT-SEC-001
