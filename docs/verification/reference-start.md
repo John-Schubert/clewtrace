@@ -5,7 +5,7 @@ Verification method: Demonstration, at the Gate 2 check. Repeat before each rele
 whenever a change could slow the start. Record the result below.
 
 The reference machine is John's Windows 10 laptop with 4 GB of RAM. The CI runner budget
-(CT-EFF-003, 4 s) is a separate Test and does not count here.
+(CT-EFF-003, 1.5 s on the median of 3 warm launches) is a separate Test and does not count here.
 
 ## Checklist
 
