@@ -46,8 +46,28 @@ fn project_arg(args: impl IntoIterator<Item = OsString>) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-// @implements CT-PLT-001, CT-PLT-003, CT-EFF-004, CT-EFF-005, CT-EFF-008, CT-EFF-011
+/// Web view settings that lower idle memory, as environment variables WebKitGTK reads when
+/// it starts. `has` says whether a variable is already set, which is left alone so a user
+/// can override it; `set` sets one. The DMABUF renderer is off because it cost about 140 MB
+/// of shared memory for no gain on a window of text and tables (task 2.5b, PLAN.md).
+// @implements CT-EFF-002, CT-EFF-010
+#[cfg(any(target_os = "linux", test))]
+fn apply_web_view_settings(has: &dyn Fn(&str) -> bool, set: &mut dyn FnMut(&str, &str)) {
+    for (name, value) in [("WEBKIT_DISABLE_DMABUF_RENDERER", "1")] {
+        if !has(name) {
+            set(name, value);
+        }
+    }
+}
+
+// @implements CT-PLT-001, CT-PLT-003, CT-EFF-004, CT-EFF-005, CT-EFF-008, CT-EFF-011, CT-EFF-002
 fn main() {
+    // Before any thread starts, since the environment is not safe to change after.
+    #[cfg(target_os = "linux")]
+    apply_web_view_settings(&|n| std::env::var_os(n).is_some(), &mut |n, v| {
+        // SAFETY: main has not started a thread yet.
+        unsafe { std::env::set_var(n, v) }
+    });
     #[cfg(feature = "perf-probe")]
     let started = std::time::Instant::now();
     let state = Arc::new(AppState::default());
@@ -142,7 +162,7 @@ mod tests {
 // @verifies CT-SEC-001, CT-PLT-003
 #[cfg(test)]
 mod no_network {
-    use super::context;
+    use super::{apply_web_view_settings, context};
     use std::collections::BTreeSet;
     use std::path::Path;
     use std::process::Command;
@@ -516,5 +536,26 @@ ureq = "3"
             assert!(joined.contains(want), "missing `{want}` in:\n{joined}");
         }
         assert!(manifest_problems("[dependencies]\ntauri = { version = \"2\", default-features = false, features = [\"wry\"] }\n").is_empty());
+    }
+
+    // @verifies CT-EFF-002, CT-EFF-010
+    #[test]
+    fn linux_web_view_settings_turn_off_the_dmabuf_renderer_and_keep_a_users_choice() {
+        let mut set = Vec::new();
+        apply_web_view_settings(&|_| false, &mut |k, v| {
+            set.push((k.to_string(), v.to_string()))
+        });
+        assert_eq!(
+            set,
+            [(
+                "WEBKIT_DISABLE_DMABUF_RENDERER".to_string(),
+                "1".to_string()
+            )]
+        );
+        let mut set = Vec::new();
+        apply_web_view_settings(&|_| true, &mut |k, v| {
+            set.push((k.to_string(), v.to_string()))
+        });
+        assert!(set.is_empty(), "a variable the user set was overwritten");
     }
 }
