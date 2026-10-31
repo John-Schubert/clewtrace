@@ -471,7 +471,7 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       - A satisfy or verify of a requirement definition is accepted, not only a usage.
       - Ambiguity is checked for owned members only, not for two imports that supply the
         same name.
-- [ ] **2.2 Svelte script scanning.** Scan `<script lang="ts">` blocks with the TypeScript
+- [x] **2.2 Svelte script scanning.** Scan `<script lang="ts">` blocks with the TypeScript
       grammar, offsetting line numbers, so functions in components get item-level tags.
       Markup stays covered by the component tag or regions. Read `<!-- @file -->` in HTML
       files. Add `html` to `languages` and `app/index.html` to the source roots in
@@ -481,6 +481,13 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       thin.
       Refs: CT-DEV-002, CT-TRC-006
       Model: Sonnet
+      Done in `scan.rs`: `Syntax::Html`, and `Scanner::svelte` parses `lang="ts"` script
+      blocks with the TypeScript grammar. The file is masked (other text becomes spaces,
+      newlines kept), so line numbers and byte offsets need no offsetting. `impl Scanner`
+      is split into five blocks, each under 200 lines.
+      Follow-ups:
+      - A script block without `lang="ts"` still allows regions only.
+      - A `<script` inside an HTML comment or string is read as a tag.
 - [ ] **2.3a App data layer.** The Rust side of the app owns the open project (model, trace
       graph, coverage, index). Tauri commands return pages of rows: tree children, element
       detail, links to and from, problems, search hits. A typed client in

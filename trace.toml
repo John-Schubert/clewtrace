@@ -11,8 +11,8 @@ id_pattern = "CT-(EFF|USE|TRC|MOD|XCH|CMP|SEC|PLT|DEV)-[0-9]{3}"
 current_phase = 2
 
 [coverage]
-source_roots = ["crates", "app/src", "app/src-tauri", "scripts", ".github/workflows"]
-languages = ["rust", "typescript", "svelte"]
+source_roots = ["crates", "app/src", "app/index.html", "app/src-tauri", "scripts", ".github/workflows"]
+languages = ["rust", "typescript", "svelte", "html"]
 file_level_allowed = ["*.toml", "*.yml", "*.yaml", "*.sh", "*.ps1"]
 max_scope_lines = 200
 # Requirements typed by these requirement definitions, or by ones that specialize them,

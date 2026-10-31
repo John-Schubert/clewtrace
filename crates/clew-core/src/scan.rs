@@ -1,10 +1,13 @@
 //! Tag scanner (v0). Finds trace tags in source files and works out which lines they cover.
 //! Rules: docs/TRACEABILITY.md. Rust and TypeScript item spans come from tree-sitter.
-//! Svelte files use `@begin`/`@end` regions only in v0, and their bare `<script>` and
-//! `<style>` wrapper lines are exempt.
+//! A Svelte `<script lang="ts">` block is parsed with the TypeScript grammar, so its
+//! functions take item tags. The rest of a Svelte file, and HTML files, use `@begin`/`@end`
+//! regions, and HTML also takes one `@file` tag. Bare `<script>` and `<style>` wrapper lines
+//! are exempt.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::ops::Range;
 use std::path::Path;
 
 use tree_sitter::{Node, Parser};
@@ -15,6 +18,8 @@ pub enum Syntax {
     Rust,
     TypeScript,
     Svelte,
+    /// An HTML file: regions, or one `@file` tag before any markup.
+    Html,
     /// Config, CI, and script files with `#` comments, traced by one `@file` tag.
     HashComments,
     /// A GitHub Actions workflow in `.github/workflows`: like `HashComments`, and a step may
@@ -32,6 +37,7 @@ impl Syntax {
             "rs" => Some(Syntax::Rust),
             "ts" => Some(Syntax::TypeScript),
             "svelte" => Some(Syntax::Svelte),
+            "html" => Some(Syntax::Html),
             "yml" | "yaml" if in_workflows => Some(Syntax::Workflow),
             "toml" | "yml" | "yaml" | "sh" | "ps1" => Some(Syntax::HashComments),
             _ => None,
@@ -177,8 +183,12 @@ pub struct FileScan {
 pub fn scan_source(syntax: Syntax, text: &str) -> FileScan {
     let mut scan = Scanner::new(text);
     match syntax {
-        Syntax::Rust | Syntax::TypeScript => scan.tree(syntax, text),
+        Syntax::Rust | Syntax::TypeScript => {
+            scan.tree(syntax, text);
+            scan.regions();
+        }
         Syntax::Svelte => scan.svelte(text),
+        Syntax::Html => scan.html(text),
         Syntax::HashComments => scan.hash_comments(text, false),
         Syntax::Workflow => scan.hash_comments(text, true),
     }
@@ -315,6 +325,66 @@ fn is_svelte_wrapper(line: &str) -> bool {
     })
 }
 
+/// Byte ranges of the content of each `<script>` block whose tag has `lang="ts"`.
+// @implements CT-TRC-006
+fn ts_script_ranges(text: &str) -> Vec<Range<usize>> {
+    let mut found = Vec::new();
+    let mut from = 0;
+    while let Some(at) = text[from..].find("<script") {
+        let attrs_start = from + at + "<script".len();
+        // The tag ends at the first `>` outside quotes, so `generics="T<U>"` is safe.
+        let mut quote = None;
+        let mut tag_end = None;
+        for (offset, c) in text[attrs_start..].char_indices() {
+            match (quote, c) {
+                (None, '"' | '\'') => quote = Some(c),
+                (Some(q), _) if q == c => quote = None,
+                (None, '>') => {
+                    tag_end = Some(attrs_start + offset);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let Some(tag_end) = tag_end else { break };
+        let attrs = &text[attrs_start..tag_end];
+        let is_script = attrs.is_empty() || attrs.starts_with(char::is_whitespace);
+        let start = tag_end + 1;
+        if !is_script {
+            from = attrs_start;
+            continue;
+        }
+        let end = text[start..]
+            .find("</script")
+            .map_or(text.len(), |e| start + e);
+        let ts = attrs
+            .split_whitespace()
+            .any(|a| matches!(a, "lang=\"ts\"" | "lang='ts'" | "lang=ts"));
+        if ts {
+            found.push(start..end);
+        }
+        from = end;
+    }
+    found
+}
+
+/// Blanks the text inside the ranges, or everything outside them. Newlines stay and each
+/// other character becomes spaces of the same byte length, so line numbers and byte offsets
+/// do not move.
+// @implements CT-TRC-006
+fn mask(text: &str, ranges: &[Range<usize>], keep_inside: bool) -> String {
+    let mut out = String::with_capacity(text.len());
+    for (at, c) in text.char_indices() {
+        let inside = ranges.iter().any(|r| r.contains(&at));
+        if inside == keep_inside || c == '\n' || c == '\r' {
+            out.push(c);
+        } else {
+            out.extend(std::iter::repeat_n(' ', c.len_utf8()));
+        }
+    }
+    out
+}
+
 /// The number of spaces before a line's first other character.
 // @implements CT-DEV-003, CT-TRC-006
 fn indent(line: &str) -> usize {
@@ -432,8 +502,13 @@ impl Scanner {
         }
         found
     }
+}
 
+// @implements CT-DEV-002, CT-TRC-006
+impl Scanner {
+    /// Parses `text` and attaches item tags. Region tags are paired by the caller.
     fn tree(&mut self, syntax: Syntax, text: &str) {
+        let first_tag = self.tags.len();
         let language = match syntax {
             Syntax::Rust => tree_sitter_rust::LANGUAGE,
             _ => tree_sitter_typescript::LANGUAGE_TYPESCRIPT,
@@ -484,7 +559,7 @@ impl Scanner {
         for (item, verifies_only) in items {
             self.attach(item, verifies_only, &comment_tags, &mut attached);
         }
-        for index in 0..self.tags.len() {
+        for index in first_tag..self.tags.len() {
             let tag = &self.tags[index];
             let kind = match tag.kind {
                 TagKind::Implements | TagKind::Verifies if !attached.contains(&index) => {
@@ -495,7 +570,6 @@ impl Scanner {
             };
             self.problem(tag.line, kind);
         }
-        self.regions();
     }
 
     /// Finds the tags in the comments and attributes directly above an item.
@@ -582,9 +656,31 @@ impl Scanner {
             self.problem(self.tags[begin].line, ProblemKind::UnclosedBegin);
         }
     }
+}
 
-    /// Svelte v0: finds comments line by line and allows only regions.
+// @implements CT-DEV-002, CT-TRC-006
+impl Scanner {
+    /// Svelte: items in `<script lang="ts">` blocks come from the TypeScript grammar. All
+    /// other text is read line by line and allows only regions.
     fn svelte(&mut self, text: &str) {
+        let scripts = ts_script_ranges(text);
+        self.markup(&mask(text, &scripts, false));
+        self.check_markup_tags(0, false);
+        if !scripts.is_empty() {
+            self.tree(Syntax::TypeScript, &mask(text, &scripts, true));
+        }
+        self.regions();
+    }
+
+    /// HTML: regions, or one `@file` tag before any markup covers the whole file.
+    fn html(&mut self, text: &str) {
+        self.markup(text);
+        self.check_markup_tags(0, true);
+        self.regions();
+    }
+
+    /// Finds comments in markup, style, and non-TypeScript script text, line by line.
+    fn markup(&mut self, text: &str) {
         // The closing marker of a block comment left open by an earlier line.
         let mut open: Option<&str> = None;
         for (row, line) in text.lines().enumerate() {
@@ -633,15 +729,37 @@ impl Scanner {
                 self.mark_code(row, row);
             }
         }
-        for index in 0..self.tags.len() {
-            let tag = &self.tags[index];
-            if !matches!(tag.kind, TagKind::Begin | TagKind::End) {
-                self.problem(tag.line, ProblemKind::TagNotAllowed(tag.kind));
-            }
-        }
-        self.regions();
     }
 
+    /// Reports tags that markup cannot take. With `html`, the first `@file` tag before any
+    /// code line covers the file. Checks the tags from index `first`.
+    fn check_markup_tags(&mut self, first: usize, html: bool) {
+        let mut file_ids = None;
+        for index in first..self.tags.len() {
+            let (kind, line) = (self.tags[index].kind, self.tags[index].line);
+            let code_before = self.has_code[..line.min(self.has_code.len())].contains(&true);
+            match kind {
+                TagKind::Begin | TagKind::End => {}
+                TagKind::File if html && file_ids.is_none() && !code_before => {
+                    file_ids = Some(self.tags[index].ids.clone());
+                }
+                _ => self.problem(line, ProblemKind::TagNotAllowed(kind)),
+            }
+        }
+        if let Some(ids) = file_ids {
+            self.scopes.push(Scope {
+                kind: ScopeKind::File,
+                implements: ids,
+                verifies: Vec::new(),
+                start_line: 1,
+                end_line: self.has_code.len(),
+            });
+        }
+    }
+}
+
+// @implements CT-DEV-002, CT-TRC-006
+impl Scanner {
     /// Config, CI, and script files: one `@file` tag in the first comment covers the file.
     /// Reads a file with `#` comments. In a workflow, `@verifies` tags in the comment directly
     /// above a step's `- name:` line make a verifies scope over that step.
@@ -732,7 +850,10 @@ impl Scanner {
             end_line: end + 1,
         });
     }
+}
 
+// @implements CT-DEV-002, CT-TRC-006
+impl Scanner {
     fn finish(mut self) -> FileScan {
         for index in 0..self.tags.len() {
             let tag = &self.tags[index];
@@ -1186,6 +1307,108 @@ mount();
         );
     }
 
+    // @verifies CT-DEV-002, CT-TRC-006
+    #[test]
+    fn svelte_script_items_take_tags_at_their_own_lines() {
+        let text = "\
+<script lang=\"ts\">
+  import { a } from './a';
+
+  // @implements CT-USE-001
+  function tagged(): number {
+    return a;
+  }
+
+  function plain(): number {
+    return 2;
+  }
+</script>
+
+<!-- @begin CT-USE-001 -->
+<p>{tagged()}</p>
+<!-- @end -->
+";
+        let scan = scan_source(Syntax::Svelte, text);
+        assert_eq!(ids(&scan, 2), vec!["CT-USE-001"]);
+        assert_eq!(ids(&scan, 6), vec!["CT-USE-001"]);
+        assert_eq!(ids(&scan, 16), vec!["CT-USE-001"]);
+        assert_eq!(scan.untraced_lines(), vec![9, 10, 11]);
+        assert_eq!(scan.lines[0], Exempt);
+        assert_eq!(scan.lines[12], Exempt);
+        assert_eq!(problem_kinds(&scan), vec![]);
+    }
+
+    // @verifies CT-TRC-006
+    #[test]
+    fn svelte_script_problems_use_file_line_numbers() {
+        let text = "<p>x</p>\n<script lang=\"ts\">\n  // @implements CT-USE-001\n\n  const x = 1;\n  function f( {\n</script>\n";
+        let scan = scan_source(Syntax::Svelte, text);
+        let kinds = problem_kinds(&scan);
+        assert!(kinds.contains(&(3, ProblemKind::OrphanTag(TagKind::Implements))));
+        assert!(kinds.contains(&(6, ProblemKind::SyntaxError)), "{kinds:?}");
+    }
+
+    // @verifies CT-TRC-006
+    #[test]
+    fn svelte_script_without_lang_ts_uses_regions_only() {
+        let text = "<script>\n  // @implements CT-USE-001\n  function f() {}\n</script>\n";
+        let scan = scan_source(Syntax::Svelte, text);
+        assert_eq!(scan.untraced_lines(), vec![3]);
+        assert_eq!(
+            problem_kinds(&scan),
+            vec![(2, ProblemKind::TagNotAllowed(TagKind::Implements))]
+        );
+    }
+
+    // @verifies CT-TRC-006
+    #[test]
+    fn svelte_script_keeps_multibyte_text_and_crlf_lines() {
+        let text = "<p>é</p>\r\n<script lang=\"ts\">\r\n  // @implements CT-USE-001\r\n  function s() { return 'é'; }\r\n</script>\r\n";
+        let scan = scan_source(Syntax::Svelte, text);
+        assert_eq!(ids(&scan, 4), vec!["CT-USE-001"]);
+        assert_eq!(scan.untraced_lines(), vec![1]);
+    }
+
+    // @verifies CT-DEV-002, CT-TRC-006
+    #[test]
+    fn html_file_tag_in_first_comment_covers_the_file() {
+        let text = "<!-- @file CT-PLT-001 -->\n<!doctype html>\n<html>\n  <body></body>\n</html>\n";
+        let scan = scan_source(Syntax::Html, text);
+        assert_eq!(ids(&scan, 4), vec!["CT-PLT-001"]);
+        assert_eq!(scan.untraced_lines(), Vec::<usize>::new());
+        assert_eq!(problem_kinds(&scan), vec![]);
+    }
+
+    // @verifies CT-TRC-006
+    #[test]
+    fn html_file_tag_after_markup_or_repeated_is_not_allowed() {
+        let text = "<html>\n<!-- @file CT-PLT-001 -->\n</html>\n";
+        let scan = scan_source(Syntax::Html, text);
+        assert_eq!(
+            problem_kinds(&scan),
+            vec![(2, ProblemKind::TagNotAllowed(TagKind::File))]
+        );
+        assert_eq!(scan.untraced_lines(), vec![1, 3]);
+        let text = "<!-- @file CT-PLT-001 -->\n<!-- @file CT-PLT-002 -->\n<p></p>\n";
+        let scan = scan_source(Syntax::Html, text);
+        assert_eq!(
+            problem_kinds(&scan),
+            vec![(2, ProblemKind::TagNotAllowed(TagKind::File))]
+        );
+    }
+
+    // @verifies CT-TRC-006
+    #[test]
+    fn html_allows_regions_and_rejects_item_tags() {
+        let text = "<!-- @begin CT-PLT-001 -->\n<p></p>\n<!-- @end -->\n<!-- @implements CT-PLT-001 -->\n<p></p>\n";
+        let scan = scan_source(Syntax::Html, text);
+        assert_eq!(scan.untraced_lines(), vec![5]);
+        assert_eq!(
+            problem_kinds(&scan),
+            vec![(4, ProblemKind::TagNotAllowed(TagKind::Implements))]
+        );
+    }
+
     // @verifies CT-DEV-002
     #[test]
     fn only_bare_svelte_wrapper_lines_are_exempt() {
@@ -1366,6 +1589,7 @@ mount();
             ("a/b.rs", Some(Syntax::Rust)),
             ("a/b.ts", Some(Syntax::TypeScript)),
             ("a/b.svelte", Some(Syntax::Svelte)),
+            ("app/index.html", Some(Syntax::Html)),
             ("Cargo.toml", Some(Syntax::HashComments)),
             ("ci.yml", Some(Syntax::HashComments)),
             ("ci.yaml", Some(Syntax::HashComments)),

@@ -308,6 +308,7 @@ pub fn syntax_for(config: &TraceConfig, path: &str) -> Option<Syntax> {
         Syntax::Rust => config.languages.iter().any(|l| l == "rust"),
         Syntax::TypeScript => config.languages.iter().any(|l| l == "typescript"),
         Syntax::Svelte => config.languages.iter().any(|l| l == "svelte"),
+        Syntax::Html => config.languages.iter().any(|l| l == "html"),
         Syntax::HashComments | Syntax::Workflow => {
             (config.file_level_allowed.iter()).any(|g| glob_matches(g, path))
         }
@@ -416,12 +417,12 @@ impl Checker {
 
     fn check_config(&mut self) -> Result<(), SetupError> {
         for language in &self.config.languages {
-            if !matches!(language.as_str(), "rust" | "typescript" | "svelte") {
+            if !matches!(language.as_str(), "rust" | "typescript" | "svelte" | "html") {
                 return Err(SetupError {
                     path: TRACE_CONFIG.to_string(),
                     line: 0,
                     message: format!(
-                        "unknown language `{language}` in `languages`. Use rust, typescript, or svelte"
+                        "unknown language `{language}` in `languages`. Use rust, typescript, svelte, or html"
                     ),
                 });
             }
