@@ -784,7 +784,7 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       - CT-MOD-004 also names go-to-definition, which 2.8 does not do.
       - Highlighting marks keywords, comments, strings, and numbers only.
       - A problem's place is read as a project-relative `file:line:column`.
-- [ ] **2.9a Incremental validation in the core.** An API that takes one file's new text,
+- [x] **2.9a Incremental validation in the core.** An API that takes one file's new text,
       re-parses only that file, then re-resolves names and rebuilds the trace graph from the
       cached syntax trees of the other files. Perf tests: an edit in a 10,000-line file is
       validated within 1 s on the 4 GB, 2 CPU job, and the 10,000-requirement project stays
@@ -793,6 +793,22 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       history while the user types (ADR-0004).
       Refs: CT-MOD-003, CT-EFF-007, CT-EFF-004
       Model: Opus
+      Done in `crates/clew-core/src/live.rs`. `Sources` caches each model file's syntax
+      tree, the code scans, checklists, and documents; `load_project` now reads `Sources`
+      and builds from them, so the CLI and the live path share one build.
+      `Workspace::edit(path, text)` parses the buffer only, rebuilds the model and graph,
+      and keeps the last project if the setup breaks. `stable_id` and `element` map model
+      indexes to `u64` IDs keyed by owner, kind, name, and sibling order. `tests/perf.rs`
+      grows `r000.sysml` to 10,000 lines and times an edit that breaks a name: 355 ms and
+      1 file re-parsed, peak 243 MB (was 138 MB), on a 4 CPU machine.
+      Follow-ups:
+      - ADR-0005 is Proposed. John to accept it.
+      - The app still uses model indexes as element IDs. 2.9b moves `data.rs` to
+        `Workspace` and sends stable IDs to the UI.
+      - Code files, checklists, and documents are read at `open` only; 2.10b refreshes them
+        on file events.
+      - Renaming an element, or adding an unnamed sibling such as a `satisfy` before
+        another, gives it a new stable ID (ADR-0005).
 - [ ] **2.9b Live validation in the app.** After a short pause in typing (a one-shot timer
       reset by each keystroke, never a poll), send the buffer to the 2.9a API. Return
       diagnostics as editor markers with help text, and refresh the browser, problems, and

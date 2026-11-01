@@ -15,6 +15,9 @@ pub mod index;
 // @begin CT-USE-008, CT-SEC-003
 pub mod io;
 // @end
+// @begin CT-MOD-003, CT-EFF-007
+pub mod live;
+// @end
 // @begin CT-MOD-002, CT-USE-007
 pub mod model;
 // @end
