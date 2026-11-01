@@ -3,8 +3,7 @@
   // The app window: shows the app name and version, read from the Rust side, and the
   // project opened from the command line once its background load ends.
   import { getName, getVersion } from '@tauri-apps/api/app';
-  import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { saveOnClose } from './lib/autosave';
+  import { MAIN_WINDOW, saveOnClose, windowCloseRequests } from './lib/autosave';
   import {
     clearRecent,
     describeStatus,
@@ -257,7 +256,7 @@
   // without the listener a close would not save.
   try {
     saveOnClose(
-      getCurrentWindow(),
+      windowCloseRequests(MAIN_WINDOW),
       () => editor?.save() ?? Promise.resolve(true),
       () => {
         view = 'editor';

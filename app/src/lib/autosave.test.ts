@@ -2,7 +2,17 @@
 // Tests for autosave: when it saves, that saves never overlap, and saving before the
 // window closes.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AUTOSAVE_MS, Autosaver, saveOnClose, type CloseRequests } from './autosave';
+
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }));
+vi.mock('@tauri-apps/api/event', async (original) => ({
+  ...((await original()) as object),
+  listen: vi.fn(async () => () => {}),
+}));
+
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import conf from '../../src-tauri/tauri.conf.json';
+import { AUTOSAVE_MS, Autosaver, MAIN_WINDOW, saveOnClose, windowCloseRequests, type CloseRequests } from './autosave';
 // @end
 
 // @begin CT-USE-008
@@ -183,5 +193,34 @@ describe('saveOnClose', () => {
     const stop = await saveOnClose(win, async () => true, () => {});
     stop();
     expect(unlisten).toHaveBeenCalledTimes(1);
+  });
+});
+
+// @verifies CT-USE-008
+describe('windowCloseRequests', () => {
+  // @verifies CT-USE-008
+  it('names the window that tauri.conf.json opens', () => {
+    expect(conf.app.windows.map((w) => w.label)).toEqual([MAIN_WINDOW]);
+  });
+
+  // @verifies CT-USE-008
+  it('listens on its own window, so Tauri waits for the handler before closing', async () => {
+    const handler = vi.fn(async () => {});
+    await windowCloseRequests('main').onCloseRequested(handler);
+    expect(listen).toHaveBeenCalledWith('tauri://close-requested', expect.any(Function), { target: { kind: 'Window', label: 'main' } });
+    const heard = vi.mocked(listen).mock.calls[0][1] as () => Promise<void>;
+    await heard();
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith('plugin:window|destroy', { label: 'main' });
+  });
+
+  // @verifies CT-USE-008
+  it('keeps the window open when the handler prevents the close', async () => {
+    vi.mocked(listen).mockClear();
+    vi.mocked(invoke).mockClear();
+    await windowCloseRequests('main').onCloseRequested(async (event) => event.preventDefault());
+    const heard = vi.mocked(listen).mock.calls[0][1] as () => Promise<void>;
+    await heard();
+    expect(invoke).not.toHaveBeenCalled();
   });
 });
