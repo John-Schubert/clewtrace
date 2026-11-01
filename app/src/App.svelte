@@ -3,7 +3,7 @@
   // The app window: shows the app name and version, read from the Rust side, and the
   // project opened from the command line once its background load ends.
   import { getName, getVersion } from '@tauri-apps/api/app';
-  import { MAIN_WINDOW, saveOnClose, windowCloseRequests } from './lib/autosave';
+  import { CloseGuard, MAIN_WINDOW, windowCloseRequests } from './lib/autosave';
   import {
     clearRecent,
     describeStatus,
@@ -250,22 +250,19 @@
   reloadRecent().catch(show);
   // @end
 
-  // @begin CT-USE-008, CT-USE-007
+  // @begin CT-USE-008, CT-USE-007, CT-EFF-002
   // Edits are saved before the window closes. If that save fails, the window stays open
-  // once to say so, and closing it again closes it. A failure to listen is shown, since
-  // without the listener a close would not save.
-  try {
-    saveOnClose(
-      windowCloseRequests(MAIN_WINDOW),
-      () => editor?.save() ?? Promise.resolve(true),
-      () => {
-        view = 'editor';
-        problem = 'The edits could not be saved. Save again, or close the window again to close without them.';
-      },
-    ).catch(show);
-  } catch (e) {
-    show(e);
-  }
+  // once to say so, and closing it again closes it. The listener is set up on the first
+  // edit, so an idle app holds none.
+  const closeGuard = new CloseGuard(
+    () => windowCloseRequests(MAIN_WINDOW),
+    () => editor?.save() ?? Promise.resolve(true),
+    () => {
+      view = 'editor';
+      problem = 'The edits could not be saved. Save again, or close the window again to close without them.';
+    },
+    show,
+  );
   // @end
 
   // @begin CT-USE-005
@@ -419,7 +416,7 @@
       {/if}
       {#if editing}
         <div class="editor-pane" hidden={view !== 'editor'}>
-          <TextEditor bind:this={editor} path={editing.path} line={editing.line} ondirty={(d) => (editorDirty = d)} onvalidated={validated} />
+          <TextEditor bind:this={editor} path={editing.path} line={editing.line} ondirty={(d) => { editorDirty = d; if (d) closeGuard.arm(); }} onvalidated={validated} />
         </div>
       {/if}
       {#key opened}

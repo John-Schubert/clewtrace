@@ -870,6 +870,9 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       Done: `lib/autosave.ts` saves 1 s after typing stops, when the editor loses focus,
       before another file or project opens, and before the window closes, one save at a
       time. The close needs three new window permissions, reviewed in `no-network.md`.
+      The close listener is set up on the first edit: on Windows the web view's first
+      event listener seemed to cost about 3 MB, which put the idle total at 74.27 MB against the
+      74 MB of CT-EFF-002. Windows idle memory now has little headroom; see below.
       `write_atomic` now also flushes the folder after the rename on Unix, for power loss.
       The index sets a 10 s busy_timeout, and `update` and `rebuild` take the write lock
       when their transaction starts. Without that, a second writer was refused at once
@@ -883,6 +886,8 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       - A writer that rebuilds the index with no gap can hold the lock past the 10 s
         timeout, since SQLite's waiting is not fair. The app writes the index only on open
         (and on file events from 2.10b), so this needs a burst over 10 s to show.
+      - Windows idle memory on main is 71 MB against the 74 MB budget. A later task that
+        adds a listener or a large module at startup will meet the same limit.
       - The desktop crate's tests (permission allowlist) did not build in the session for
         lack of GTK; CI runs them. The autosave checklist item in `model-browser-demo.md`
         is for John to run by hand once.

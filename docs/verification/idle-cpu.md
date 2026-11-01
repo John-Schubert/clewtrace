@@ -38,7 +38,7 @@ once for a watchdog. The allowlist in the test gives the same reason.
 | Event handlers on buttons and inputs | all components | Run on user input. |
 | Autosave pause | `lib/autosave.ts`, `Autosaver` (task 2.10a) | A one-shot `setTimeout` that each edit restarts. It saves once, after the text has been still for 1 s, and leaves no timer behind. |
 | Editor `blur` handler | `lib/editor.ts`, `editorState` (task 2.10a) | Runs when the editor loses focus, and saves once. |
-| Window close request | `App.svelte`, `saveOnClose` (task 2.10a) | A Tauri event listener. Runs when the user closes the window, saves once, then closes it. |
+| Window close request | `lib/autosave.ts`, `CloseGuard` (task 2.10a) | A Tauri event listener, set up on the first edit. Runs when the user closes the window, saves once, then closes it. |
 
 There are no repeating timers, animation loops, `ResizeObserver`s, or CSS animations in the UI. The
 web view is the OS's own (WebView2, WKWebView, WebKitGTK). It is idle when the page is.

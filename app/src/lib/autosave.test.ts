@@ -12,7 +12,7 @@ vi.mock('@tauri-apps/api/event', async (original) => ({
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import conf from '../../src-tauri/tauri.conf.json';
-import { AUTOSAVE_MS, Autosaver, MAIN_WINDOW, saveOnClose, windowCloseRequests, type CloseRequests } from './autosave';
+import { AUTOSAVE_MS, Autosaver, CloseGuard, MAIN_WINDOW, saveOnClose, windowCloseRequests, type CloseRequests } from './autosave';
 // @end
 
 // @begin CT-USE-008
@@ -222,5 +222,34 @@ describe('windowCloseRequests', () => {
     const heard = vi.mocked(listen).mock.calls[0][1] as () => Promise<void>;
     await heard();
     expect(invoke).not.toHaveBeenCalled();
+  });
+});
+
+// @verifies CT-USE-008, CT-EFF-002
+describe('CloseGuard', () => {
+  // @verifies CT-USE-008, CT-EFF-002
+  it('listens for the close only once armed, and only once', async () => {
+    const onCloseRequested = vi.fn(async () => () => {});
+    const failed = vi.fn();
+    const guard = new CloseGuard(() => ({ onCloseRequested }), async () => true, () => {}, failed);
+    expect(onCloseRequested).not.toHaveBeenCalled();
+    guard.arm();
+    guard.arm();
+    await Promise.resolve();
+    expect(onCloseRequested).toHaveBeenCalledTimes(1);
+    expect(failed).not.toHaveBeenCalled();
+  });
+
+  // @verifies CT-USE-008, CT-USE-007
+  it('reports a listener that could not be set up', async () => {
+    const failed = vi.fn();
+    const guard = new CloseGuard(() => { throw new Error('no window'); }, async () => true, () => {}, failed);
+    guard.arm();
+    expect(failed).toHaveBeenCalledWith(new Error('no window'));
+    const rejects = new CloseGuard(() => ({ onCloseRequested: async () => { throw new Error('denied'); } }), async () => true, () => {}, failed);
+    rejects.arm();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(failed).toHaveBeenLastCalledWith(new Error('denied'));
   });
 });
