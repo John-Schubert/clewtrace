@@ -108,5 +108,63 @@ describe('TreeModel', () => {
     expect(onerror).toHaveBeenCalledOnce();
     expect(tree.count).toBe(0);
   });
+  // @verifies CT-MOD-005
+  it('refreshes in place: expanded packages stay open and new children appear', async () => {
+    const kids: Record<number, number> = { 0: 2, 1: 3 };
+    const fetch = fake(kids);
+    const counts: number[] = [];
+    const watching = new TreeModel(fetch, () => counts.push(watching.count), 200);
+    await watching.reset();
+    await watching.expand(0);
+    expect(watching.count).toBe(2 + 3);
+    kids[1] = 4;
+    kids[0] = 3;
+    counts.length = 0;
+    await watching.refresh();
+    // The tree is swapped in one step, so it is never shown empty or half built.
+    expect(counts.every((n) => n === 3 + 4)).toBe(true);
+    expect(watching.count).toBe(3 + 4);
+    expect(watching.at(0)?.expanded).toBe(true);
+    expect(watching.at(4)?.row?.id).toBe(1004);
+  });
+
+  // @verifies CT-MOD-005
+  it('refreshes a package that is gone as closed, and keeps the ids of the rest', async () => {
+    const kids: Record<number, number> = { 0: 2, 1: 3, 2: 1 };
+    const tree = new TreeModel(fake(kids), () => {}, 200);
+    await tree.reset();
+    await tree.expand(0);
+    await tree.expand(tree.indexOf(2));
+    expect(tree.count).toBe(2 + 3 + 1);
+    kids[0] = 1;
+    delete kids[2];
+    await tree.refresh();
+    expect(tree.count).toBe(1 + 3);
+    expect(tree.indexOf(1)).toBe(0);
+    expect(tree.indexOf(2)).toBe(-1);
+  });
+
+  // @verifies CT-MOD-005, CT-USE-007
+  it('keeps the old tree when a refresh fails', async () => {
+    let fail = false;
+    const base = fake({ 0: 2 });
+    const onerror = vi.fn();
+    const tree = new TreeModel(async (...args) => (fail ? Promise.reject(new Error('boom')) : base(...args)), () => {}, 200, onerror);
+    await tree.reset();
+    fail = true;
+    await tree.refresh();
+    expect(tree.count).toBe(2);
+    expect(onerror).toHaveBeenCalledOnce();
+  });
+
+  // @verifies CT-MOD-005
+  it('ignores a refresh that a reset overtook', async () => {
+    const tree = new TreeModel(fake({ 0: 2 }), () => {}, 200);
+    await tree.reset();
+    const late = tree.refresh();
+    await tree.reset();
+    await late;
+    expect(tree.count).toBe(2);
+  });
 });
 // @end

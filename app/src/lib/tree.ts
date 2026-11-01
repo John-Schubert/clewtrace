@@ -50,6 +50,63 @@ export class TreeModel {
     this.onchange();
   }
 
+  /**
+   * Fetches the tree again after the model changed, keeping every package that was open
+   * open. The new tree is built off to the side and swapped in whole, so the list is never
+   * shown empty or half built. A package whose ID is gone closes. Rows past the first page
+   * of a package load as they scroll into view; a package open there is not reopened.
+   * When a fetch fails, the old tree stays.
+   */
+  async refresh(): Promise<void> {
+    const generation = ++this.generation;
+    const open = new Set<number>();
+    for (const node of this.flat) {
+      if (node.expanded && node.row) {
+        open.add(node.row.id);
+      }
+    }
+    const kids = new Map<number, TreeNode[]>();
+    const build = async (parent: number, depth: number): Promise<TreeNode[] | undefined> => {
+      const first = await this.fetchPage(parent, 0);
+      if (!first || generation !== this.generation) {
+        return undefined;
+      }
+      const slots = Array.from({ length: first.total ?? first.rows.length }, (_, offset) => ({
+        depth,
+        parent,
+        offset,
+        expanded: false,
+      })) as TreeNode[];
+      kids.set(parent, slots);
+      first.rows.forEach((row, i) => {
+        if (slots[first.offset + i]) {
+          slots[first.offset + i].row = row;
+        }
+      });
+      const flat: TreeNode[] = [];
+      for (const slot of slots) {
+        flat.push(slot);
+        if (slot.row && slot.row.children > 0 && open.has(slot.row.id)) {
+          const below = await build(slot.row.id, depth + 1);
+          if (below === undefined) {
+            return undefined;
+          }
+          slot.expanded = true;
+          flat.push(...below);
+        }
+      }
+      return flat;
+    };
+    const flat = await build(0, 0);
+    if (flat !== undefined && generation === this.generation) {
+      this.flat = flat;
+      this.kids.clear();
+      kids.forEach((v, k) => this.kids.set(k, v));
+      this.pending.clear();
+      this.onchange();
+    }
+  }
+
   /** The node at an index. A node without a row starts the load of its page. */
   at(index: number): TreeNode | undefined {
     const node = this.flat[index];

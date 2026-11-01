@@ -8,13 +8,15 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard};
 use std::thread::JoinHandle;
 
 use clew_core::check::{SetupError, TRACE_CONFIG};
 use clew_core::index::{Index, IndexError};
 use clew_core::json::quote;
+use clew_core::live::Workspace;
 use clew_core::model::{Element, ElementId, LIBRARY_PATH, Model};
+use clew_core::project::find_root;
 use clew_core::report::{Project, RequirementCoverage, fully_waived, project_coverage};
 use clew_core::trace::{End, Link, Toward};
 
@@ -94,7 +96,7 @@ impl AppError {
         AppError::new(
             format!("no element has ID {id}"),
             "",
-            "Element IDs change when a project is opened again. Reload the view.",
+            "That element was renamed, moved, or deleted by an edit. Pick it again from the tree.",
         )
     }
 
@@ -144,10 +146,11 @@ impl Problem {
     }
 }
 
-// @implements CT-EFF-004, CT-MOD-001
-/// A project read from its `.sysml` text and code, with its coverage and search index.
-pub struct Loaded {
-    project: Project,
+// @implements CT-EFF-004, CT-MOD-001, CT-MOD-003
+/// A project read from its `.sysml` text and code, with its coverage and search index. The
+/// workspace keeps each model file's syntax tree, so an edit re-parses one file (ADR-0005).
+struct Live {
+    workspace: Workspace,
     /// Coverage of each requirement usage that has an ID.
     coverage: HashMap<ElementId, RequirementCoverage>,
     /// Indexes into `Project::requirements` by requirement ID.
@@ -155,14 +158,17 @@ pub struct Loaded {
     /// The elements behind each of `GAP_FILTERS`, in declaration order.
     gaps: [Vec<ElementId>; 4],
     /// The search index, or why it could not be opened. SQLite connections are not
-    /// shared between threads, so queries take turns.
+    /// shared between threads, so queries take turns. It reads the saved files, so it
+    /// does not see unsaved edits.
     index: Mutex<Result<Index, IndexError>>,
+    /// Counts the edits taken, so the UI can drop a reply that a later edit overtook.
+    revision: u64,
 }
 
-// @implements CT-EFF-004, CT-EFF-005, CT-MOD-001, CT-USE-007
-impl Loaded {
+// @implements CT-EFF-004, CT-EFF-005, CT-MOD-001, CT-MOD-003, CT-USE-007
+impl Live {
     /// Reads the project that holds `path`, then brings its search index up to date.
-    pub fn open(path: &Path) -> Result<Loaded, AppError> {
+    fn open(path: &Path) -> Result<Live, AppError> {
         let place = path.display().to_string();
         if !path.exists() {
             return Err(AppError::new(
@@ -178,31 +184,96 @@ impl Loaded {
                 "Open the project folder, not a file in it.",
             ));
         }
-        let project = Project::open(path).map_err(|e| AppError::setup(path, e))?;
-        let found = project_coverage(&project);
-        let gaps = gaps_of(&found.requirements, found.untraced);
-        let coverage = (found.requirements.into_iter())
-            .map(|c| (c.requirement, c))
-            .collect();
-        let requirements = (project.requirements.iter().enumerate())
-            .map(|(i, r)| (r.id.clone(), i))
-            .collect();
-        let index = Index::open(&project.root).and_then(|mut index| {
+        let workspace = Workspace::open(&find_root(path)).map_err(|e| AppError::setup(path, e))?;
+        let index = Index::open(&workspace.project().root).and_then(|mut index| {
             index.update()?;
             Ok(index)
         });
-        Ok(Loaded {
-            project,
-            coverage,
-            requirements,
-            gaps,
+        let mut live = Live {
+            workspace,
+            coverage: HashMap::new(),
+            requirements: HashMap::new(),
+            gaps: Default::default(),
             index: Mutex::new(index),
-        })
+            revision: 0,
+        };
+        live.derive();
+        Ok(live)
+    }
+
+    fn project(&self) -> &Project {
+        self.workspace.project()
+    }
+}
+
+// @implements CT-MOD-003, CT-EFF-004, CT-EFF-005, CT-MOD-005, CT-USE-007
+impl Live {
+    /// Works out the coverage lists from the current project.
+    fn derive(&mut self) {
+        let project = self.workspace.project();
+        let found = project_coverage(project);
+        self.gaps = gaps_of(&found.requirements, found.untraced);
+        self.coverage = (found.requirements.into_iter())
+            .map(|c| (c.requirement, c))
+            .collect();
+        self.requirements = (project.requirements.iter().enumerate())
+            .map(|(i, r)| (r.id.clone(), i))
+            .collect();
+    }
+
+    /// The stable ID the UI knows an element by.
+    fn sid(&self, id: ElementId) -> u64 {
+        self.workspace.stable_id(id)
+    }
+
+    /// Takes `text` as the content of the model file `path` and rebuilds the project from
+    /// it and the cached syntax trees of the other files. Nothing is written.
+    fn edit(&mut self, path: &str, text: &str) -> Result<String, AppError> {
+        let root = self.project().root.clone();
+        let result = self.workspace.edit(path, text).map(|_| ());
+        // On a setup error the workspace has rebuilt the last project, which has the same
+        // model, so what `derive` works out from it is the same too.
+        self.derive();
+        match result {
+            Ok(()) => {
+                self.revision += 1;
+                Ok(self.edit_reply(path))
+            }
+            Err(e) => Err(AppError::setup(&root, e)),
+        }
+    }
+
+    /// The reply to an edit: the problems found in the edited file, which the editor
+    /// shows as markers, and the project counts.
+    fn edit_reply(&self, path: &str) -> String {
+        let p = self.project();
+        let rows = (p.problems.iter().chain(&p.warnings))
+            .filter_map(|text| {
+                let problem = Problem::parse(text);
+                let (file, line, column) = place_parts(&problem.place)?;
+                (file == path).then(|| {
+                    Obj::new()
+                        .str("severity", problem.severity)
+                        .str("what", &problem.what)
+                        .str("where", &problem.place)
+                        .str("help", &problem.help)
+                        .num("line", line)
+                        .num("column", column)
+                        .end()
+                })
+            })
+            .take(MAX_PAGE)
+            .collect();
+        Obj::new()
+            .num("revision", self.revision)
+            .raw("diagnostics", &array(rows))
+            .raw("summary", &self.summary())
+            .end()
     }
 
     /// Counts the status bar and the first view need.
     fn summary(&self) -> String {
-        let p = &self.project;
+        let p = &self.project();
         let elements = (p.model.elements.iter())
             .filter(|e| !self.is_library(e))
             .count();
@@ -226,13 +297,14 @@ impl Loaded {
     }
 
     fn is_library(&self, e: &Element) -> bool {
-        self.project.model.files[e.file] == LIBRARY_PATH
+        self.project().model.files[e.file] == LIBRARY_PATH
     }
 
     fn get(&self, id: usize) -> Result<(ElementId, &Element), AppError> {
-        let elements = &self.project.model.elements;
-        match elements.get(id) {
-            Some(e) if !self.is_library(e) || id == Model::ROOT.0 => Ok((ElementId(id), e)),
+        let found = self.workspace.element(id as u64);
+        let element = found.map(|found| (found, self.project().model.element(found)));
+        match element {
+            Some((found, e)) if !self.is_library(e) || found == Model::ROOT => Ok((found, e)),
             _ => Err(AppError::no_element(id)),
         }
     }
@@ -240,7 +312,7 @@ impl Loaded {
     /// The members of an element that come from project files, so the tree hides the
     /// built-in library.
     fn members(&self, e: &Element) -> Vec<ElementId> {
-        let model = &self.project.model;
+        let model = &self.project().model;
         (e.members.iter().copied())
             .filter(|&m| !self.is_library(model.element(m)))
             .collect()
@@ -257,10 +329,10 @@ impl Loaded {
     }
 
     fn tree_row(&self, id: ElementId) -> String {
-        let model = &self.project.model;
+        let model = &self.project().model;
         let e = model.element(id);
         Obj::new()
-            .num("id", id.0)
+            .num("id", self.sid(id))
             .str("kind", e.kind.label())
             .opt_str("name", e.name.as_deref())
             .opt_str("shortName", e.short_name.as_deref())
@@ -274,9 +346,9 @@ impl Loaded {
     /// size its link lists before asking for pages.
     pub fn element(&self, id: usize) -> Result<String, AppError> {
         let (element_id, e) = self.get(id)?;
-        let model = &self.project.model;
-        let graph = &self.project.graph;
-        let owner = e.owner.map(|o| o.0.to_string());
+        let model = &self.project().model;
+        let graph = &self.project().graph;
+        let owner = e.owner.map(|o| self.sid(o).to_string());
         Ok(Obj::new()
             .num("id", id)
             .str("kind", e.kind.label())
@@ -298,7 +370,7 @@ impl Loaded {
     fn requirement(&self, id: ElementId, e: &Element) -> String {
         let found = (e.short_name.as_ref())
             .and_then(|s| self.requirements.get(s))
-            .map(|&i| &self.project.requirements[i]);
+            .map(|&i| &self.project().requirements[i]);
         let (Some(r), Some(c)) = (found, self.coverage.get(&id)) else {
             return "null".to_string();
         };
@@ -316,7 +388,7 @@ impl Loaded {
 }
 
 // @implements CT-EFF-005, CT-USE-007
-impl Loaded {
+impl Live {
     /// One page of the links that start at an element (`from`: what it traces to) or end
     /// at it (`to`: what traces to it).
     pub fn links(
@@ -327,7 +399,7 @@ impl Loaded {
         limit: usize,
     ) -> Result<String, AppError> {
         let (element_id, _) = self.get(id)?;
-        let graph = &self.project.graph;
+        let graph = &self.project().graph;
         let mut links: Vec<(&Link, &End)> = match direction {
             "from" => graph.links_from(element_id).map(|l| (l, &l.to)).collect(),
             "to" => graph.links_to(element_id).map(|l| (l, &l.from)).collect(),
@@ -377,7 +449,7 @@ impl Loaded {
                 ));
             }
         };
-        let reached = self.project.graph.reachable(&[element_id], toward);
+        let reached = self.project().graph.reachable(&[element_id], toward);
         let rows = (page_of(&reached, offset, limit).iter())
             .map(|r| {
                 Obj::new()
@@ -395,9 +467,9 @@ impl Loaded {
     fn end(&self, end: &End) -> String {
         match end {
             End::Element(id) => Obj::new()
-                .num("id", id.0)
-                .str("kind", self.project.model.element(*id).kind.label())
-                .str("name", &self.project.model.qualified_name(*id))
+                .num("id", self.sid(*id))
+                .str("kind", self.project().model.element(*id).kind.label())
+                .str("name", &self.project().model.qualified_name(*id))
                 .end(),
             End::Code {
                 path,
@@ -413,7 +485,7 @@ impl Loaded {
 
     /// One page of the project's problems, errors first, then warnings.
     pub fn problems(&self, offset: usize, limit: usize) -> String {
-        let p = &self.project;
+        let p = &self.project();
         let all: Vec<&String> = p.problems.iter().chain(&p.warnings).collect();
         let rows = (page_of(&all, offset, limit).iter())
             .map(|text| {
@@ -442,8 +514,8 @@ impl Loaded {
         hits.truncate(limit);
         let rows = (hits.iter())
             .map(|hit| {
-                let id = self.project.model.find(&hit.qualified_name);
-                let id = id.map(|i| i.0.to_string());
+                let id = self.project().model.find(&hit.qualified_name);
+                let id = id.map(|i| self.sid(i).to_string());
                 Obj::new()
                     .raw("id", id.as_deref().unwrap_or("null"))
                     .str("kind", &hit.kind)
@@ -465,7 +537,7 @@ impl Loaded {
 }
 
 // @implements CT-TRC-004, CT-EFF-005, CT-EFF-006, CT-USE-007
-impl Loaded {
+impl Live {
     /// One page of the elements a coverage filter lists. The lists are worked out when the
     /// project opens, so a page is a slice. A requirement waived in full is left out of the
     /// implementation and verification gaps, as in `clew report coverage`.
@@ -490,10 +562,10 @@ impl Loaded {
     }
 
     fn gap_row(&self, id: ElementId) -> String {
-        let model = &self.project.model;
+        let model = &self.project().model;
         let e = model.element(id);
         Obj::new()
-            .num("id", id.0)
+            .num("id", self.sid(id))
             .str("kind", e.kind.label())
             .opt_str("name", e.name.as_deref())
             .opt_str("shortName", e.short_name.as_deref())
@@ -508,7 +580,7 @@ impl Loaded {
     /// refused (CT-SEC-003), as is a folder or a file over `MAX_SOURCE_BYTES`.
     // @implements CT-TRC-004, CT-MOD-004, CT-SEC-003
     fn project_file(&self, path: &str) -> Result<PathBuf, AppError> {
-        let root = &self.project.root;
+        let root = &self.project().root;
         let inside = !path.is_empty()
             && Path::new(path)
                 .components()
@@ -628,6 +700,134 @@ impl Loaded {
             })
             .collect();
         Ok(page(offset, Some(lines.len()), rows))
+    }
+}
+
+// @implements CT-EFF-004, CT-MOD-003
+/// The open project, shared between commands. Queries read it together; an edit takes it
+/// alone while it rebuilds, which is about as long as the core takes to re-parse one file.
+pub struct Loaded {
+    live: RwLock<Live>,
+}
+
+// @implements CT-EFF-004, CT-EFF-005, CT-MOD-001, CT-MOD-003, CT-MOD-005, CT-USE-007
+impl Loaded {
+    /// Reads the project that holds `path`, then brings its search index up to date.
+    pub fn open(path: &Path) -> Result<Loaded, AppError> {
+        Ok(Loaded {
+            live: RwLock::new(Live::open(path)?),
+        })
+    }
+
+    /// The project folder.
+    #[cfg(test)]
+    fn root(&self) -> PathBuf {
+        self.read().project().root.clone()
+    }
+
+    fn read(&self) -> RwLockReadGuard<'_, Live> {
+        self.live.read().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Takes `text` as the unsaved content of the model file `path`, a path relative to
+    /// the project folder, and rebuilds the project from it. Nothing is written. Replies
+    /// with the problems found in that file, for the editor's markers, and the project
+    /// counts. The browser, problems, trace, and coverage queries see the new text at once.
+    pub fn edit(&self, path: &str, text: &str) -> Result<String, AppError> {
+        self.read().project_file(path)?;
+        if text.len() > MAX_SOURCE_BYTES {
+            return Err(AppError::new(
+                format!("the text is too large to check (over {MAX_SOURCE_BYTES} bytes)"),
+                path,
+                "Split the model into smaller files.",
+            ));
+        }
+        let mut live = self.live.write().unwrap_or_else(PoisonError::into_inner);
+        live.edit(path, text)
+    }
+
+    /// Takes the saved text of the model file `path` in place of any unsaved edit, so the
+    /// project matches the disk again after the user discards their changes.
+    pub fn revert(&self, path: &str) -> Result<String, AppError> {
+        let text = self.read().read_text(path)?;
+        self.edit(path, &text)
+    }
+
+    pub fn children(&self, parent: usize, offset: usize, limit: usize) -> Result<String, AppError> {
+        self.read().children(parent, offset, limit)
+    }
+
+    pub fn element(&self, id: usize) -> Result<String, AppError> {
+        self.read().element(id)
+    }
+
+    pub fn links(
+        &self,
+        id: usize,
+        direction: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<String, AppError> {
+        self.read().links(id, direction, offset, limit)
+    }
+
+    pub fn impact(
+        &self,
+        id: usize,
+        direction: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<String, AppError> {
+        self.read().impact(id, direction, offset, limit)
+    }
+
+    pub fn problems(&self, offset: usize, limit: usize) -> String {
+        self.read().problems(offset, limit)
+    }
+
+    pub fn search(&self, text: &str, offset: usize, limit: usize) -> Result<String, AppError> {
+        self.read().search(text, offset, limit)
+    }
+
+    pub fn coverage_gaps(
+        &self,
+        filter: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<String, AppError> {
+        self.read().coverage_gaps(filter, offset, limit)
+    }
+
+    pub fn source_text(&self, path: &str) -> Result<String, AppError> {
+        self.read().source_text(path)
+    }
+
+    pub fn save_source(&self, path: &str, text: &str) -> Result<String, AppError> {
+        self.read().save_source(path, text)
+    }
+
+    pub fn source(&self, path: &str, offset: usize, limit: usize) -> Result<String, AppError> {
+        self.read().source(path, offset, limit)
+    }
+
+    /// Counts the status bar and the first view need.
+    fn summary(&self) -> String {
+        self.read().summary()
+    }
+}
+
+// @implements CT-MOD-003
+/// The file, line, and column in a problem place such as `model/a.sysml:12:5`. A place
+/// with a line and no column gets column 1; a place without a line is not in a file's text.
+fn place_parts(place: &str) -> Option<(&str, usize, usize)> {
+    let (rest, last) = place.rsplit_once(':')?;
+    let last = last.parse().ok()?;
+    match rest.rsplit_once(':') {
+        Some((file, line)) => match line.parse() {
+            Ok(line) => Some((file, line, last)),
+            Err(_) => Some((rest, last, 1)),
+        },
+        None => Some((rest, last, 1)),
     }
 }
 
@@ -1434,7 +1634,7 @@ mod tests {
         let project = gappy("the_source_view_does_not_follow_a_link_o");
         let outside = folder("outside-link").join("secret.txt");
         fs::write(&outside, "secret").unwrap();
-        let link = project.project.root.join("src").join("link.rs");
+        let link = project.root().join("src").join("link.rs");
         std::os::unix::fs::symlink(&outside, &link).unwrap();
         assert!(project.source("src/link.rs", 0, 10).is_err());
     }
@@ -1443,7 +1643,7 @@ mod tests {
     #[test]
     fn the_source_view_refuses_a_file_that_is_not_text_or_is_too_large() {
         let project = gappy("the_source_view_refuses_a_file_that_is_n");
-        let root = project.project.root.clone();
+        let root = project.root().clone();
         fs::write(root.join("src/binary.bin"), [0u8, 159, 146, 150]).unwrap();
         let e = project.source("src/binary.bin", 0, 10).unwrap_err();
         assert!(e.what.contains("text"), "{e:?}");
@@ -1457,7 +1657,7 @@ mod tests {
     #[test]
     fn the_editor_opens_a_model_file_whole_and_refuses_what_the_source_view_refuses() {
         let project = gappy("the_editor_opens_a_model_file_whole");
-        let root = project.project.root.clone();
+        let root = project.root().clone();
         let opened = ok(&reply(project.source_text("reqs.sysml")));
         assert_eq!(text(&opened, "path"), "reqs.sysml");
         assert_eq!(
@@ -1477,7 +1677,7 @@ mod tests {
     #[test]
     fn saving_replaces_a_model_file_inside_the_project_and_nothing_else() {
         let project = gappy("saving_replaces_a_model_file_inside");
-        let root = project.project.root.clone();
+        let root = project.root().clone();
         let saved = ok(&reply(project.save_source("reqs.sysml", "package P {}\n")));
         assert_eq!(text(&saved, "path"), "reqs.sysml");
         assert_eq!(num(&saved, "bytes"), 13);
@@ -1520,7 +1720,7 @@ mod tests {
     #[test]
     fn saving_does_not_follow_a_link_out_of_the_project() {
         let project = gappy("saving_does_not_follow_a_link_out");
-        let root = project.project.root.clone();
+        let root = project.root().clone();
         let outside = root.parent().unwrap().join("saving-outside.sysml");
         fs::write(&outside, "secret").unwrap();
         std::os::unix::fs::symlink(&outside, root.join("link.sysml")).unwrap();
@@ -1658,6 +1858,146 @@ mod tests {
         let e = error(&reply(loaded().element(usize::MAX)));
         assert!(text(&e, "what").contains("no element"), "{e:?}");
         assert!(!text(&e, "help").is_empty());
+    }
+
+    // @verifies CT-MOD-003, CT-MOD-005
+    /// The `diagnostics` rows of an edit reply.
+    fn diagnostics(reply_text: &str) -> Vec<Json> {
+        let ok = ok(reply_text);
+        ok.get("diagnostics").unwrap().items().to_vec()
+    }
+
+    // @verifies CT-MOD-003, CT-MOD-005
+    /// The first row of the model tree under `parent` whose name is `name`, as its ID.
+    fn child_id(project: &Loaded, parent: usize, name: &str) -> Option<usize> {
+        let page = ok(&reply(project.children(parent, 0, MAX_PAGE)));
+        (page.get("rows").unwrap().items().iter())
+            .find(|r| r.get("name").and_then(Json::as_str) == Some(name))
+            .map(|r| num(r, "id"))
+    }
+
+    // @verifies CT-MOD-003, CT-USE-007
+    #[test]
+    fn an_edit_returns_the_problems_of_that_file_with_place_and_help() {
+        let project = gappy("an_edit_returns_the_problems_of_that_file");
+        let broken = "package Design {\n  part def Engine {\n    satisfy Reqs::nope;\n  }\n}\n";
+        let rows = diagnostics(&reply(project.edit("design.sysml", broken)));
+        assert!(!rows.is_empty());
+        for row in &rows {
+            assert!(text(row, "where").starts_with("design.sysml:3:"), "{row:?}");
+            assert_eq!(num(row, "line"), 3, "{row:?}");
+            assert!(num(row, "column") >= 1, "{row:?}");
+            assert!(!text(row, "what").is_empty(), "{row:?}");
+            assert!(!text(row, "help").is_empty(), "{row:?}");
+            assert!(["error", "warning"].contains(&text(row, "severity")));
+        }
+        // The problems list sees the same text, so the panel can refresh from it.
+        let page = ok(&reply(Ok(project.problems(0, MAX_PAGE))));
+        assert!(num(&page, "total") >= rows.len());
+    }
+
+    // @verifies CT-MOD-003
+    #[test]
+    fn a_fixing_edit_clears_the_problems_and_the_reply_counts_them() {
+        let project = gappy("a_fixing_edit_clears_the_problems");
+        let broken = "package Design {\n  part def Engine {\n    satisfy Reqs::nope;\n  }\n}\n";
+        let first = ok(&reply(project.edit("design.sysml", broken)));
+        assert!(num(first.get("summary").unwrap(), "problems") > 0);
+        let fixed = "package Design {\n  part def Engine {\n    satisfy Reqs::top;\n  }\n}\n";
+        let second = ok(&reply(project.edit("design.sysml", fixed)));
+        assert!(second.get("diagnostics").unwrap().items().is_empty());
+        assert_eq!(num(second.get("summary").unwrap(), "problems"), 0);
+        assert!(num(&second, "revision") > num(&first, "revision"));
+    }
+
+    // @verifies CT-MOD-003, CT-MOD-005
+    #[test]
+    fn element_ids_stay_the_same_across_an_edit_and_a_gone_element_is_an_error() {
+        let project = gappy("element_ids_stay_the_same_across_an_edit");
+        let design = child_id(&project, 0, "Design").unwrap();
+        let engine = child_id(&project, design, "Engine").unwrap();
+        let tester = child_id(&project, design, "Tester").unwrap();
+        // A new part before `Engine` shifts every model index after it.
+        let edited = "package Design {\n  part def Added;\n  part def Engine {\n    satisfy Reqs::top;\n  }\n\
+                      \x20 part def Tester {\n    verify Reqs::child;\n  }\n}\n";
+        ok(&reply(project.edit("design.sysml", edited)));
+        assert_eq!(child_id(&project, design, "Engine"), Some(engine));
+        assert_eq!(child_id(&project, design, "Tester"), Some(tester));
+        let detail = ok(&reply(project.element(engine)));
+        assert_eq!(text(&detail, "name"), "Engine");
+        assert_eq!(num(&detail, "id"), engine);
+        // `Tester` is deleted, so the ID it had is gone.
+        let removed = "package Design {\n  part def Engine {\n    satisfy Reqs::top;\n  }\n}\n";
+        ok(&reply(project.edit("design.sysml", removed)));
+        let gone = error(&reply(project.element(tester)));
+        assert!(text(&gone, "what").contains("no element"), "{gone:?}");
+        assert_eq!(num(&ok(&reply(project.element(engine))), "id"), engine);
+    }
+
+    // @verifies CT-MOD-005
+    #[test]
+    fn the_tree_and_the_trace_links_follow_the_edited_text() {
+        let project = gappy("the_tree_follows_the_edited_text");
+        let design = child_id(&project, 0, "Design").unwrap();
+        assert_eq!(child_id(&project, design, "Added"), None);
+        let before = num(&ok(&reply(project.element(design))), "children");
+        let edited = "package Design {\n  part def Added;\n  part def Engine {\n    satisfy Reqs::top;\n  }\n}\n";
+        ok(&reply(project.edit("design.sysml", edited)));
+        assert!(child_id(&project, design, "Added").is_some());
+        let after = num(&ok(&reply(project.element(design))), "children");
+        assert_ne!(before, after);
+        // `Tester` held the only `verify` of `child`, so the gap lists see it go.
+        assert!(gap_names(&project, "no-verification").contains(&"X-002".to_string()));
+        let top = child_id(&project, child_id(&project, 0, "Reqs").unwrap(), "top");
+        let links = ok(&reply(project.links(top.unwrap(), "to", 0, MAX_PAGE)));
+        assert_eq!(num(&links, "total"), 1);
+    }
+
+    // @verifies CT-MOD-003, CT-SEC-003
+    #[test]
+    fn an_edit_is_never_written_and_only_model_files_are_taken() {
+        let project = gappy("an_edit_is_never_written");
+        let root = std::env::temp_dir()
+            .join("clewtrace-app-tests")
+            .join("an_edit_is_never_written");
+        let before = fs::read_to_string(root.join("design.sysml")).unwrap();
+        ok(&reply(project.edit("design.sysml", "package Design {}\n")));
+        assert_eq!(
+            fs::read_to_string(root.join("design.sysml")).unwrap(),
+            before
+        );
+        for bad in ["src/lib.rs", "trace.toml", "../x.sysml", "/etc/x.sysml"] {
+            let e = error(&reply(project.edit(bad, "x")));
+            assert!(!text(&e, "what").is_empty(), "{bad}");
+            assert!(!text(&e, "help").is_empty(), "{bad}");
+        }
+    }
+
+    // @verifies CT-MOD-003
+    #[test]
+    fn reverting_a_file_takes_the_saved_text_again() {
+        let project = gappy("reverting_a_file");
+        ok(&reply(project.edit(
+            "design.sysml",
+            "package Design { part def Gone; }\n",
+        )));
+        let design = child_id(&project, 0, "Design").unwrap();
+        assert!(child_id(&project, design, "Gone").is_some());
+        ok(&reply(project.revert("design.sysml")));
+        assert!(child_id(&project, design, "Gone").is_none());
+        assert!(child_id(&project, design, "Engine").is_some());
+    }
+
+    // @verifies CT-MOD-003, CT-EFF-005
+    #[test]
+    fn an_edit_in_a_project_of_two_hundred_requirements_answers_within_one_second() {
+        let project = loaded();
+        let text = fs::read_to_string(generated().0.join("model/perf.sysml")).unwrap();
+        let started = Instant::now();
+        let rows = diagnostics(&reply(project.edit("model/perf.sysml", &text)));
+        let took = started.elapsed();
+        assert!(took < Duration::from_secs(1), "an edit took {took:?}");
+        assert!(rows.is_empty(), "{rows:?}");
     }
 
     // @verifies CT-EFF-005

@@ -1,4 +1,4 @@
-// @begin CT-MOD-005, CT-EFF-005, CT-USE-007
+// @begin CT-MOD-005, CT-MOD-003, CT-EFF-005, CT-USE-007
 // Tests for the model browser, the detail view, and the problems panel. The Rust commands
 // are replaced by fakes, so no project and no Tauri are needed.
 import { flushSync, mount, unmount } from 'svelte';
@@ -13,6 +13,7 @@ import * as api from './api';
 import DetailView from './DetailView.svelte';
 import ModelBrowser from './ModelBrowser.svelte';
 import ProblemsPanel from './ProblemsPanel.svelte';
+import { Refresher } from './live';
 
 let instance: Record<string, unknown> | undefined;
 afterEach(() => {
@@ -68,6 +69,47 @@ describe('ModelBrowser', () => {
     await settle();
     expect(document.querySelector('[role="alert"]')?.textContent).toContain('no project is open');
   });
+
+  // @verifies CT-MOD-005, CT-MOD-003
+  it('follows the text: a refresh shows new members and keeps the open package and the selection', async () => {
+    let members = [row(11, 'Speed'), row(12, 'Memory')];
+    vi.mocked(api.treeChildren).mockImplementation(async (parent, offset = 0) => {
+      const rows = parent === 0 ? [row(1, 'Reqs', members.length), row(2, 'Other')] : members;
+      return { offset, total: rows.length, more: false, rows };
+    });
+    const refresher = new Refresher();
+    const onselect = vi.fn();
+    instance = mount(ModelBrowser, { target: document.body, props: { onselect, refresher } });
+    await settle();
+    const text = () => [...document.querySelectorAll('[role="option"]')].map((o) => o.textContent?.trim());
+    const list = document.querySelector('[role="listbox"]') as HTMLElement;
+    const key = (k: string) => list.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+    key('ArrowDown');
+    key('ArrowRight');
+    await settle();
+    key('ArrowDown');
+    key('ArrowDown');
+    flushSync();
+    expect(document.querySelector('[aria-selected="true"]')?.textContent).toContain('Memory');
+    // A new member goes in before the selected one, so its row moves down the list.
+    members = [row(10, 'Added'), ...members];
+    refresher.fire();
+    await settle();
+    expect(text()).toEqual(['▾ Reqs', 'Added', 'Speed', 'Memory', 'Other']);
+    expect(document.querySelector('[aria-selected="true"]')?.textContent).toContain('Memory');
+  });
+
+  // @verifies CT-MOD-005
+  it('stops listening for refreshes when it is removed', async () => {
+    vi.mocked(api.treeChildren).mockResolvedValue({ offset: 0, total: 0, more: false, rows: [] });
+    const refresher = new Refresher();
+    instance = mount(ModelBrowser, { target: document.body, props: { onselect: () => {}, refresher } });
+    await settle();
+    expect(refresher.size).toBe(1);
+    unmount(instance);
+    instance = undefined;
+    expect(refresher.size).toBe(0);
+  });
 });
 
 describe('DetailView', () => {
@@ -96,6 +138,27 @@ describe('DetailView', () => {
     expect(onopen).toHaveBeenCalledWith('m.sysml', 4);
   });
 
+  // @verifies CT-MOD-005
+  it('shows the element again after the text changed, and says when it is gone', async () => {
+    const detail = (line: number): api.ElementDetail => ({
+      id: 7, kind: 'package', name: 'Reqs', shortName: null, qualifiedName: 'Reqs', file: 'm.sysml', line, column: 1,
+      owner: null, children: 2, linksFrom: 0, linksTo: 0, requirement: null,
+    });
+    vi.mocked(api.elementDetail).mockResolvedValue(detail(4));
+    const refresher = new Refresher();
+    instance = mount(DetailView, { target: document.body, props: { selection: { kind: 'element', id: 7 }, onopen: vi.fn(), refresher } });
+    await settle();
+    expect(document.body.textContent).toContain('m.sysml:4:1');
+    vi.mocked(api.elementDetail).mockResolvedValue(detail(9));
+    refresher.fire();
+    await settle();
+    expect(document.body.textContent).toContain('m.sysml:9:1');
+    vi.mocked(api.elementDetail).mockRejectedValue(new api.ClewError({ what: 'no element has ID 7', where: '', help: 'Pick it again' }));
+    refresher.fire();
+    await settle();
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('no element');
+  });
+
   // @verifies CT-USE-007
   it('shows a selected problem with its place and fix', async () => {
     const problem: api.ProblemRow = { severity: 'warning', what: 'no verification', where: 'r.sysml:9:3', help: 'Add a verify link' };
@@ -106,6 +169,9 @@ describe('DetailView', () => {
   });
 });
 
+// @end
+
+// @begin CT-MOD-003, CT-USE-007, CT-EFF-005
 describe('ProblemsPanel', () => {
   // @verifies CT-USE-007, CT-EFF-005
   it('lists each problem with its place and fix, and selects on click', async () => {
@@ -129,6 +195,25 @@ describe('ProblemsPanel', () => {
   it('says so when there are no problems', async () => {
     vi.mocked(api.problems).mockResolvedValue({ offset: 0, total: 0, more: false, rows: [] });
     instance = mount(ProblemsPanel, { target: document.body, props: { onselect: () => {} } });
+    await settle();
+    expect(document.body.textContent).toContain('No problems');
+  });
+
+  // @verifies CT-MOD-003, CT-USE-007
+  it('lists the new problems after an edit, without going blank first', async () => {
+    const one: api.ProblemRow = { severity: 'error', what: 'unknown name `X`', where: 'a.sysml:3:9', help: 'Define X' };
+    vi.mocked(api.problems).mockResolvedValue({ offset: 0, total: 1, more: false, rows: [one] });
+    const refresher = new Refresher();
+    instance = mount(ProblemsPanel, { target: document.body, props: { onselect: () => {}, refresher } });
+    await settle();
+    expect(document.querySelectorAll('[role="option"]').length).toBe(1);
+    const two = { ...one, what: 'unknown name `Y`', where: 'a.sysml:5:2' };
+    vi.mocked(api.problems).mockResolvedValue({ offset: 0, total: 2, more: false, rows: [one, two] });
+    refresher.fire();
+    await settle();
+    expect(document.querySelectorAll('[role="option"]').length).toBe(2);
+    vi.mocked(api.problems).mockResolvedValue({ offset: 0, total: 0, more: false, rows: [] });
+    refresher.fire();
     await settle();
     expect(document.body.textContent).toContain('No problems');
   });

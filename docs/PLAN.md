@@ -813,12 +813,53 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
         on file events.
       - Renaming an element, or adding an unnamed sibling such as a `satisfy` before
         another, gives it a new stable ID (ADR-0005).
-- [ ] **2.9b Live validation in the app.** After a short pause in typing (a one-shot timer
+- [x] **2.9b Live validation in the app.** After a short pause in typing (a one-shot timer
       reset by each keystroke, never a poll), send the buffer to the 2.9a API. Return
       diagnostics as editor markers with help text, and refresh the browser, problems, and
       trace panel.
       Refs: CT-MOD-003, CT-MOD-005, CT-EFF-005
       Model: Sonnet
+      Done: `Loaded` in `app/src-tauri/src/data.rs` now holds the 2.9a `Workspace` behind an
+      `RwLock` (queries read together, an edit takes it alone). Every ID sent to the UI is a
+      stable ID, and `get` maps it back. New commands `validate_source` (rebuilds the project
+      from the editor's unsaved text, writes nothing, replies with this file's problems as
+      line, column, what, and help, plus the project counts) and `revert_source` (takes the
+      saved text again after the user discards edits). In the UI, `lib/live.ts` has the
+      one-shot `QuietTimer` (300 ms, reset by each keystroke, no timer left after it fires),
+      `markers` (line and column to a CodeMirror diagnostic with its help text), and
+      `Refresher`. `TextEditor` sends the text after the pause, keeps one check in flight,
+      drops markers for text typed since, checks at once on save, and checks the saved text on
+      open for its markers. The model browser, problems, detail, and trace panes fetch again
+      on each rebuild: `TreeModel.refresh` and `PagedRows.refresh` swap the new data in whole,
+      so open packages and the selection stay and nothing blanks.
+      `@codemirror/lint` 6.9.7 added (MIT, `deps.toml`). The JS bundle is 457 KB (152 KB gzip),
+      from 434 KB (144 KB gzip).
+      Probe (Linux, 4 CPU, run without the 4 GB limit, xvfb): the 2.6 project probe on the
+      10,000-requirement, 50,000-link project gives 358 MB total PSS (358.1 to 358.5 over three
+      measured launches, 361 MB warm-up) against CT-EFF-004's 400 MB, and opens in 0.8 s
+      against 3 s. That is under budget with 42 MB to spare, so the stable-ID table was not
+      compacted. The ADR-0005 estimate was 384 MB; the 2.6 figure of 333 MB came from a
+      different machine, so the two are not a like-for-like delta. The start, idle memory, and
+      100 ms select and navigate probes pass.
+      Follow-ups:
+      - Search reads the on-disk index, so it does not see unsaved edits and is not refreshed
+        by an edit or a save. File watching in 2.10b should update it.
+      - The coverage and search views are not refreshed while open; they fetch fresh when the
+        user switches to them, which is the only time the editor is not in front.
+      - ADR-0005 says the UI drops a selection whose ID is gone. The detail view shows the
+        "no element has ID" error instead, with a hint to pick the element again, and the
+        history keeps the entry. Say if you would rather it clear the selection.
+      - A discarded edit is reverted in the core when the user discards and opens another
+        file. Closing the window, or opening another project, with unsaved edits still loses
+        them (2.10a).
+      - A check of the whole project runs on each pause, about 0.3 to 0.4 s for a 10,000-line
+        file in the core perf test. The 4 GB, 2 CPU job was not available here, so the 1 s
+        figure of CT-MOD-003 is still checked by the core perf test only.
+      - The `model-browser-demo.md` sync item and the markers were tested with fakes and the
+        Rust tests, not by hand in the window. John to run the checklist item once.
+      - Only problems whose place is in the edited file become markers. An error caused in
+        another file by this edit shows in the problems panel.
+
 - [ ] **2.10a Autosave and concurrent use.** Autosave after a short pause and on blur and
       close, through the 2.8 atomic write. A test kills the writer mid-save and finds the
       old or the new content, never a torn file. Set the SQLite busy_timeout, and test

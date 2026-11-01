@@ -208,6 +208,14 @@ serves = ["CT-MOD-004", "CT-USE-003", "CT-USE-004"]
 why = "CodeMirror 6 text editor for .sysml files (approved by John, task 2.8). Version 6.7.2. Find and replace inside the open file"
 
 [[dep]]
+name = "@codemirror/lint"
+ecosystem = "npm"
+license = "MIT"
+scope = "shipped"
+serves = ["CT-MOD-003", "CT-MOD-004", "CT-USE-007"]
+why = "CodeMirror 6 text editor for .sysml files (approved by John, task 2.8; added in task 2.9b). Version 6.9.7. Shows the core's syntax and reference errors as markers in the text, with their help text"
+
+[[dep]]
 name = "cargo-deny"
 ecosystem = "ci"
 license = "MIT OR Apache-2.0"

@@ -5,11 +5,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./api', async (original) => {
   const real = (await original()) as object;
-  return { ...real, sourceText: vi.fn(), saveSource: vi.fn(), editorKeywords: vi.fn() };
+  return { ...real, sourceText: vi.fn(), saveSource: vi.fn(), editorKeywords: vi.fn(), validateSource: vi.fn() };
 });
 // The test web view lacks constructed style sheets in shadow roots, which a real one has.
 vi.mock('./editor', async (original) => ({ ...((await original()) as object), supportsEditor: () => true }));
 
+import { forEachDiagnostic } from '@codemirror/lint';
 import type { EditorView } from '@codemirror/view';
 import * as api from './api';
 import TextEditor from './TextEditor.svelte';
@@ -36,12 +37,29 @@ const settle = async () => {
   }
 };
 
-async function open(props: { path?: string; line?: number; ondirty?: (d: boolean) => void } = {}) {
+const reply = (diagnostics: api.DiagnosticRow[] = [], revision = 1): api.EditReply => ({
+  revision,
+  diagnostics,
+  summary: {} as api.ProjectSummary,
+});
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** The markers the editor shows, as `from-to:severity:message`. */
+const shown = (view: EditorView) => {
+  const found: string[] = [];
+  forEachDiagnostic(view.state, (d, from, to) => found.push(`${from}-${to}:${d.severity}:${d.message}`));
+  return found;
+};
+
+async function open(
+  props: { path?: string; line?: number; ondirty?: (d: boolean) => void; quietMs?: number; onvalidated?: (r: api.EditReply) => void; validated?: api.EditReply } = {},
+) {
+  const { validated, ...componentProps } = props;
+  vi.mocked(api.validateSource).mockResolvedValue(validated ?? reply());
   vi.mocked(api.sourceText).mockResolvedValue({ path: 'a.sysml', text: 'package A {\n  part x;\n  part y;\n}\n' });
   vi.mocked(api.editorKeywords).mockResolvedValue(['package', 'part']);
   instance = mount(TextEditor, {
     target: document.body,
-    props: { path: 'a.sysml', line: 1, ondirty: () => {}, ...props },
+    props: { path: 'a.sysml', line: 1, ondirty: () => {}, onvalidated: () => {}, quietMs: 20, ...componentProps },
   }) as unknown as Instance;
   await settle();
   return instance;
@@ -81,7 +99,7 @@ describe('TextEditor', () => {
   it('says what went wrong when the file cannot be opened', async () => {
     vi.mocked(api.sourceText).mockRejectedValue(new Error('file not found'));
     vi.mocked(api.editorKeywords).mockResolvedValue([]);
-    instance = mount(TextEditor, { target: document.body, props: { path: 'gone.sysml', line: 1, ondirty: () => {} } }) as unknown as Instance;
+    instance = mount(TextEditor, { target: document.body, props: { path: 'gone.sysml', line: 1, ondirty: () => {}, onvalidated: () => {} } }) as unknown as Instance;
     await settle();
     expect(document.querySelector('[role="alert"]')?.textContent).toContain('file not found');
   });
@@ -141,6 +159,117 @@ describe('TextEditor', () => {
     button('Undo').click();
     flushSync();
     expect(ondirty).toHaveBeenLastCalledWith(false);
+  });
+});
+
+// @end
+
+// @begin CT-MOD-003, CT-MOD-004, CT-USE-007, CT-EFF-008
+describe('TextEditor live validation', () => {
+  const broken = (over: Partial<api.DiagnosticRow> = {}): api.DiagnosticRow => ({
+    severity: 'error',
+    what: 'cannot find `nope`',
+    where: 'a.sysml:2:8',
+    help: 'Declare it or fix the name.',
+    line: 2,
+    column: 8,
+    ...over,
+  });
+
+  // @verifies CT-MOD-003, CT-EFF-008
+  it('sends the text once after a pause in typing, not on each keystroke', async () => {
+    const onvalidated = vi.fn();
+    const editor = await open({ onvalidated });
+    // Opening checks the saved text once, for its markers.
+    expect(api.validateSource).toHaveBeenCalledTimes(1);
+    for (const ch of ['a', 'b', 'c']) {
+      type(editor.view()!, ch);
+      await wait(5);
+    }
+    expect(api.validateSource).toHaveBeenCalledTimes(1);
+    await wait(80);
+    expect(api.validateSource).toHaveBeenCalledTimes(2);
+    expect(api.validateSource).toHaveBeenLastCalledWith('a.sysml', 'package A {\n  part x;\n  part y;\n}\nabc');
+    expect(onvalidated).toHaveBeenCalledTimes(1);
+  });
+
+  // @verifies CT-MOD-003, CT-USE-007
+  it('shows the problems of the file as markers with their help text', async () => {
+    const editor = await open({ validated: reply([broken()], 2) });
+    await settle();
+    const [marker] = shown(editor.view()!);
+    expect(marker).toContain('error:cannot find `nope`');
+    expect(marker).toContain('Declare it or fix the name.');
+    vi.mocked(api.validateSource).mockResolvedValue(reply([], 3));
+    type(editor.view()!, '\n');
+    await wait(80);
+    expect(shown(editor.view()!)).toEqual([]);
+  });
+
+  // @verifies CT-MOD-003
+  it('shows the markers of the saved text on open without refreshing the other panes', async () => {
+    const onvalidated = vi.fn();
+    const editor = await open({ onvalidated, validated: reply([broken()]) });
+    await settle();
+    expect(shown(editor.view()!)).toHaveLength(1);
+    expect(onvalidated).not.toHaveBeenCalled();
+  });
+
+  // @verifies CT-MOD-003
+  it('drops the markers of a reply that further typing overtook', async () => {
+    const editor = await open();
+    let release!: (r: api.EditReply) => void;
+    vi.mocked(api.validateSource).mockReturnValueOnce(new Promise((r) => (release = r)));
+    type(editor.view()!, 'a');
+    await wait(60);
+    type(editor.view()!, 'b');
+    release(reply([broken()]));
+    await settle();
+    expect(shown(editor.view()!)).toEqual([]);
+  });
+
+  // @verifies CT-MOD-003, CT-EFF-008
+  it('keeps one check in flight, then checks the newest text', async () => {
+    const editor = await open();
+    let release!: (r: api.EditReply) => void;
+    vi.mocked(api.validateSource).mockReturnValueOnce(new Promise((r) => (release = r)));
+    type(editor.view()!, 'a');
+    await wait(60);
+    type(editor.view()!, 'b');
+    await wait(60);
+    // The second pause ended while the first check was out, so nothing more was sent.
+    expect(api.validateSource).toHaveBeenCalledTimes(2);
+    release(reply());
+    await wait(80);
+    expect(api.validateSource).toHaveBeenCalledTimes(3);
+    expect(api.validateSource).toHaveBeenLastCalledWith('a.sysml', 'package A {\n  part x;\n  part y;\n}\nab');
+  });
+
+  // @verifies CT-MOD-003, CT-USE-007
+  it('says why a check failed and keeps the editor usable', async () => {
+    const editor = await open();
+    vi.mocked(api.validateSource).mockRejectedValue(new Error('trace.toml:9: top_level_definitions no longer resolves'));
+    type(editor.view()!, 'x');
+    await wait(80);
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('top_level_definitions');
+    type(editor.view()!, 'y');
+    expect(editor.view()!.state.doc.toString().endsWith('xy')).toBe(true);
+    vi.mocked(api.validateSource).mockResolvedValue(reply());
+    await wait(80);
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  // @verifies CT-MOD-003, CT-USE-008
+  it('checks the text at once when it is saved, without waiting for the pause', async () => {
+    const editor = await open({ quietMs: 5000 });
+    vi.mocked(api.saveSource).mockResolvedValue({ path: 'a.sysml', bytes: 1 });
+    type(editor.view()!, 'z');
+    flushSync();
+    expect(api.validateSource).toHaveBeenCalledTimes(1);
+    button('Save').click();
+    await settle();
+    expect(api.validateSource).toHaveBeenCalledTimes(2);
+    expect(api.validateSource).toHaveBeenLastCalledWith('a.sysml', 'package A {\n  part x;\n  part y;\n}\nz');
   });
 });
 // @end
