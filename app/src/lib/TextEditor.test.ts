@@ -51,7 +51,15 @@ const shown = (view: EditorView) => {
 };
 
 async function open(
-  props: { path?: string; line?: number; ondirty?: (d: boolean) => void; quietMs?: number; onvalidated?: (r: api.EditReply) => void; validated?: api.EditReply } = {},
+  props: {
+    path?: string;
+    line?: number;
+    ondirty?: (d: boolean) => void;
+    quietMs?: number;
+    autosaveMs?: number;
+    onvalidated?: (r: api.EditReply) => void;
+    validated?: api.EditReply;
+  } = {},
 ) {
   const { validated, ...componentProps } = props;
   vi.mocked(api.validateSource).mockResolvedValue(validated ?? reply());
@@ -59,7 +67,8 @@ async function open(
   vi.mocked(api.editorKeywords).mockResolvedValue(['package', 'part']);
   instance = mount(TextEditor, {
     target: document.body,
-    props: { path: 'a.sysml', line: 1, ondirty: () => {}, onvalidated: () => {}, quietMs: 20, ...componentProps },
+    // Autosave waits a minute unless a test asks for less, so the other tests see no save.
+    props: { path: 'a.sysml', line: 1, ondirty: () => {}, onvalidated: () => {}, quietMs: 20, autosaveMs: 60_000, ...componentProps },
   }) as unknown as Instance;
   await settle();
   return instance;
@@ -70,6 +79,9 @@ const button = (name: string) =>
 const type = (view: EditorView, text: string) =>
   view.dispatch({ changes: { from: view.state.doc.length, insert: text }, userEvent: 'input.type' });
 
+// @end
+
+// @verifies CT-MOD-004, CT-MOD-003, CT-USE-003, CT-USE-008, CT-USE-007
 describe('TextEditor', () => {
   // @verifies CT-MOD-004
   it('opens the whole file and puts the cursor on the line asked for', async () => {
@@ -105,7 +117,7 @@ describe('TextEditor', () => {
   });
 
   // @verifies CT-USE-008
-  it('saves only when asked, with the whole text, then shows it is saved', async () => {
+  it('saves on Save before the pause ends, with the whole text, then shows it is saved', async () => {
     const ondirty = vi.fn();
     const editor = await open({ ondirty });
     vi.mocked(api.saveSource).mockResolvedValue({ path: 'a.sysml', bytes: 1 });
@@ -121,6 +133,37 @@ describe('TextEditor', () => {
     expect(ondirty).toHaveBeenLastCalledWith(false);
     expect(document.body.textContent).toContain('Saved');
     expect(button('Save').disabled).toBe(true);
+  });
+
+  // @verifies CT-USE-008
+  it('saves by itself after a short pause in typing', async () => {
+    const ondirty = vi.fn();
+    const editor = await open({ ondirty, autosaveMs: 30 });
+    vi.mocked(api.saveSource).mockResolvedValue({ path: 'a.sysml', bytes: 1 });
+    type(editor.view()!, 'a');
+    type(editor.view()!, 'b');
+    flushSync();
+    expect(api.saveSource).not.toHaveBeenCalled();
+    await wait(60);
+    await settle();
+    expect(api.saveSource).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.saveSource).mock.calls[0][1].endsWith('ab')).toBe(true);
+    expect(ondirty).toHaveBeenLastCalledWith(false);
+    expect(document.body.textContent).toContain('Saved');
+  });
+
+  // @verifies CT-USE-008
+  it('saves when the editor loses focus', async () => {
+    const editor = await open();
+    vi.mocked(api.saveSource).mockResolvedValue({ path: 'a.sysml', bytes: 1 });
+    const view = editor.view()!;
+    view.focus();
+    type(view, 'z');
+    flushSync();
+    view.contentDOM.dispatchEvent(new FocusEvent('blur'));
+    await settle();
+    expect(api.saveSource).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.saveSource).mock.calls[0][1].endsWith('z')).toBe(true);
   });
 
   // @verifies CT-USE-008, CT-USE-007
@@ -161,8 +204,6 @@ describe('TextEditor', () => {
     expect(ondirty).toHaveBeenLastCalledWith(false);
   });
 });
-
-// @end
 
 // @begin CT-MOD-003, CT-MOD-004, CT-USE-007, CT-EFF-008
 describe('TextEditor live validation', () => {

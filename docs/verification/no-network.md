@@ -36,6 +36,11 @@ whenever a capability, a Tauri feature, or a dependency changes. Record the resu
       `open_project`, `recent_projects`, `clear_recent`; task 2.3b). None reaches the
       network: the app commands read the open project and its local SQLite index, show
       the OS folder dialog, and read or write the recent-projects file only.
+- [x] Task 2.10a adds `core:event:allow-listen`, `core:event:allow-unlisten`, and
+      `core:window:allow-destroy`, so the page hears its own window's close request, saves
+      the editor's edits, and then closes the window (CT-USE-008). Tauri events travel
+      between the page and the Rust side of the app only, and destroying a window closes
+      it. None of them opens a connection.
 - [x] `tauri.conf.json` configures no plugins and no `remote` capability.
 - [x] The CSP allows only `'self'` and IPC (`connect-src ipc: http://ipc.localhost`).
       `http://ipc.localhost` is the Tauri IPC channel on Windows, not a network host.
@@ -60,3 +65,4 @@ whenever a capability, a Tauri feature, or a dependency changes. Record the resu
 | 2026-10-31 | task 2.3b | Pass, four folder and recent-list permissions reviewed; rfd 0.17.2 (gtk3 only) added, no network crate in the six desktop trees | Claude Code |
 | 2026-11-01 | task 2.8 | Pass, three editor permissions reviewed (`source_text` and `editor_keywords` read, `save_source` writes one existing `.sysml` file in the open project through a temp file in its folder); no new Rust crate | Claude Code |
 | 2026-11-01 | task 2.9b | Pass, two permissions reviewed (`validate_source` rebuilds the in-memory project from the editor's text and writes nothing; `revert_source` reads one `.sysml` file in the open project); no new Rust crate | Claude Code |
+| 2026-11-01 | task 2.10a | Pass, three window close permissions reviewed (event listen and unlisten, window destroy); no dependency change | Claude Code |

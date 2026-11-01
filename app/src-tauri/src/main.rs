@@ -182,9 +182,15 @@ mod no_network {
     /// The `allow-` permissions of the app's own commands (build.rs) only read the project
     /// the app has open, show the folder dialog, read and write the recent-projects file, or
     /// save an existing `.sysml` file in the open project; none of them opens a connection.
-    const OFFLINE_PERMISSIONS: [&str; 21] = [
+    /// The `core:event` listen and unlisten permissions and `core:window:allow-destroy` let
+    /// the page hear its own window's close request and then close the window, so the
+    /// editor saves first (CT-USE-008). They pass events inside the app only.
+    const OFFLINE_PERMISSIONS: [&str; 24] = [
         "core:app:allow-name",
         "core:app:allow-version",
+        "core:event:allow-listen",
+        "core:event:allow-unlisten",
+        "core:window:allow-destroy",
         "allow-project-status",
         "allow-wait-for-project",
         "allow-tree-children",

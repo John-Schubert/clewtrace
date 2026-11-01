@@ -1,7 +1,7 @@
 // @begin CT-MOD-004, CT-MOD-003, CT-USE-003, CT-USE-008, CT-EFF-005
 // The text editor for .sysml files: CodeMirror 6 set up with highlighting from the
-// lexer's own keyword list, keyword completion, search, undo and redo, and an explicit
-// save. The logic lives here so the Svelte component stays thin.
+// lexer's own keyword list, keyword completion, search, undo and redo, and a save on
+// Ctrl+S next to autosave. The logic lives here so the Svelte component stays thin.
 import { autocompletion, completionKeymap, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { lintGutter, setDiagnostics, type Diagnostic } from '@codemirror/lint';
@@ -27,6 +27,8 @@ export interface EditorHooks {
   onChange: (doc: Text) => void;
   /** The user asked to save, with the whole text. */
   onSave: (text: string) => void;
+  /** The editor lost the focus; autosave saves then. */
+  onBlur?: () => void;
 }
 
 /** The source classes the highlighter marks, by the token name the tokenizer returns. */
@@ -225,6 +227,12 @@ export function editorState(doc: string, keywords: readonly string[], hooks: Edi
         indentWithTab,
       ]),
       EditorView.contentAttributes.of({ 'aria-label': 'SysML v2 text editor' }),
+      EditorView.domEventHandlers({
+        blur: () => {
+          hooks.onBlur?.();
+          return false;
+        },
+      }),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           hooks.onChange(update.state.doc);

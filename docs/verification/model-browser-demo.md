@@ -17,6 +17,11 @@ browser, the detail view, or the problems panel changes. Record the result below
       tree shows the new part without closing the open packages, and the selected row stays
       selected. Task 2.9b built this; the unit tests cover it, and it has not been demonstrated
       by hand in the running app yet.
+- [ ] Autosave: type in the editor and stop. Within about a second the status says Saved and
+      the file on disk has the edit. Type again and click the model browser: the edit is
+      saved. Type again and close the window at once: it closes, and the file has the edit.
+      Task 2.10a built this; the unit tests cover it, and it has not been demonstrated by
+      hand in the running app yet.
 
 ## Result
 
