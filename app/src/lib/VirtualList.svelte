@@ -15,8 +15,10 @@
     row: Snippet<[Row, number]>;
     selected?: number;
     onselect?: (index: number) => void;
+    /** Called on a click or Enter, not on arrow keys. */
+    onactivate?: (index: number) => void;
   }
-  let { count, rowHeight = 24, label, rowAt, row, selected = $bindable(-1), onselect }: Props = $props();
+  let { count, rowHeight = 24, label, rowAt, row, selected = $bindable(-1), onselect, onactivate }: Props = $props();
 
   let scroller = $state<HTMLDivElement>();
   let viewport = $state(400);
@@ -42,7 +44,10 @@
       Home: 0,
       End: count - 1,
     };
-    if (count > 0 && event.key in moves) {
+    if (event.key === 'Enter' && selected >= 0 && selected < count) {
+      event.preventDefault();
+      onactivate?.(selected);
+    } else if (count > 0 && event.key in moves) {
       event.preventDefault();
       select(selected < 0 && event.key === 'ArrowDown' ? 0 : moves[event.key]);
     }
@@ -75,7 +80,10 @@
           aria-posinset={i + 1}
           aria-setsize={count}
           style:height="{rowHeight}px"
-          onclick={() => select(i)}
+          onclick={() => {
+            select(i);
+            onactivate?.(i);
+          }}
         >
           {#if data !== undefined}
             {@render row(data, i)}

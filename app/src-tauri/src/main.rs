@@ -90,6 +90,7 @@ fn main() {
             commands::tree_children,
             commands::element_detail,
             commands::element_links,
+            commands::element_impact,
             commands::problems,
             commands::search,
             commands::pick_folder,

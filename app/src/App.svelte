@@ -1,5 +1,5 @@
 <script lang="ts">
-  // @begin CT-PLT-001, CT-EFF-004, CT-MOD-005
+  // @begin CT-PLT-001, CT-EFF-004, CT-MOD-005, CT-TRC-005
   // The app window: shows the app name and version, read from the Rust side, and the
   // project opened from the command line once its background load ends.
   import { getName, getVersion } from '@tauri-apps/api/app';
@@ -16,6 +16,8 @@
   import { ActionRegistry } from './lib/actions';
   import DetailView from './lib/DetailView.svelte';
   import ModelBrowser from './lib/ModelBrowser.svelte';
+  import { NavHistory } from './lib/history';
+  import TracePanel from './lib/TracePanel.svelte';
   import ProblemsPanel from './lib/ProblemsPanel.svelte';
   import type { Selection } from './lib/describe';
   import Tokens from './lib/Tokens.svelte';
@@ -36,9 +38,34 @@
   let opened = $state(0);
   let selection = $state<Selection>();
 
+  // Back and forward through the elements looked at. The flags mirror the history for the
+  // trace panel's buttons.
+  const history = new NavHistory();
+  let canBack = $state(false);
+  let canForward = $state(false);
+
+  function syncHistory() {
+    canBack = history.canBack;
+    canForward = history.canForward;
+  }
+
+  function goto(id: number | undefined) {
+    if (id !== undefined) {
+      selection = { kind: 'element', id };
+    }
+    syncHistory();
+  }
+
+  function visit(id: number) {
+    history.visit(id);
+    goto(id);
+  }
+
   function showStatus(status: ProjectStatus) {
     project = describeStatus(status);
     selection = undefined;
+    history.clear();
+    syncHistory();
     if (status.state === 'ready') {
       opened += 1;
     }
@@ -118,7 +145,7 @@
   }
   // @end
 
-  // @begin CT-USE-002, CT-USE-004
+  // @begin CT-USE-002, CT-USE-004, CT-TRC-005
   // The action registry and command palette, and the pane focus order (F6).
   const registry = new ActionRegistry();
   let paletteOpen = $state(false);
@@ -136,6 +163,8 @@
   }
 
   registry.register({ id: 'project.open', title: 'Open project folder...', run: choose });
+  registry.register({ id: 'trace.back', title: 'Trace: back', run: () => goto(history.back()) });
+  registry.register({ id: 'trace.forward', title: 'Trace: forward', run: () => goto(history.forward()) });
   registry.register({ id: 'project.clearRecent', title: 'Clear recent projects', run: clear });
   registry.register({ id: 'view.theme.system', title: 'Theme: follow the OS setting', run: () => setTheme('system') });
   registry.register({ id: 'view.theme.light', title: 'Theme: light', run: () => setTheme('light') });
@@ -177,7 +206,7 @@
 <svelte:window onkeydown={onwindowkeydown} />
 <!-- @end -->
 
-<!-- @begin CT-PLT-001, CT-EFF-004, CT-SEC-003, CT-USE-007, CT-USE-004, CT-MOD-005 -->
+<!-- @begin CT-PLT-001, CT-EFF-004, CT-SEC-003, CT-USE-007, CT-USE-004, CT-MOD-005, CT-TRC-005 -->
 <Tokens />
 <a class="skip" href="#pane-main">Skip to main view</a>
 <div class="shell">
@@ -198,7 +227,7 @@
     <h2>Model browser</h2>
     {#if opened > 0}
       {#key opened}
-        <ModelBrowser onselect={(id) => (selection = { kind: 'element', id })} />
+        <ModelBrowser onselect={visit} />
       {/key}
     {/if}
     {#if recent.length > 0}
@@ -225,7 +254,16 @@
   </main>
   <aside id="pane-trace" tabindex="-1" aria-label="Trace panel">
     <h2>Trace panel</h2>
-    <p class="muted">Links to and from the selected element arrive in task 2.7a.</p>
+    {#if opened > 0}
+      <TracePanel
+        id={selection?.kind === 'element' ? selection.id : undefined}
+        {canBack}
+        {canForward}
+        onfollow={visit}
+        onback={() => goto(history.back())}
+        onforward={() => goto(history.forward())}
+      />
+    {/if}
   </aside>
   <section id="pane-problems" tabindex="-1" aria-label="Problems">
     <h2>Problems</h2>
@@ -317,9 +355,6 @@
   }
   p {
     margin: 0.5rem 0 0;
-  }
-  .muted {
-    color: var(--text-muted);
   }
   button,
   select {

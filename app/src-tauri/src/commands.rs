@@ -76,6 +76,20 @@ pub fn element_links(
     Response::new(reply(result))
 }
 
+// @implements CT-TRC-005, CT-EFF-005
+/// One page of the elements and code reachable `upstream` or `downstream` of an element.
+#[tauri::command(async)]
+pub fn element_impact(
+    state: State<'_, Arc<AppState>>,
+    id: usize,
+    direction: String,
+    offset: usize,
+    limit: usize,
+) -> Response {
+    let result = (state.project()).and_then(|p| p.impact(id, &direction, offset, limit));
+    Response::new(reply(result))
+}
+
 // @implements CT-EFF-005, CT-USE-007
 /// One page of the project's errors and warnings.
 #[tauri::command(async)]
