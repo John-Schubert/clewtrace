@@ -8,9 +8,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
 
-use rusqlite::{Connection, ErrorCode, Transaction, params};
+use rusqlite::{Connection, ErrorCode, Transaction, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
 
 use crate::parse::ast::{Kind, Member, UsageKind};
@@ -23,6 +23,12 @@ pub const INDEX_DIR: &str = ".clewtrace";
 // @implements CT-SEC-003
 /// File name of the index database inside `INDEX_DIR`.
 pub const INDEX_FILE: &str = "index.db";
+
+// @implements CT-USE-009
+/// How long a connection waits for another one, such as the app and `clew index` at the
+/// same time, to finish writing before it gives up. A full rebuild of a large project on a
+/// slow laptop takes a few seconds, so this leaves room for one.
+const BUSY_TIMEOUT: Duration = Duration::from_secs(10);
 
 // @implements CT-MOD-001
 /// Stored in `PRAGMA user_version`. A database with another version is rebuilt.
@@ -173,21 +179,32 @@ impl Index {
     /// Re-indexes the `.sysml` files under the root whose content changed, adds new files,
     /// and drops files that no longer exist. Unchanged files are not read again.
     pub fn update(&mut self) -> Result<UpdateStats, IndexError> {
-        let found = sysml_files(&self.root)?;
-        let db = self.db_path();
-        let tx = self.conn.transaction().map_err(|e| sql_error(&db, e))?;
-        let stats = update_files(&tx, &self.root, &found).map_err(|e| sql_error(&db, e))?;
-        tx.commit().map_err(|e| sql_error(&db, e))?;
-        Ok(stats)
+        self.write(false)
     }
 
     /// Drops everything in the index and indexes every file again from the text.
     pub fn rebuild(&mut self) -> Result<UpdateStats, IndexError> {
+        self.write(true)
+    }
+
+    // @implements CT-EFF-007, CT-USE-009
+    /// Runs an update, after emptying the index when `rebuild` is set, as one transaction.
+    /// The transaction takes the write lock when it starts. One that read first and asked
+    /// for the lock later could be refused at once while another connection writes, since
+    /// SQLite does not wait where waiting could deadlock; asking first means it waits.
+    fn write(&mut self, rebuild: bool) -> Result<UpdateStats, IndexError> {
+        let found = sysml_files(&self.root)?;
         let db = self.db_path();
-        self.conn
-            .execute_batch("DELETE FROM elements; DELETE FROM problems; DELETE FROM files;")
+        let tx = (self.conn)
+            .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|e| sql_error(&db, e))?;
-        self.update()
+        if rebuild {
+            tx.execute_batch("DELETE FROM elements; DELETE FROM problems; DELETE FROM files;")
+                .map_err(|e| sql_error(&db, e))?;
+        }
+        let stats = update_files(&tx, &self.root, &found).map_err(|e| sql_error(&db, e))?;
+        tx.commit().map_err(|e| sql_error(&db, e))?;
+        Ok(stats)
     }
 
     /// Number of indexed elements.
@@ -237,18 +254,25 @@ impl Index {
     }
 }
 
-// @implements CT-MOD-001
-/// Opens the database and makes sure it has the current schema, recreating it if not.
+// @implements CT-MOD-001, CT-USE-009
+/// Opens the database and makes sure it has the current schema, recreating it if not. The
+/// check and the change are one transaction that holds the write lock, so two programs
+/// opening a new index at once do not both create it.
 fn open_schema(db: &Path) -> rusqlite::Result<Connection> {
-    let conn = Connection::open(db)?;
-    let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version != SCHEMA_VERSION {
-        conn.execute_batch(
-            "DROP TABLE IF EXISTS elements_fts; DROP TABLE IF EXISTS elements;
-             DROP TABLE IF EXISTS problems; DROP TABLE IF EXISTS files;",
-        )?;
-        conn.execute_batch(SCHEMA)?;
-        conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    let mut conn = Connection::open(db)?;
+    conn.busy_timeout(BUSY_TIMEOUT)?;
+    let current = |c: &Connection| c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0));
+    if current(&conn)? != SCHEMA_VERSION {
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if current(&tx)? != SCHEMA_VERSION {
+            tx.execute_batch(
+                "DROP TABLE IF EXISTS elements_fts; DROP TABLE IF EXISTS elements;
+                 DROP TABLE IF EXISTS problems; DROP TABLE IF EXISTS files;",
+            )?;
+            tx.execute_batch(SCHEMA)?;
+            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        }
+        tx.commit()?;
     }
     Ok(conn)
 }
@@ -518,12 +542,12 @@ fn sql_error(db: &Path, e: rusqlite::Error) -> IndexError {
     }
 }
 
-// @verifies CT-MOD-001, CT-EFF-007, CT-EFF-006, CT-SEC-003, CT-USE-007
+// @verifies CT-MOD-001, CT-EFF-007, CT-EFF-006, CT-SEC-003, CT-USE-007, CT-USE-009
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs::File;
-    use std::time::{Duration, SystemTime};
+    use std::time::SystemTime;
 
     // @verifies CT-MOD-001
     fn project(name: &str) -> PathBuf {
@@ -842,5 +866,90 @@ mod tests {
         let err = index.search("Vehicle", 10, 0).unwrap_err();
         assert!(err.message.starts_with("index database error:"), "{err}");
         assert!(err.help.contains("clew index --rebuild"));
+    }
+
+    // @verifies CT-USE-009
+    #[test]
+    fn waits_for_another_writer_instead_of_failing() {
+        let root = project("busy-timeout");
+        let index = Index::open(&root).unwrap();
+        let ms: i64 = (index.conn)
+            .query_row("PRAGMA busy_timeout", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(ms, i64::try_from(BUSY_TIMEOUT.as_millis()).unwrap());
+    }
+
+    /// Where `an_update_waits_for_the_write_lock` is: 0 at the start, 1 once the update
+    /// waits for the lock, 2 once the other connection let it go.
+    // @verifies CT-USE-009
+    static GATE: (std::sync::Mutex<u8>, std::sync::Condvar) =
+        (std::sync::Mutex::new(0), std::sync::Condvar::new());
+
+    // @verifies CT-USE-009
+    fn gate_set(step: u8) {
+        *GATE.0.lock().unwrap() = step;
+        GATE.1.notify_all();
+    }
+
+    // @verifies CT-USE-009
+    fn gate_wait(step: u8) {
+        let mut at = GATE.0.lock().unwrap();
+        while *at < step {
+            at = GATE.1.wait(at).unwrap();
+        }
+    }
+
+    /// A busy handler that says the update is waiting, then retries once the lock is free,
+    /// so the test needs no timing.
+    // @verifies CT-USE-009
+    fn wait_for_release(_tries: i32) -> bool {
+        gate_set(1);
+        gate_wait(2);
+        true
+    }
+
+    // @verifies CT-USE-009
+    #[test]
+    fn an_update_waits_for_the_write_lock_another_connection_holds() {
+        let root = project("held-lock");
+        let mut index = Index::open(&root).unwrap();
+        index.conn.busy_handler(Some(wait_for_release)).unwrap();
+        let other = Connection::open(root.join(INDEX_DIR).join(INDEX_FILE)).unwrap();
+        other.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let holder = std::thread::spawn(move || {
+            gate_wait(1);
+            other.execute_batch("COMMIT").unwrap();
+            gate_set(2);
+        });
+        let result = index.update();
+        // An update that failed without waiting never woke the holder; wake it to finish.
+        gate_set(2);
+        holder.join().unwrap();
+        assert_eq!(result.unwrap().parsed, 2);
+    }
+
+    // @verifies CT-USE-009
+    #[test]
+    fn two_connections_rebuild_at_the_same_time_without_errors() {
+        let root = project("two-writers");
+        for n in 0..40 {
+            fs::write(
+                root.join(format!("model/p{n}.sysml")),
+                format!("package P{n} {{\n    part def A{n};\n    part def B{n};\n}}\n"),
+            )
+            .unwrap();
+        }
+        let mut first = Index::open(&root).unwrap();
+        let mut second = Index::open(&root).unwrap();
+        let other = std::thread::spawn(move || {
+            for _ in 0..15 {
+                second.rebuild().unwrap();
+            }
+        });
+        for _ in 0..15 {
+            first.rebuild().unwrap();
+        }
+        other.join().unwrap();
+        assert_eq!(first.element_count().unwrap(), 7 + 40 * 3);
     }
 }

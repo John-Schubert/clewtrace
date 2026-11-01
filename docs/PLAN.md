@@ -861,12 +861,31 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       - Only problems whose place is in the edited file become markers. An error caused in
         another file by this edit shows in the problems panel.
 
-- [ ] **2.10a Autosave and concurrent use.** Autosave after a short pause and on blur and
+- [x] **2.10a Autosave and concurrent use.** Autosave after a short pause and on blur and
       close, through the 2.8 atomic write. A test kills the writer mid-save and finds the
       old or the new content, never a torn file. Set the SQLite busy_timeout, and test
       `clew index` running while the app holds the index.
       Refs: CT-USE-008, CT-USE-009
       Model: Opus
+      Done: `lib/autosave.ts` saves 1 s after typing stops, when the editor loses focus,
+      before another file or project opens, and before the window closes, one save at a
+      time. The close needs three new window permissions, reviewed in `no-network.md`.
+      `write_atomic` now also flushes the folder after the rename on Unix, for power loss.
+      The index sets a 10 s busy_timeout, and `update` and `rebuild` take the write lock
+      when their transaction starts. Without that, a second writer was refused at once
+      with "database is locked", even with a timeout. `rebuild` is now one transaction.
+      `tests/kill_save.rs` kills a writer process mid-save 12 times.
+      Follow-ups:
+      - A killed save leaves its hidden `.clewtmp` temp file next to the target. It is never
+        read as a model file, but nothing removes it yet.
+      - The "could not be saved" prompt now shows only when a save fails. If the editor has
+        the focus, clicking Discard first tries one more save on blur.
+      - A writer that rebuilds the index with no gap can hold the lock past the 10 s
+        timeout, since SQLite's waiting is not fair. The app writes the index only on open
+        (and on file events from 2.10b), so this needs a burst over 10 s to show.
+      - The desktop crate's tests (permission allowlist) did not build in the session for
+        lack of GTK; CI runs them. The autosave checklist item in `model-browser-demo.md`
+        is for John to run by hand once.
 - [ ] **2.10b File watching.** Watch the project folder with OS file events through notify
       8.2.1 alone, using its recommended watcher only (CC0-1.0 for notify and ISC for
       inotify and inotify-sys as per-crate exceptions, PR #27). Debounce with a one-shot

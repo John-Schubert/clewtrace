@@ -40,7 +40,28 @@ fn write_then_rename(target: &Path, temp: &Path, bytes: &[u8]) -> std::io::Resul
     }
     file.sync_all()?;
     drop(file);
-    fs::rename(temp, target)
+    fs::rename(temp, target)?;
+    sync_folder(target)
+}
+
+// @implements CT-USE-008
+/// Flushes the folder that holds `target`, so the rename itself survives a power loss and
+/// the saved file does not come back as the old one. Windows makes the rename durable with
+/// the file and has no folder to flush.
+#[cfg(unix)]
+fn sync_folder(target: &Path) -> std::io::Result<()> {
+    let folder = match target.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+    fs::File::open(folder)?.sync_all()
+}
+
+// @implements CT-USE-008
+/// Windows has no folder to flush; see the Unix version.
+#[cfg(not(unix))]
+fn sync_folder(_target: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 // @verifies CT-USE-008, CT-SEC-003

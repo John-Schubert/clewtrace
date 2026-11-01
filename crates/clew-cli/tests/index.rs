@@ -85,3 +85,54 @@ fn exits_2_when_the_index_cannot_be_opened() {
     );
     assert!(stderr.contains("help:"), "{stderr}");
 }
+
+// @verifies CT-USE-009, CT-TRC-008
+#[test]
+fn clew_index_runs_while_the_app_holds_and_rebuilds_the_index() {
+    use std::sync::mpsc;
+    let root = fixture("index-concurrent");
+    for n in 0..60 {
+        fs::write(
+            root.join(format!("model/p{n}.sysml")),
+            format!("package P{n} {{\n    part def A{n};\n    part def B{n};\n}}\n"),
+        )
+        .unwrap();
+    }
+    // The app keeps its index open for as long as the project is open. It writes the index
+    // in bursts, on opening a project or after files change; here each `clew` run starts a
+    // burst of three rebuilds, so the app and the CLI write at the same time.
+    let mut app = clew_core::index::Index::open(&root).unwrap();
+    app.update().unwrap();
+    let (go, bursts) = mpsc::channel::<()>();
+    let (done, finished) = mpsc::channel::<()>();
+    let writer = std::thread::spawn(move || {
+        for () in bursts {
+            for _ in 0..3 {
+                app.rebuild().unwrap();
+            }
+            done.send(()).unwrap();
+        }
+        app
+    });
+    for args in [&["index", "--rebuild"][..], &["index"]].repeat(5) {
+        let child = Command::new(env!("CARGO_BIN_EXE_clew"))
+            .args(args)
+            .current_dir(&root)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        go.send(()).unwrap();
+        let out = child.wait_with_output().unwrap();
+        finished.recv().unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    drop(go);
+    let app = writer.join().unwrap();
+    assert_eq!(app.element_count().unwrap(), 3 + 60 * 3);
+}

@@ -3,6 +3,8 @@
   // The app window: shows the app name and version, read from the Rust side, and the
   // project opened from the command line once its background load ends.
   import { getName, getVersion } from '@tauri-apps/api/app';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { saveOnClose } from './lib/autosave';
   import {
     clearRecent,
     describeStatus,
@@ -60,8 +62,8 @@
   let source = $state<{ path: string; line: number }>();
 
   // The editor for .sysml files. It stays mounted while a file is open, so a switch to
-  // another view never drops unsaved edits. Opening a different file while there are
-  // unsaved edits waits in `blocked` until the user chooses.
+  // another view never drops unsaved edits. Opening a different file saves the edits first;
+  // when that save fails, the open waits in `blocked` until the user chooses.
   let editing = $state<{ path: string; line: number }>();
   let editorDirty = $state(false);
   let blocked = $state<{ path: string; line: number }>();
@@ -69,16 +71,16 @@
 
   function openSource(path: string, line: number) {
     if (canEdit(path) && supportsEditor()) {
-      openEditor(path, line);
+      void openEditor(path, line);
     } else {
       source = { path, line };
       view = 'source';
     }
   }
 
-  function openEditor(path: string, line: number) {
+  async function openEditor(path: string, line: number) {
     view = 'editor';
-    if (decideOpen(editing?.path, editorDirty, path) === 'ask') {
+    if (decideOpen(editing?.path, editorDirty, path) === 'ask' && !(await editor?.save())) {
       blocked = { path, line };
       return;
     }
@@ -113,7 +115,7 @@
 
   async function saveAndOpen() {
     if (blocked && (await editor?.save())) {
-      openEditor(blocked.path, blocked.line);
+      void openEditor(blocked.path, blocked.line);
     }
   }
 
@@ -123,7 +125,7 @@
       const next = blocked;
       const discarded = editing.path;
       editorDirty = false;
-      openEditor(next.path, next.line);
+      void openEditor(next.path, next.line);
       try {
         validated(await revertSource(discarded));
       } catch (e) {
@@ -195,7 +197,8 @@
   waitForProject().then(showStatus);
   // @end
 
-  // @begin CT-SEC-003, CT-USE-007
+
+  // @begin CT-SEC-003, CT-USE-007, CT-USE-008
   // Opening a project: the folder dialog, the recent list, and its "Clear recent" action.
   // The list holds folder paths only; the Rust side keeps it in the app config folder.
   let recent = $state<RecentProject[]>([]);
@@ -210,6 +213,11 @@
   }
 
   async function open(path: string) {
+    // The edits in the open file are saved before another project replaces it.
+    if (editor && !(await editor.save())) {
+      problem = 'The edits could not be saved, so the other project was not opened. See the editor.';
+      return;
+    }
     problem = '';
     project = `Opening ${path}`;
     try {
@@ -241,6 +249,24 @@
   }
 
   reloadRecent().catch(show);
+  // @end
+
+  // @begin CT-USE-008, CT-USE-007
+  // Edits are saved before the window closes. If that save fails, the window stays open
+  // once to say so, and closing it again closes it. A failure to listen is shown, since
+  // without the listener a close would not save.
+  try {
+    saveOnClose(
+      getCurrentWindow(),
+      () => editor?.save() ?? Promise.resolve(true),
+      () => {
+        view = 'editor';
+        problem = 'The edits could not be saved. Save again, or close the window again to close without them.';
+      },
+    ).catch(show);
+  } catch (e) {
+    show(e);
+  }
   // @end
 
   // @begin CT-USE-005
@@ -386,7 +412,7 @@
       </div>
       {#if blocked && editing}
         <div class="ask" role="alertdialog" aria-label="Unsaved changes">
-          <p>{editing.path} has changes that are not saved. Opening {blocked.path} would lose them.</p>
+          <p>{editing.path} has changes that could not be saved. Opening {blocked.path} would lose them.</p>
           <button type="button" onclick={saveAndOpen}>Save and open {blocked.path}</button>
           <button type="button" onclick={discardAndOpen}>Discard and open {blocked.path}</button>
           <button type="button" onclick={() => (blocked = undefined)}>Keep editing</button>

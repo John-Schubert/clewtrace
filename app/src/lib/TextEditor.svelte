@@ -1,7 +1,9 @@
-<!-- @begin CT-MOD-004, CT-MOD-003, CT-USE-003, CT-USE-008, CT-USE-007, CT-EFF-005, CT-EFF-008 -->
 <script lang="ts">
+  // @begin CT-MOD-004, CT-MOD-003, CT-USE-003, CT-USE-008, CT-USE-007, CT-EFF-005, CT-EFF-008
   // The text editor for one .sysml file. The Rust side serves the text and keywords and
-  // saves it; the CodeMirror setup is in editor.ts. Saving is explicit: Save or Ctrl+S.
+  // saves it; the CodeMirror setup is in editor.ts. Edits are saved by themselves after a
+  // short pause and when the editor loses focus (autosave.ts), or at once with Save or
+  // Ctrl+S.
   // After a short pause in typing the unsaved text goes to the Rust side to be checked, and
   // the problems it finds in this file come back as markers in the text.
   import { onMount, untrack } from 'svelte';
@@ -10,6 +12,7 @@
   import type { EditorView } from '@codemirror/view';
   import { editorKeywords, saveSource, sourceText, validateSource, type EditReply } from './api';
   import { editorState, goToLine, openView, showDiagnostics } from './editor';
+  import { AUTOSAVE_MS, Autosaver } from './autosave';
   import { markers, QUIET_MS, QuietTimer } from './live';
 
   let {
@@ -18,6 +21,7 @@
     ondirty,
     onvalidated,
     quietMs = QUIET_MS,
+    autosaveMs = AUTOSAVE_MS,
   }: {
     path: string;
     line: number;
@@ -25,6 +29,7 @@
     /** The project was rebuilt from this file's unsaved text; the panes should refresh. */
     onvalidated: (reply: EditReply) => void;
     quietMs?: number;
+    autosaveMs?: number;
   } = $props();
 
   let host: HTMLElement;
@@ -55,8 +60,9 @@
     }
   }
 
-  // Saves the whole text. Resolves true when it was written.
-  export async function save(): Promise<boolean> {
+  // Saves the whole text. Resolves true when it was written. Only the autosaver calls it,
+  // so one save runs at a time.
+  async function write(): Promise<boolean> {
     if (!editor || saving) {
       return false;
     }
@@ -110,6 +116,16 @@
     }
   }
 
+  const autosave = new Autosaver(write, () => dirty, untrack(() => autosaveMs));
+
+  // Saves now, after any save already running. Resolves true when nothing is left unsaved.
+  export function save(): Promise<boolean> {
+    return autosave.flush();
+  }
+
+  // @end
+
+  // @begin CT-MOD-004, CT-MOD-003, CT-USE-003, CT-USE-008, CT-USE-007, CT-EFF-005, CT-EFF-008
   export function view(): EditorView | undefined {
     return editor;
   }
@@ -126,6 +142,7 @@
     notice = '';
     loaded = false;
     quiet.cancel();
+    autosave.cancel();
     edits += 1;
     try {
       keywords ??= editorKeywords();
@@ -139,8 +156,10 @@
           setDirty(!saved?.eq(doc));
           edits += 1;
           quiet.schedule(() => void check());
+          autosave.changed();
         },
         onSave: () => void save(),
+        onBlur: () => void save(),
       });
       saved = state.doc;
       if (editor) {
@@ -166,10 +185,13 @@
 
   onMount(() => () => {
     quiet.cancel();
+    autosave.cancel();
     editor?.destroy();
   });
+  // @end
 </script>
 
+<!-- @begin CT-MOD-004, CT-MOD-003, CT-USE-003, CT-USE-008, CT-USE-007, CT-EFF-005, CT-EFF-008 -->
 <div class="editor" data-view="editor">
   <h2>{path}</h2>
   <div class="bar" role="toolbar" aria-label="Editor actions">
