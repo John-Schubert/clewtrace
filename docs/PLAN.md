@@ -796,13 +796,16 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       Done in `crates/clew-core/src/live.rs`. `Sources` caches each model file's syntax
       tree, the code scans, checklists, and documents; `load_project` now reads `Sources`
       and builds from them, so the CLI and the live path share one build.
-      `Workspace::edit(path, text)` parses the buffer only, rebuilds the model and graph,
-      and keeps the last project if the setup breaks. `stable_id` and `element` map model
+      `Workspace::edit(path, text)` parses the buffer only, drops the old project, and
+      rebuilds the model and graph. If the setup breaks, it rebuilds the last good project
+      from the file's previous syntax tree. `stable_id` and `element` map model
       indexes to `u64` IDs keyed by owner, kind, name, and sibling order. `tests/perf.rs`
-      grows `r000.sysml` to 10,000 lines and times an edit that breaks a name: 355 ms and
-      1 file re-parsed, peak 243 MB (was 138 MB), on a 4 CPU machine.
+      grows `r000.sysml` to 10,000 lines and times an edit that breaks a name: 334 to
+      390 ms and 1 file re-parsed, core peak 189 MB (was 138 MB), on a 4 CPU machine.
       Follow-ups:
       - ADR-0005 is Proposed. John to accept it.
+      - Estimated app total with the workspace is about 384 MB PSS (2.6 probe: 333 MB at a
+        138 MB core peak), under 400 MB with little margin. 2.9b re-runs the 2.6 probe.
       - The app still uses model indexes as element IDs. 2.9b moves `data.rs` to
         `Workspace` and sends stable IDs to the UI.
       - Code files, checklists, and documents are read at `open` only; 2.10b refreshes them

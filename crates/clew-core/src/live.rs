@@ -2,7 +2,7 @@
 //! parsing the others again (ADR-0005).
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::check::{self, SetupError};
 use crate::config::TraceConfig;
@@ -117,13 +117,22 @@ impl Sources {
         }
     }
 
-    /// Replaces the model file at `path` with `text` parsed, or adds it in path order.
-    fn set(&mut self, path: &str, text: &str) {
-        let file = self.parse(path.to_string(), text);
-        match self.files.binary_search_by(|f| f.path.as_str().cmp(path)) {
-            Ok(at) => self.files[at] = file,
-            Err(at) => self.files.insert(at, file),
+    /// Puts `file` in place of the model file with its path, or adds it in path order.
+    /// Returns the file it replaced.
+    fn put(&mut self, file: ModelFile) -> Option<ModelFile> {
+        match self.files.binary_search_by(|f| f.path.cmp(&file.path)) {
+            Ok(at) => Some(std::mem::replace(&mut self.files[at], file)),
+            Err(at) => {
+                self.files.insert(at, file);
+                None
+            }
         }
+    }
+
+    /// Takes the model file at `path` out.
+    fn remove(&mut self, path: &str) -> Option<ModelFile> {
+        let at = self.files.binary_search_by(|f| f.path.as_str().cmp(path));
+        at.ok().map(|at| self.files.remove(at))
     }
 
     /// Builds the model, trace graph, and problem list from the cached inputs.
@@ -257,8 +266,11 @@ impl StableIds {
 /// re-parsing that file only. The other files' syntax trees, the code scans, the
 /// checklists, and the documents are kept from `open`.
 pub struct Workspace {
+    root: PathBuf,
     sources: Sources,
-    project: Project,
+    /// The last project built. `None` only while `edit` rebuilds, so the old and new
+    /// project are never held together (CT-EFF-004).
+    project: Option<Project>,
     ids: StableIds,
 }
 
@@ -272,15 +284,16 @@ impl Workspace {
         let mut ids = StableIds::default();
         ids.assign(&project.model);
         Ok(Workspace {
+            root: root.to_path_buf(),
             sources,
-            project,
+            project: Some(project),
             ids,
         })
     }
 
     /// The project as last built.
     pub fn project(&self) -> &Project {
-        &self.project
+        (self.project.as_ref()).expect("`edit` always leaves a project behind")
     }
 
     /// The number of model files parsed since `open`, counting those `open` parsed.
@@ -293,9 +306,12 @@ impl Workspace {
     /// yet. Only this file is parsed; the model, trace graph, and problems are rebuilt from
     /// the cached syntax trees of the others.
     ///
-    /// When the rebuilt model breaks the setup, such as a `top_level_definitions` entry in
-    /// `trace.toml` that no longer resolves, the error is returned and the last project is
-    /// kept. The new text is kept too, so the next edit builds on it.
+    /// The old project is dropped before the new one is built, so only one is held at a
+    /// time. When the rebuilt model breaks the setup, such as a `top_level_definitions`
+    /// entry in `trace.toml` that no longer resolves, the error is returned and the last
+    /// project is rebuilt from the file's previous syntax tree, with no parse. The cache
+    /// keeps that previous tree, so it always holds the inputs of the current project, and
+    /// the editor sends the file's text again on its next edit.
     pub fn edit(&mut self, path: &str, text: &str) -> Result<&Project, SetupError> {
         if !path.ends_with(".sysml") {
             return Err(SetupError {
@@ -306,11 +322,24 @@ impl Workspace {
                     .to_string(),
             });
         }
-        self.sources.set(path, text);
-        let project = self.sources.project(&self.project.root)?;
-        self.ids.assign(&project.model);
-        self.project = project;
-        Ok(&self.project)
+        let file = self.sources.parse(path.to_string(), text);
+        let previous = self.sources.put(file);
+        self.project = None;
+        let error = match self.sources.project(&self.root) {
+            Ok(project) => {
+                self.ids.assign(&project.model);
+                return Ok(self.project.insert(project));
+            }
+            Err(error) => error,
+        };
+        match previous {
+            Some(previous) => self.sources.put(previous),
+            None => self.sources.remove(path),
+        };
+        // The cache now holds the inputs that built the last project, so this build
+        // succeeds and gives the same model, and the stable IDs still match it.
+        self.project = Some(self.sources.project(&self.root)?);
+        Err(error)
     }
 
     /// The stable ID of an element of the current model. It stays the same across edits
@@ -479,16 +508,52 @@ mod tests {
     fn a_broken_top_level_definition_keeps_the_last_project() {
         let root = project("top-level");
         let mut ws = Workspace::open(&root).unwrap();
+        let a = ws.stable_id(find(&ws, "Reqs::a"));
+        let links = ws.project().graph.links.clone();
         let err = ws
             .edit("model/reqs.sysml", &REQS.replace("def Top", "def Topp"))
             .err()
             .unwrap();
         assert!(err.to_string().contains("Reqs::Top"), "{err}");
+        // The last good project is rebuilt from the cached tree, not parsed again.
+        assert_eq!(ws.parses(), 3);
         assert!(ws.project().model.find("Reqs::Top").is_some());
+        assert!(
+            ws.project().problems.is_empty(),
+            "{:?}",
+            ws.project().problems
+        );
+        assert_eq!(ws.project().graph.links, links);
+        assert_eq!(ws.element(a), Some(find(&ws, "Reqs::a")));
+        // The broken text is dropped, so an edit to another file builds on the last good
+        // version of this one.
+        let design = DESIGN.replace("part wheel;", "part wheel;\n    part axle;");
+        let p = ws.edit("model/design.sysml", &design).unwrap();
+        assert!(p.model.find("Reqs::Top").is_some());
+        assert!(p.model.find("Design::axle").is_some());
         let p = ws
             .edit("model/reqs.sysml", &REQS.replace("> b :", "> beta :"))
             .unwrap();
         assert!(p.model.find("Reqs::beta").is_some());
+    }
+
+    // @verifies CT-MOD-003
+    #[test]
+    fn a_new_file_that_breaks_the_setup_is_left_out_of_the_last_project() {
+        let root = project("new-file-breaks");
+        let mut ws = Workspace::open(&root).unwrap();
+        let files = ws.project().model.files.clone();
+        let text = "package Reqs { part def Top; }\n";
+        let err = ws.edit("model/a.sysml", text).err().unwrap();
+        assert!(err.to_string().contains("Reqs::Top"), "{err}");
+        assert_eq!(ws.project().model.files, files);
+        assert!(
+            ws.project().problems.is_empty(),
+            "{:?}",
+            ws.project().problems
+        );
+        let p = ws.edit("model/a.sysml", "package A;\n").unwrap();
+        assert!(p.model.files.iter().any(|f| f == "model/a.sysml"));
     }
 
     // @verifies CT-MOD-003
