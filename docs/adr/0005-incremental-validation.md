@@ -31,10 +31,14 @@ edit point got a new ID on a rebuild, and the UI would lose its selection and hi
   avoids tracking which names in other files could resolve differently.
 - **The buffer is the truth for the edit.** Nothing is written to disk. The project's
   `inputs` hash the buffer text, so a report built from the workspace says what it read.
-- **A broken setup keeps the last project.** If the edit makes `trace.toml` fail, such as
-  a `top_level_definitions` entry that no longer resolves, `edit` returns the
-  `SetupError` and keeps the last good project. The new text is kept, so the next edit
-  builds on it.
+- **One project at a time.** `edit` drops the old project before it builds the new one,
+  so the two are never held together (CT-EFF-004).
+- **A broken setup rebuilds the last project.** If the edit makes `trace.toml` fail, such
+  as a `top_level_definitions` entry that no longer resolves, `edit` returns the
+  `SetupError`. It puts the file's previous syntax tree back in the cache and rebuilds the
+  last good project from it, with no parse. The cache therefore always holds the inputs
+  of the current project, so that rebuild cannot fail. The editor sends the file's text
+  again on its next edit.
 - **Stable IDs.** `Workspace::stable_id` gives each element a `u64` that survives a
   rebuild. Its key is its owner's stable ID, its kind, its name (or short name), and how
   many earlier siblings share that kind and name. A top-level element is keyed under its
@@ -55,10 +59,17 @@ edit point got a new ID on a rebuild, and the UI would lose its selection and hi
 ## Consequences
 
 - The workspace keeps every syntax tree in memory. In the perf job's 10,000-requirement
-  project, peak resident memory went from 138 MB to 243 MB on a 4 CPU machine, under the
-  400 MB budget. An edit there in a 10,000-line file took 355 ms. Both are checked by
-  `crates/clew-core/tests/perf.rs`.
-- During an edit the old and new project exist together for a moment. This sets the peak.
+  project, the core's peak resident memory went from 138 MB to 189 MB on a 4 CPU
+  machine. A first version that held the old and new project together during an edit
+  peaked at 243 MB. An edit in a 10,000-line file took 334 to 390 ms over three runs.
+  Both are checked by `crates/clew-core/tests/perf.rs`.
+- **Estimated app total: about 384 MB, under the 400 MB budget with little margin.** The
+  2.6 in-app probe measured 333 MB total PSS for the same project when the core peaked
+  at 138 MB, so the app adds about 195 MB. 195 MB plus the core's 189 MB is 384 MB. This
+  is an estimate. The 2.6 probe, run again after 2.9b moves the app to `Workspace`,
+  gives the real figure.
+- A setup error costs a second rebuild, since the last project was dropped. Such errors
+  are rare while typing, and the rebuild is about as fast as the edit itself.
 - An element gets a new stable ID when it is renamed, changes kind, moves to another owner
   or file, or when a same-named sibling is added before it. Unnamed elements, such as
   `satisfy`, are told apart by order only, so adding one before another shifts their IDs.
