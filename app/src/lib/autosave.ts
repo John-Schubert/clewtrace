@@ -126,3 +126,33 @@ export function saveOnClose(win: CloseRequests, flush: () => Promise<boolean>, f
     failed();
   });
 }
+
+// @implements CT-USE-008, CT-EFF-002, CT-USE-007
+/**
+ * Sets up `saveOnClose` the first time `arm` is called, which the app does on the first
+ * edit. Until then nothing can be unsaved, and the web view does not pay the memory of
+ * its first event listener while the app is idle (CT-EFF-002). `error` hears a listener
+ * that could not be set up, since without it a close would not save.
+ */
+export class CloseGuard {
+  private armed = false;
+
+  constructor(
+    private readonly win: () => CloseRequests,
+    private readonly flush: () => Promise<boolean>,
+    private readonly failed: () => void,
+    private readonly error: (e: unknown) => void,
+  ) {}
+
+  arm(): void {
+    if (this.armed) {
+      return;
+    }
+    this.armed = true;
+    try {
+      saveOnClose(this.win(), this.flush, this.failed).catch(this.error);
+    } catch (e) {
+      this.error(e);
+    }
+  }
+}
