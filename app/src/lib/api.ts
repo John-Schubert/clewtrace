@@ -112,6 +112,12 @@ export interface LinkRow {
   line: number;
 }
 
+// @implements CT-TRC-005, CT-EFF-005
+/** An end reached by following links, how many links away it is, and the link that reached it. */
+export interface ImpactRow extends LinkRow {
+  depth: number;
+}
+
 // @implements CT-EFF-005, CT-USE-007
 export interface ProblemRow extends Problem {
   severity: 'error' | 'warning';
@@ -176,6 +182,17 @@ export function elementLinks(
   limit = MAX_PAGE,
 ): Promise<Page<LinkRow>> {
   return call('element_links', { id, direction, offset, limit });
+}
+
+// @implements CT-TRC-005, CT-EFF-005
+/** One page of what is reachable `upstream` or `downstream` of an element, nearest first. */
+export function elementImpact(
+  id: number,
+  direction: 'upstream' | 'downstream',
+  offset = 0,
+  limit = MAX_PAGE,
+): Promise<Page<ImpactRow>> {
+  return call('element_impact', { id, direction, offset, limit });
 }
 
 // @implements CT-EFF-005, CT-USE-007

@@ -16,7 +16,7 @@ use clew_core::index::{Index, IndexError};
 use clew_core::json::quote;
 use clew_core::model::{Element, ElementId, LIBRARY_PATH, Model};
 use clew_core::report::{Project, RequirementCoverage, project_coverage};
-use clew_core::trace::{End, Link};
+use clew_core::trace::{End, Link, Toward};
 
 // @implements CT-EFF-005, CT-EFF-004
 /// The most rows one page holds. Lists longer than this are virtualized in the UI, which
@@ -301,7 +301,7 @@ impl Loaded {
     ) -> Result<String, AppError> {
         let (element_id, _) = self.get(id)?;
         let graph = &self.project.graph;
-        let links: Vec<(&Link, &End)> = match direction {
+        let mut links: Vec<(&Link, &End)> = match direction {
             "from" => graph.links_from(element_id).map(|l| (l, &l.to)).collect(),
             "to" => graph.links_to(element_id).map(|l| (l, &l.from)).collect(),
             other => {
@@ -312,6 +312,8 @@ impl Loaded {
                 ));
             }
         };
+        // Grouped by kind; the sort is stable, so each group keeps declaration order.
+        links.sort_by_key(|(link, _)| link.kind.verb());
         let rows = (page_of(&links, offset, limit).iter())
             .map(|(link, other)| {
                 Obj::new()
@@ -323,6 +325,44 @@ impl Loaded {
             })
             .collect();
         Ok(page(offset, Some(links.len()), rows))
+    }
+
+    // @implements CT-TRC-005, CT-EFF-005, CT-USE-007
+    /// One page of every end reachable from an element by following links `upstream` (what it
+    /// traces to) or `downstream` (what traces to it), nearest first. Each row carries its
+    /// depth and the link that reached it.
+    pub fn impact(
+        &self,
+        id: usize,
+        direction: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<String, AppError> {
+        let (element_id, _) = self.get(id)?;
+        let toward = match direction {
+            "upstream" => Toward::Upstream,
+            "downstream" => Toward::Downstream,
+            other => {
+                return Err(AppError::new(
+                    format!("unknown impact direction `{other}`"),
+                    "",
+                    "Ask for the impact `upstream` or `downstream` of the element.",
+                ));
+            }
+        };
+        let reached = self.project.graph.reachable(&[element_id], toward);
+        let rows = (page_of(&reached, offset, limit).iter())
+            .map(|r| {
+                Obj::new()
+                    .num("depth", r.depth)
+                    .str("kind", r.link.kind.verb())
+                    .raw("other", &self.end(r.end))
+                    .str("file", &r.link.path)
+                    .num("line", r.link.line)
+                    .end()
+            })
+            .collect();
+        Ok(page(offset, Some(reached.len()), rows))
     }
 
     fn end(&self, end: &End) -> String {
@@ -879,6 +919,67 @@ mod tests {
         assert!(num(&page, "total") > 5);
     }
 
+    // @verifies CT-TRC-005
+    #[test]
+    fn impact_lists_everything_upstream_and_downstream() {
+        let project = loaded();
+        let top = find("PF-00000");
+        let down = ok(&reply(project.impact(top, "downstream", 0, MAX_PAGE)));
+        let rows = down.get("rows").unwrap().items();
+        assert!(!rows.is_empty());
+        assert_eq!(num(&down, "total"), rows.len());
+        // Nearest first, and code ends are included.
+        assert_eq!(num(&rows[0], "depth"), 1);
+        assert!(
+            rows.windows(2)
+                .all(|w| num(&w[0], "depth") <= num(&w[1], "depth"))
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r.get("other").unwrap().get("path").is_some())
+        );
+        // The start is never listed.
+        assert!(rows.iter().all(|r| {
+            r.get("other")
+                .unwrap()
+                .get("id")
+                .map(|_| num(r.get("other").unwrap(), "id"))
+                != Some(top)
+        }));
+
+        let child = find("PF-00007");
+        let up = ok(&reply(project.impact(child, "upstream", 0, MAX_PAGE)));
+        let ups = up.get("rows").unwrap().items();
+        assert!(
+            ups.iter()
+                .any(|r| num(r.get("other").unwrap(), "id") == find("PF-00000"))
+        );
+
+        let page = ok(&reply(project.impact(top, "downstream", 1, 2)));
+        assert_eq!(page.get("rows").unwrap().items().len(), 2);
+        assert_eq!(num(&page, "total"), rows.len());
+    }
+
+    // @verifies CT-USE-007
+    #[test]
+    fn impact_in_an_unknown_direction_is_an_error() {
+        let e = error(&reply(loaded().impact(find("PF-00000"), "sideways", 0, 10)));
+        assert!(text(&e, "what").contains("`sideways`"), "{e:?}");
+        assert!(!text(&e, "help").is_empty());
+    }
+
+    // @verifies CT-TRC-005
+    #[test]
+    fn links_are_grouped_by_kind() {
+        let to = ok(&reply(loaded().links(find("PF-00007"), "to", 0, MAX_PAGE)));
+        let kinds: Vec<&str> = (to.get("rows").unwrap().items().iter())
+            .map(|r| text(r, "kind"))
+            .collect();
+        let mut sorted = kinds.clone();
+        sorted.sort();
+        assert_eq!(kinds, sorted);
+    }
+
     // @verifies CT-USE-007
     #[test]
     fn a_direction_other_than_to_or_from_is_an_error() {
@@ -913,7 +1014,7 @@ mod tests {
         let state = &generated().1;
         let id = find("PF-00100");
         let budget = Duration::from_millis(100);
-        let calls: [(&str, &dyn Fn() -> String); 7] = [
+        let calls: [(&str, &dyn Fn() -> String); 9] = [
             ("status", &|| state.status()),
             ("children", &|| reply(project.children(0, 0, MAX_PAGE))),
             ("element", &|| reply(project.element(id))),
@@ -921,6 +1022,12 @@ mod tests {
                 reply(project.links(id, "from", 0, MAX_PAGE))
             }),
             ("links to", &|| reply(project.links(id, "to", 0, MAX_PAGE))),
+            ("impact up", &|| {
+                reply(project.impact(id, "upstream", 0, MAX_PAGE))
+            }),
+            ("impact down", &|| {
+                reply(project.impact(id, "downstream", 0, MAX_PAGE))
+            }),
             ("problems", &|| reply(Ok(project.problems(0, MAX_PAGE)))),
             ("search", &|| {
                 reply(project.search("system budget", 0, MAX_PAGE))

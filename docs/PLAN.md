@@ -683,12 +683,28 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       - The tree rows show the kind only as a tooltip. A visible kind icon or badge needs
         John's call on design.
       - Arrow keys move the selection and load detail on every press, with no debounce.
-- [ ] **2.7a Traces and impact.** Trace panel for the selected element: links to and from,
+- [x] **2.7a Traces and impact.** Trace panel for the selected element: links to and from,
       grouped by kind, including code tags with file and line; click to follow; back and
       forward. Impact view, upstream and downstream. Probe: select and navigate within
       100 ms in the app.
       Refs: CT-TRC-005, CT-TRC-006, CT-EFF-005
       Model: Sonnet
+      Done: new `element_impact` command (`Loaded::impact`) pages everything upstream or
+      downstream of an element, nearest first, from `TraceGraph::reachable`. `element_links`
+      now sorts by link kind so each kind is a group. `TracePanel` and `TraceList` show
+      "Traces to" and "Traced by" (links, code tags with file and line) and an Impact tab
+      (upstream and downstream), each a paged virtual list. Click or Enter on an element row
+      follows it; code rows are shown but not followable. `lib/history.ts` (`NavHistory`)
+      gives Back and Forward, also in the command palette. `VirtualList` gained `onactivate`
+      (click and Enter, not arrows). The 100 ms check is the Rust test
+      `every_command_answers_within_100_ms` (now includes both impact calls) on the
+      10,000-requirement project, plus a UI test.
+      Follow-ups:
+      - The probe is not yet run inside the built app. The existing app probes need a display
+        (xvfb), and a select-and-navigate step has not been added to `probe.rs`.
+      - Groups are shown as a sort by kind with the kind at the start of each row, not as
+        headings, because rows come in pages. Headings need John's call on design.
+      - Code rows cannot be opened until the source view (2.7b) or the editor.
 - [ ] **2.7b Coverage, search, and source view.** Coverage view (no parent, no
       implementation, no verification, untraced elements) with filters. Search box over the
       FTS5 index with paged results. Read-only source view that opens a code file at the
