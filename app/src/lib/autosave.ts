@@ -2,6 +2,8 @@
 // Autosave for the text editor: after a short pause in typing, when the editor loses focus,
 // and before the window closes. Every save goes through the Rust side's atomic write. The
 // logic lives here so the editor component stays thin.
+import { invoke } from '@tauri-apps/api/core';
+import { listen, TauriEvent } from '@tauri-apps/api/event';
 import { QuietTimer } from './live';
 
 /** How long the text must be still before it is saved, in milliseconds. */
@@ -76,6 +78,35 @@ export class Autosaver {
 /** The part of a Tauri window that `saveOnClose` uses, so tests can pass a fake. */
 export interface CloseRequests {
   onCloseRequested(handler: (event: { preventDefault(): void }) => Promise<void>): Promise<() => void>;
+}
+
+// @implements CT-USE-008
+/** The label of the app's one window, as `tauri.conf.json` names it. */
+export const MAIN_WINDOW = 'main';
+
+// @implements CT-USE-008, CT-EFF-002
+/**
+ * The close requests of the window `label`, from the small event module. `Window` from
+ * `@tauri-apps/api/window` does the same, but loads a large class into the web view's
+ * memory for this one use (CT-EFF-002). The listener targets the window by label, which
+ * is what makes Tauri hold the close until the page closes the window itself; the close
+ * is the same `plugin:window|destroy` call `Window.destroy` makes.
+ */
+export function windowCloseRequests(label: string): CloseRequests {
+  return {
+    onCloseRequested: (handler) =>
+      listen(
+        TauriEvent.WINDOW_CLOSE_REQUESTED,
+        async () => {
+          let prevented = false;
+          await handler({ preventDefault: () => void (prevented = true) });
+          if (!prevented) {
+            await invoke('plugin:window|destroy', { label });
+          }
+        },
+        { target: { kind: 'Window', label } },
+      ),
+  };
 }
 
 // @implements CT-USE-008, CT-USE-007
