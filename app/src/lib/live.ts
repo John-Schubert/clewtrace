@@ -3,7 +3,7 @@
 // Kept out of the editor component so it can be tested as plain TypeScript.
 import type { Diagnostic } from '@codemirror/lint';
 import type { Text } from '@codemirror/state';
-import type { DiagnosticRow } from './api';
+import { ClewError, type DiagnosticRow } from './api';
 
 /** How long the text must be still before it is sent for checking, in milliseconds. */
 export const QUIET_MS = 300;
@@ -59,6 +59,23 @@ export class Refresher {
 
   get size(): number {
     return this.listeners.size;
+  }
+}
+
+/**
+ * Whether the element with this ID is still in the model after an edit. Only the Rust
+ * side's answer that it is gone counts; a call that failed some other way is thrown, so a
+ * broken connection does not clear the user's selection.
+ */
+export async function stillThere(id: number, detail: (id: number) => Promise<unknown>): Promise<boolean> {
+  try {
+    await detail(id);
+    return true;
+  } catch (e) {
+    if (e instanceof ClewError) {
+      return false;
+    }
+    throw e;
   }
 }
 

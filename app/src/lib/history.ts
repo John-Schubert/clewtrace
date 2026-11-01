@@ -41,6 +41,22 @@ export class NavHistory {
     return this.canForward ? this.trail[++this.at] : undefined;
   }
 
+  /**
+   * Steps back or forward to the nearest element that still exists, going past those that
+   * `exists` says are gone (an edit removed or renamed them). Returns that element, or
+   * undefined, and stays where it is, when none is left in that direction.
+   */
+  async step(direction: 'back' | 'forward', exists: (id: number) => Promise<boolean>): Promise<number | undefined> {
+    const by = direction === 'back' ? -1 : 1;
+    for (let at = this.at + by; at >= 0 && at < this.trail.length; at += by) {
+      if (await exists(this.trail[at])) {
+        this.at = at;
+        return this.trail[at];
+      }
+    }
+    return undefined;
+  }
+
   clear(): void {
     this.trail = [];
     this.at = -1;

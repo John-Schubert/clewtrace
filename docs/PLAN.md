@@ -846,9 +846,10 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
         by an edit or a save. File watching in 2.10b should update it.
       - The coverage and search views are not refreshed while open; they fetch fresh when the
         user switches to them, which is the only time the editor is not in front.
-      - ADR-0005 says the UI drops a selection whose ID is gone. The detail view shows the
-        "no element has ID" error instead, with a hint to pick the element again, and the
-        history keeps the entry. Say if you would rather it clear the selection.
+      - John's review of PR 46 asked for the ADR-0005 behavior: when an edit renames or removes
+        the selected element, the selection is cleared with the note "The selected element was
+        renamed or removed", and Back and Forward skip history entries whose IDs are gone
+        (`NavHistory.step`, `stillThere`).
       - A discarded edit is reverted in the core when the user discards and opens another
         file. Closing the window, or opening another project, with unsaved edits still loses
         them (2.10a).
