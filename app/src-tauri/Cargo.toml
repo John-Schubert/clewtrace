@@ -22,7 +22,7 @@ default = []
 perf-probe = ["tauri/custom-protocol"]
 
 [dependencies]
-clew-core = { version = "0.1.0", path = "../../crates/clew-core" }
+clew-core = { version = "0.2.0", path = "../../crates/clew-core" }
 tauri = { version = "2.12.4", default-features = false, features = ["wry"] }
 rfd = { version = "0.17.2", default-features = false, features = ["gtk3"] }
 
