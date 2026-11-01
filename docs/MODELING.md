@@ -62,6 +62,28 @@ current one or a parent, that holds a `trace.toml` file or a `.clewtrace` folder
 as the project root. When there is none, they use the current folder. `clew notices` is the
 exception: it runs from the repository root, where `cargo` and `app/package-lock.json` are.
 
+## Files the app writes
+
+The app saves a `.sysml` file by writing a hidden temp file next to it, named like
+`.requirements.sysml.1234.clewtmp`, then renaming it over the file. A crash or power loss
+leaves the old content or the new, never a mix. If the app is killed during a save, the temp
+file stays behind. It is never read as a model file, and the app removes it the next time it
+opens the project, once it is a minute old.
+
+Add these lines to the project's `.gitignore`, so neither the index nor a leftover temp file
+counts as a change:
+
+```
+.clewtrace/
+*.clewtmp
+```
+
+While a project is open, the app watches its folder for changes made elsewhere, such as a
+`git pull` or another editor, on Linux and macOS. A file with no unsaved edits reloads by
+itself. If a file with unsaved edits changes on disk, the app stops saving it and asks which
+version to keep. On Windows, reopen the project to see changes made outside the app.
+If Linux runs out of file watches, the app says so and shows how to raise the limit.
+
 ## Coverage and impact
 
 Run these from the project root, where `trace.toml` lives. Both read every `.sysml` file

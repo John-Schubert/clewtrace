@@ -1,5 +1,5 @@
 <script lang="ts">
-  // @begin CT-MOD-004, CT-MOD-003, CT-USE-003, CT-USE-008, CT-USE-007, CT-EFF-005, CT-EFF-008
+  // @begin CT-MOD-004, CT-MOD-003, CT-USE-003, CT-USE-008, CT-USE-007, CT-EFF-005, CT-EFF-008, CT-USE-009
   // The text editor for one .sysml file. The Rust side serves the text and keywords and
   // saves it; the CodeMirror setup is in editor.ts. Edits are saved by themselves after a
   // short pause and when the editor loses focus (autosave.ts), or at once with Save or
@@ -41,6 +41,9 @@
   let saving = $state(false);
   let failure = $state('');
   let notice = $state('');
+  // While the user is asked whether to keep their edits or take the file as it changed on
+  // disk, nothing is saved, so the answer is theirs and not the autosave's.
+  let held = false;
   let current = untrack(() => path);
   // Live validation. `edits` counts changes to the text, so a reply for older text shows no
   // markers. One check is out at a time; typing during it asks for another after it ends.
@@ -63,7 +66,7 @@
   // Saves the whole text. Resolves true when it was written. Only the autosaver calls it,
   // so one save runs at a time.
   async function write(): Promise<boolean> {
-    if (!editor || saving) {
+    if (!editor || saving || held) {
       return false;
     }
     const doc = editor.state.doc;
@@ -121,6 +124,29 @@
   // Saves now, after any save already running. Resolves true when nothing is left unsaved.
   export function save(): Promise<boolean> {
     return autosave.flush();
+  }
+
+  // The file changed on disk while it has unsaved edits: stop saving until the user says
+  // which text to keep.
+  export function hold() {
+    held = true;
+    autosave.cancel();
+  }
+
+  // The user answered. Keeping the edits saves them over the disk version after the pause;
+  // otherwise the host reloads the disk text.
+  export function release(keep: boolean) {
+    held = false;
+    if (keep && dirty) {
+      autosave.changed();
+    }
+  }
+
+  // Takes the file's text from disk again, after it changed there, and keeps the cursor on
+  // its line. The undo history starts afresh, as on open.
+  export function reloadFromDisk(): Promise<void> {
+    const at = editor ? editor.state.doc.lineAt(editor.state.selection.main.head).number : 1;
+    return load(current, at);
   }
 
   // @end

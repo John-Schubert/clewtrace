@@ -205,6 +205,27 @@ export function waitForProject(): Promise<ProjectStatus> {
   return invoke<ProjectStatus>('wait_for_project');
 }
 
+// @implements CT-EFF-008, CT-EFF-007, CT-USE-009
+/**
+ * What file events did to the open project since the last wait: the files whose new
+ * content it now uses, the files with unsaved edits that changed on disk, trouble while
+ * watching, and the new counts, or null when nothing was rebuilt. `watching` is false when
+ * the project is not watched, such as on Windows until task 2.10c.
+ */
+export interface DiskNews {
+  watching: boolean;
+  reloaded: string[];
+  conflicts: string[];
+  problems: Problem[];
+  summary: ProjectSummary | null;
+}
+
+// @implements CT-EFF-008, CT-USE-009
+/** Resolves when file events change the open project, with what changed. */
+export function waitForDiskChange(): Promise<DiskNews> {
+  return invoke<DiskNews>('wait_for_disk_change');
+}
+
 // @implements CT-EFF-005
 /** One page of the children of element `parent` in the model tree; 0 is the root. */
 export function treeChildren(parent: number, offset = 0, limit = MAX_PAGE): Promise<Page<TreeRow>> {

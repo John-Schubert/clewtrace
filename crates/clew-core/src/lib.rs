@@ -46,3 +46,6 @@ pub mod scan;
 // @begin CT-TRC-002, CT-TRC-006
 pub mod trace;
 // @end
+// @begin CT-EFF-008, CT-EFF-007, CT-USE-009
+pub mod watch;
+// @end

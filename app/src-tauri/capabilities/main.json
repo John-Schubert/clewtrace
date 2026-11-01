@@ -10,6 +10,7 @@
     "core:window:allow-destroy",
     "allow-project-status",
     "allow-wait-for-project",
+    "allow-wait-for-disk-change",
     "allow-tree-children",
     "allow-element-detail",
     "allow-element-links",

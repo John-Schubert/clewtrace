@@ -2,6 +2,8 @@
 # Build output and local caches that never belong in the public source.
 /target/
 /.clewtrace/
+# Temp files of a save the app was killed during (docs/MODELING.md).
+*.clewtmp
 node_modules/
 /app/dist/
 /app/src-tauri/target/

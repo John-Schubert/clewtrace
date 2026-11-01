@@ -59,6 +59,8 @@ distributed.
   | cssparser, cssparser-macros, dtoa-short, selectors | MPL-2.0 | build-only | tauri-utils -> dom_query |
   | option-ext | MPL-2.0 | shipped | tauri, wry -> dirs -> dirs-sys |
   | target-lexicon | Apache-2.0 WITH LLVM-exception | build-only | Tauri's Linux GTK sys crates |
+  | notify | CC0-1.0 | shipped | clew-core, Linux and macOS only (task 2.10b) |
+  | inotify, inotify-sys | ISC | shipped | clew-core -> notify, Linux only (task 2.10b) |
   | WiX Toolset 3 (CI tool) | MS-RL | build-only | tauri-cli, MSI bundling |
 
 - **Exceptions approved, pending their dependency** (John, 2026-10-31, decisions on PR #27).
@@ -68,8 +70,6 @@ distributed.
   | Crate | License | Scope | Task | Notes |
   | --- | --- | --- | --- | --- |
   | ed25519-dalek, curve25519-dalek, subtle | BSD-3-Clause | shipped | 3.9 | Per-crate only, not the whole license. Default features off, verify only |
-  | notify | CC0-1.0 | shipped | 2.10b | Version 8.2.1 (9.x is a release candidate) |
-  | inotify, inotify-sys | ISC | shipped | 2.10b | Linux only, pulled in by notify |
   | libfuzzer-sys | NCSA (with MIT OR Apache-2.0) | build-only | 3.8 | Fuzz job only |
 
 - **Test inputs under other licenses:** the OMG SysML v2 example models (EPL-2.0) may be

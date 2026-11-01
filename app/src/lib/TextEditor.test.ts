@@ -15,7 +15,14 @@ import type { EditorView } from '@codemirror/view';
 import * as api from './api';
 import TextEditor from './TextEditor.svelte';
 
-type Instance = { view: () => EditorView | undefined; save: () => Promise<boolean>; goto: (line: number) => void };
+type Instance = {
+  view: () => EditorView | undefined;
+  save: () => Promise<boolean>;
+  goto: (line: number) => void;
+  reloadFromDisk: () => Promise<void>;
+  hold: () => void;
+  release: (keep: boolean) => void;
+};
 let instance: Instance | undefined;
 afterEach(async () => {
   if (instance) unmount(instance as unknown as Record<string, unknown>);
@@ -311,6 +318,56 @@ describe('TextEditor live validation', () => {
     await settle();
     expect(api.validateSource).toHaveBeenCalledTimes(2);
     expect(api.validateSource).toHaveBeenLastCalledWith('a.sysml', 'package A {\n  part x;\n  part y;\n}\nz');
+  });
+});
+
+// @verifies CT-USE-009, CT-USE-008
+describe('TextEditor and changes on disk', () => {
+  // @verifies CT-USE-009
+  it('reloads its text from disk and keeps the cursor line', async () => {
+    const editor = await open({ line: 3 });
+    vi.mocked(api.sourceText).mockResolvedValue({ path: 'a.sysml', text: 'package B {\n  part x;\n  part z;\n}\n' });
+    await editor.reloadFromDisk();
+    await settle();
+    const view = editor.view()!;
+    expect(view.state.doc.toString()).toContain('package B');
+    expect(view.state.doc.lineAt(view.state.selection.main.head).number).toBe(3);
+    expect(document.body.textContent).not.toContain('Unsaved changes');
+  });
+
+  // @verifies CT-USE-009, CT-USE-008
+  it('saves nothing while the user is asked which text to keep', async () => {
+    const editor = await open({ autosaveMs: 20 });
+    vi.mocked(api.saveSource).mockResolvedValue({ path: 'a.sysml', bytes: 1 });
+    const view = editor.view()!;
+    type(view, 'mine');
+    editor.hold();
+    view.contentDOM.dispatchEvent(new FocusEvent('blur'));
+    type(view, '!');
+    await wait(50);
+    await settle();
+    expect(api.saveSource).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain('could not');
+    // Keeping the edits saves them over the disk version after the pause.
+    editor.release(true);
+    await wait(50);
+    await settle();
+    expect(api.saveSource).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.saveSource).mock.calls[0][1].endsWith('mine!')).toBe(true);
+  });
+
+  // @verifies CT-USE-009
+  it('takes the disk text after the hold when the user chooses it', async () => {
+    const editor = await open({ autosaveMs: 20 });
+    type(editor.view()!, 'mine');
+    editor.hold();
+    vi.mocked(api.sourceText).mockResolvedValue({ path: 'a.sysml', text: 'package Theirs;\n' });
+    editor.release(false);
+    await editor.reloadFromDisk();
+    await wait(50);
+    await settle();
+    expect(editor.view()!.state.doc.toString()).toBe('package Theirs;\n');
+    expect(api.saveSource).not.toHaveBeenCalled();
   });
 });
 // @end
