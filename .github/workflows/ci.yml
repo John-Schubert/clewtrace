@@ -378,18 +378,23 @@ jobs:
 
       # Fails (exit 1) over 250 MB in total, over 105 MB for the app process, or with no web
       # view process counted. WKWebView runs its processes outside the app's process tree, so
-      # they are summed by name; a runner with no other web content has only the app's.
+      # they are summed by name. WebKit processes already running before the app starts
+      # belong to another client on the runner, so they are listed and left out; every
+      # process that starts after the app counts, whoever started it.
       # @verifies CT-EFF-002, CT-EFF-010
       - name: Idle memory (macOS)
         if: runner.os == 'macOS'
         run: |
+          webkit='com\.apple\.WebKit\.(WebContent|Networking|GPU)'
+          before=$(ps -axo pid=,comm= | grep -E "$webkit" | awk '{print $1}' || true)
+          if [ -n "$before" ]; then echo "WebKit processes running before the app, left out:"; ps -o pid=,rss=,comm= -p "$(echo $before | tr ' ' ',')"; fi
           target/release/clewtrace &
           pid=$!
           sleep 10
           app_kb=$(ps -o rss= -p "$pid")
-          web=$(ps -axo rss=,comm= | grep -E 'com\.apple\.WebKit\.(WebContent|Networking|GPU)' || true)
+          web=$(ps -axo pid=,rss=,comm= | grep -E "$webkit" | awk -v before=" $(echo $before) " 'index(before, " " $1 " ") == 0' || true)
           echo "$web"
-          web_kb=$(echo "$web" | awk '{s+=$1} END{print s+0}')
+          web_kb=$(echo "$web" | awk '{s+=$2} END{print s+0}')
           kill "$pid"
           total=$(( (app_kb + web_kb) * 1024 ))
           echo "idle memory: $(( total / 1000000 )) MB (app $app_kb KB, web view $web_kb KB)"
@@ -442,10 +447,16 @@ jobs:
           cargo llvm-cov --version
 
       # bash with pipefail, so a failed test run still fails the step through tee.
+      # The cache restores target/llvm-cov-target with test binaries of every workspace
+      # member, the app's included, built from the commit that saved it. cargo-llvm-cov
+      # reports on every workspace binary it finds there, so a stale app binary adds the
+      # old clew-core code as unrun lines. Cleaning the workspace artifacts first keeps the
+      # cached dependencies and measures only what this commit builds and runs.
       - name: Test coverage
         shell: bash
         run: |
           status=0
+          cargo llvm-cov clean --workspace
           cargo llvm-cov --locked -p clew-core -p clew-cli --summary-only \
             --fail-under-lines "$MIN_LINE_COVERAGE" | tee "$RUNNER_TEMP/coverage.txt" || status=$?
           lines=$(awk '$1 == "TOTAL" { print $10 }' "$RUNNER_TEMP/coverage.txt")

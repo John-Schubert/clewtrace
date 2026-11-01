@@ -16,11 +16,16 @@ import TextEditor from './TextEditor.svelte';
 
 type Instance = { view: () => EditorView | undefined; save: () => Promise<boolean>; goto: (line: number) => void };
 let instance: Instance | undefined;
-afterEach(() => {
+afterEach(async () => {
   if (instance) unmount(instance as unknown as Record<string, unknown>);
   instance = undefined;
   document.body.innerHTML = '';
   vi.clearAllMocks();
+  // A focus change makes CodeMirror check focus again on a 10 ms timer, which outlives
+  // the editor. If it fires after the next test focuses its own editor, happy-dom throws
+  // while it looks for the focused element across the two shadow roots. Waiting longer
+  // than the timer lets it fire before the next test starts.
+  await new Promise((resolve) => setTimeout(resolve, 20));
 });
 
 const settle = async () => {
