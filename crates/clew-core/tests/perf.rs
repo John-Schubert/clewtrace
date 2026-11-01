@@ -17,7 +17,8 @@ use std::time::{Duration, Instant};
 
 use clew_core::config::TraceConfig;
 use clew_core::index::Index;
-use clew_core::report::{load_project, project_coverage};
+use clew_core::live::Workspace;
+use clew_core::report::{Project, load_project, project_coverage};
 use clew_core::reqs::read_requirements;
 use generate::generate;
 
@@ -29,7 +30,13 @@ fn project_dir(name: &str) -> PathBuf {
         .join(name)
 }
 
-// @verifies CT-EFF-009, CT-EFF-004, CT-EFF-007
+// @verifies CT-MOD-003
+/// The model file the live edit changes, and the number of lines it grows to first.
+const LIVE_FILE: &str = "model/reqs/r000.sysml";
+// @verifies CT-MOD-003
+const LIVE_LINES: usize = 10_000;
+
+// @verifies CT-EFF-009, CT-EFF-004, CT-EFF-007, CT-MOD-003
 /// What loading and indexing a project measured.
 struct Measured {
     requirements: usize,
@@ -40,14 +47,20 @@ struct Measured {
     search: Duration,
     reparsed: usize,
     incremental: Duration,
+    /// Time to validate one edit in a `LIVE_LINES`-line model file and recount coverage.
+    live: Duration,
+    /// Model files parsed for that edit.
+    live_reparsed: usize,
     /// Peak resident memory in bytes, where the OS reports it.
     peak: Option<u64>,
 }
 
-// @verifies CT-EFF-009, CT-EFF-004, CT-EFF-007
+// @verifies CT-EFF-009, CT-EFF-004, CT-EFF-007, CT-MOD-003
 /// Indexes the project under `root`, loads its model, trace graph, and coverage, searches
-/// it, then changes one file and indexes again. Checks that the project is complete: no
-/// problems, and every requirement has a parent, an implementation, and a verification.
+/// it, then opens it for live validation and edits one model file, then changes one file
+/// and indexes again. Checks that the project is complete: no problems, and every
+/// requirement has a parent, an implementation, and a verification. Peak memory covers the
+/// loaded project and, after it is dropped, the live workspace, as the app holds it.
 fn measure(root: &Path) -> Measured {
     reset_peak();
     let started = Instant::now();
@@ -75,6 +88,9 @@ fn measure(root: &Path) -> Measured {
     let hits = index.search("budget", 50, 0).unwrap();
     let search = started.elapsed();
     assert_eq!(hits.len(), 50.min(found.requirements.len()));
+    let (requirements, links) = (found.requirements.len(), project.graph.links.len());
+    drop((found, project));
+    let (live, live_reparsed) = live_edit(root);
     let peak = peak_memory();
 
     let changed = root.join("model/reqs/r000.sysml");
@@ -84,16 +100,64 @@ fn measure(root: &Path) -> Measured {
     let again = index.update().unwrap();
     let incremental = started.elapsed();
     Measured {
-        requirements: found.requirements.len(),
-        links: project.graph.links.len(),
+        requirements,
+        links,
         files: stats.files,
         index: index_time,
         load,
         search,
         reparsed: again.parsed,
         incremental,
+        live,
+        live_reparsed,
         peak,
     }
+}
+
+// @verifies CT-MOD-003, CT-EFF-007, CT-EFF-004
+/// Opens the project under `root` for live validation, grows `LIVE_FILE` to `LIVE_LINES`
+/// lines in the editor, then times one edit that breaks a name near its end. Checks the
+/// problem names the file, line, and column. Returns the time and the files parsed.
+fn live_edit(root: &Path) -> (Duration, usize) {
+    let mut workspace = Workspace::open(root).unwrap();
+    let text = fs::read_to_string(root.join(LIVE_FILE)).unwrap();
+    let body = text.strip_suffix("}\n").unwrap();
+    let mut grown = body.to_string();
+    let mut last = 0;
+    while grown.lines().count() + 4 <= LIVE_LINES {
+        last += 1;
+        write!(
+            grown,
+            "    part filler{last} {{\n        attribute weight;\n    }}\n"
+        )
+        .unwrap();
+    }
+    grown.push_str("}\n");
+    let clean = |p: &Project| assert!(p.problems.is_empty(), "{:?}", p.problems.first());
+    clean(workspace.edit(LIVE_FILE, &grown).unwrap());
+    assert!(grown.lines().count() >= LIVE_LINES - 4);
+
+    let line = grown.lines().count() - 3;
+    let broken = grown.replace(
+        &format!("part filler{last} {{"),
+        &format!("part filler{last} : Missing {{"),
+    );
+    let parses = workspace.parses();
+    let started = Instant::now();
+    let project = workspace.edit(LIVE_FILE, &broken).unwrap();
+    let _ = project_coverage(project);
+    let elapsed = started.elapsed();
+    let place = format!("{LIVE_FILE}:{line}:");
+    assert_eq!(project.problems.len(), 1, "{:?}", project.problems);
+    assert!(
+        project.problems[0].starts_with(&place),
+        "{:?}",
+        project.problems
+    );
+    assert!(project.problems[0].contains("Missing"));
+    let reparsed = workspace.parses() - parses;
+    clean(workspace.edit(LIVE_FILE, &text).unwrap());
+    (elapsed, reparsed)
 }
 
 // @verifies CT-EFF-009, CT-EFF-004
@@ -124,9 +188,10 @@ struct Budget {
     passed: bool,
 }
 
-// @verifies CT-EFF-009, CT-EFF-004, CT-EFF-006, CT-EFF-007
+// @verifies CT-EFF-009, CT-EFF-004, CT-EFF-006, CT-EFF-007, CT-MOD-003
 /// The budgets the measurements are checked against. CT-EFF-004 is measured on the core
-/// library: index, model, trace graph, and coverage, without the desktop app.
+/// library: index, model, trace graph, coverage, and the live workspace, without the
+/// desktop app.
 fn budgets(m: &Measured) -> Vec<Budget> {
     let ms = |d: Duration| format!("{} ms", d.as_millis());
     let mut list = vec![
@@ -150,6 +215,20 @@ fn budgets(m: &Measured) -> Vec<Budget> {
             measured: m.reparsed.to_string(),
             limit: "1",
             passed: m.reparsed == 1,
+        },
+        Budget {
+            id: "CT-MOD-003",
+            what: "validate an edit in a 10,000-line file",
+            measured: ms(m.live),
+            limit: "1000 ms",
+            passed: m.live <= Duration::from_secs(1),
+        },
+        Budget {
+            id: "CT-EFF-007",
+            what: "files re-parsed for a live edit",
+            measured: m.live_reparsed.to_string(),
+            limit: "1",
+            passed: m.live_reparsed == 1,
         },
     ];
     if let Some(peak) = m.peak {
@@ -190,7 +269,7 @@ fn judge(budgets: &[Budget], phase_of: impl Fn(&str) -> u8, current: i64) -> (St
     (table, ok)
 }
 
-// @verifies CT-EFF-009, CT-EFF-004
+// @verifies CT-EFF-009, CT-EFF-004, CT-EFF-007, CT-MOD-003
 #[test]
 fn generates_the_requested_requirements_and_links() {
     let root = project_dir("small");
@@ -200,6 +279,7 @@ fn generates_the_requested_requirements_and_links() {
     // Three files of each kind, plus perf.sysml.
     assert_eq!(m.files, 7);
     assert_eq!(m.reparsed, 1);
+    assert_eq!(m.live_reparsed, 1);
 }
 
 // @verifies CT-EFF-009, CT-EFF-004
@@ -249,10 +329,12 @@ fn budgets_cover_memory_only_where_it_is_measured() {
         search: Duration::ZERO,
         reparsed: 2,
         incremental: Duration::ZERO,
+        live: Duration::from_millis(1_001),
+        live_reparsed: 1,
         peak: None,
     };
     let passed: Vec<bool> = budgets(&m).iter().map(|b| b.passed).collect();
-    assert_eq!(passed, [false, true, false]);
+    assert_eq!(passed, [false, true, false, false, true]);
     let m = Measured {
         peak: Some(500_000_000),
         ..m
@@ -261,7 +343,7 @@ fn budgets_cover_memory_only_where_it_is_measured() {
     assert_eq!((last.measured.as_str(), last.passed), ("500 MB", false));
 }
 
-// @verifies CT-EFF-009, CT-EFF-004, CT-EFF-006, CT-EFF-007
+// @verifies CT-EFF-009, CT-EFF-004, CT-EFF-006, CT-EFF-007, CT-MOD-003
 #[test]
 #[ignore = "full size; run by the perf CI job in release mode"]
 fn budgets_hold_at_10000_requirements_and_50000_links() {
@@ -280,6 +362,10 @@ fn budgets_hold_at_10000_requirements_and_50000_links() {
     );
     println!("  full index: {} ms", m.index.as_millis());
     println!("  incremental index: {} ms", m.incremental.as_millis());
+    println!(
+        "  live edit in a {LIVE_LINES}-line file: {} ms",
+        m.live.as_millis()
+    );
 
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let config = TraceConfig::read(&repo.join("trace.toml")).unwrap();

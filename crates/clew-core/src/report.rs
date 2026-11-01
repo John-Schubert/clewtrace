@@ -18,12 +18,12 @@ use std::path::{Path, PathBuf};
 use crate::check::{self, SetupError};
 use crate::config::{TOP_LEVEL_DEFINITIONS, TraceConfig, Waiver};
 use crate::index;
+use crate::live;
 use crate::model::{ElementId, ElementKind, LIBRARY_PATH, Model, Role};
-use crate::parse::ast::{Kind, Member, UsageKind};
-use crate::parse::parser;
+use crate::parse::ast::{Kind, UsageKind};
 use crate::reproduce;
-use crate::reqs::{self, Requirement};
-use crate::scan::{self, FileScan, TagKind};
+use crate::reqs::Requirement;
+use crate::scan::TagKind;
 use crate::trace::{End, LinkKind, Toward, TraceGraph};
 
 // @implements CT-DEV-003, CT-TRC-004
@@ -96,76 +96,13 @@ pub struct Project {
 /// that `clew check --self` would report as excluded, untraceable, or unreadable add no
 /// links.
 pub fn load_project(root: &Path) -> Result<Project, SetupError> {
-    let config = check::read_config(root)?;
-    let paths = index::sysml_files(root).map_err(|e| SetupError {
-        path: String::new(),
-        line: 0,
-        message: e.to_string(),
-    })?;
-    let mut problems = Vec::new();
-    let mut hashed = Vec::new();
-    if let Ok(loaded) = index::read_file(&root.join(check::TRACE_CONFIG)) {
-        let sha256 = reproduce::text_sha256(&loaded.text);
-        hashed.push((check::TRACE_CONFIG.to_string(), sha256));
-    }
-    let mut parsed: Vec<(&str, Vec<Member>)> = Vec::new();
-    for path in &paths {
-        match index::read_file(&root.join(path)) {
-            Ok(loaded) => {
-                let result = parser::parse(&loaded.text);
-                problems.extend(result.errors.iter().map(|e| e.render(path)));
-                parsed.push((path, result.members));
-                hashed.push((path.clone(), reproduce::text_sha256(&loaded.text)));
-            }
-            Err(message) => problems.push(index::unreadable(path, &message)),
-        }
-    }
-    let inputs: Vec<(&str, &[Member])> = (parsed.iter())
-        .map(|(path, members)| (*path, members.as_slice()))
-        .collect();
-    let defaults = reqs::PhaseDefaults::new(parsed.iter().map(|(_, m)| m.as_slice()));
-    let requirements = (parsed.iter())
-        .flat_map(|(_, members)| reqs::requirements_with_defaults(members, &defaults))
-        .collect();
-    let model = Model::build(&inputs);
-    let (warnings, errors): (Vec<_>, Vec<_>) = model.errors.iter().partition(|e| e.warning);
-    problems.extend(errors.iter().map(ToString::to_string));
-    let warnings = warnings.iter().map(ToString::to_string).collect();
-    let top_level = top_level_definitions(&model, &config)?;
-    let mut scans = Vec::new();
-    for path in check::source_files(root, &config)? {
-        let excluded = (config.excludes.iter()).any(|e| check::glob_matches(&e.path, &path));
-        let syntax = check::syntax_for(&config, &path).filter(|_| !excluded);
-        let loaded = syntax.and_then(|_| index::read_file(&root.join(&path)).ok());
-        if let (Some(syntax), Some(loaded)) = (syntax, loaded) {
-            scans.push((path.clone(), scan::scan_source(syntax, &loaded.text)));
-            hashed.push((path, reproduce::text_sha256(&loaded.text)));
-        }
-    }
-    let code: Vec<(&str, &FileScan)> = (scans.iter()).map(|(p, s)| (p.as_str(), s)).collect();
-    let graph = TraceGraph::build(&model, &code);
-    problems.extend(graph.problems.iter().map(ToString::to_string));
-    let checklists = read_checklists(root, &mut problems, &mut hashed);
-    let documents = read_documents(root, &mut problems, &mut hashed);
-    Ok(Project {
-        root: root.to_path_buf(),
-        model,
-        graph,
-        problems,
-        warnings,
-        inputs: hashed,
-        top_level,
-        requirements,
-        checklists,
-        documents,
-        waivers: config.waivers,
-    })
+    live::Sources::read(root)?.project(root)
 }
 
 // @implements CT-DEV-003, CT-TRC-004, CT-TRC-009, CT-USE-007
 /// Reads the `.md` checklists in `VERIFICATION_DIR` in name order, adding each file read to
 /// `hashed` and each unreadable one to `problems`. A missing folder holds no checklists.
-fn read_checklists(
+pub(crate) fn read_checklists(
     root: &Path,
     problems: &mut Vec<String>,
     hashed: &mut Vec<(String, Vec<u8>)>,
@@ -199,7 +136,7 @@ fn read_checklists(
 /// Reads the Markdown files at the root and, at any depth, under `DOCS_DIR`, except those in
 /// `VERIFICATION_DIR`, in path order. Each one with an `@implements` tag in its first comment
 /// is a document, and is added to `hashed`. Each unreadable one is added to `problems`.
-fn read_documents(
+pub(crate) fn read_documents(
     root: &Path,
     problems: &mut Vec<String>,
     hashed: &mut Vec<(String, Vec<u8>)>,
@@ -268,7 +205,7 @@ pub fn first_comment_tag(text: &str, kind: TagKind) -> Option<(usize, Vec<String
 // @implements CT-TRC-004, CT-USE-007
 /// Resolves `[coverage] top_level_definitions` in `trace.toml`. Each entry must be the
 /// qualified name of a requirement definition.
-fn top_level_definitions(
+pub(crate) fn top_level_definitions(
     model: &Model,
     config: &TraceConfig,
 ) -> Result<Vec<ElementId>, SetupError> {
