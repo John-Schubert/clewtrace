@@ -59,3 +59,4 @@ Go through this list for every release, before publishing the draft, and record 
 | Date | Tag | Result | Checked by |
 | --- | --- | --- | --- |
 | 2026-10-21 | v0.1.0 | Draft built from the signed tag. Checksums match. The MSI installed and ran on the Windows 10 reference laptop. Published 2026-10-21. | John (laptop), Claude (checksums, notices) |
+| 2026-11-01 | v0.2.0 | Draft built from the signed tag by the `release` run; all jobs passed. Checksums match. All four installers are 8.6 MB or smaller. Notices checks pass. No AppImage. Not published. Laptop result: pending John. | Claude (checksums, notices), John (laptop, pending) |
