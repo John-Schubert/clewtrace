@@ -77,16 +77,29 @@ describe('DetailView', () => {
       id: 7, kind: 'package', name: 'Reqs', shortName: null, qualifiedName: 'Reqs', file: 'm.sysml', line: 4, column: 1,
       owner: null, children: 2, linksFrom: 0, linksTo: 0, requirement: null,
     });
-    instance = mount(DetailView, { target: document.body, props: { selection: { kind: 'element', id: 7 } } });
+    instance = mount(DetailView, { target: document.body, props: { selection: { kind: 'element', id: 7 }, onopen: vi.fn() } });
     await settle();
     expect(document.body.textContent).toContain('Qualified name');
     expect(document.body.textContent).toContain('m.sysml:4:1');
   });
 
+  // @verifies CT-TRC-004
+  it('opens the file of the selected element in the source view at its line', async () => {
+    vi.mocked(api.elementDetail).mockResolvedValue({
+      id: 7, kind: 'package', name: 'Reqs', shortName: null, qualifiedName: 'Reqs', file: 'm.sysml', line: 4, column: 1,
+      owner: null, children: 2, linksFrom: 0, linksTo: 0, requirement: null,
+    });
+    const onopen = vi.fn();
+    instance = mount(DetailView, { target: document.body, props: { selection: { kind: 'element', id: 7 }, onopen } });
+    await settle();
+    (document.querySelector('p button') as HTMLButtonElement).click();
+    expect(onopen).toHaveBeenCalledWith('m.sysml', 4);
+  });
+
   // @verifies CT-USE-007
   it('shows a selected problem with its place and fix', async () => {
     const problem: api.ProblemRow = { severity: 'warning', what: 'no verification', where: 'r.sysml:9:3', help: 'Add a verify link' };
-    instance = mount(DetailView, { target: document.body, props: { selection: { kind: 'problem', problem } } });
+    instance = mount(DetailView, { target: document.body, props: { selection: { kind: 'problem', problem }, onopen: vi.fn() } });
     await settle();
     expect(document.body.textContent).toContain('r.sysml:9:3');
     expect(document.body.textContent).toContain('Add a verify link');

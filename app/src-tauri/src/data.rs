@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 
@@ -15,13 +15,28 @@ use clew_core::check::{SetupError, TRACE_CONFIG};
 use clew_core::index::{Index, IndexError};
 use clew_core::json::quote;
 use clew_core::model::{Element, ElementId, LIBRARY_PATH, Model};
-use clew_core::report::{Project, RequirementCoverage, project_coverage};
+use clew_core::report::{Project, RequirementCoverage, fully_waived, project_coverage};
 use clew_core::trace::{End, Link, Toward};
 
 // @implements CT-EFF-005, CT-EFF-004
 /// The most rows one page holds. Lists longer than this are virtualized in the UI, which
 /// asks for the page it shows.
 pub const MAX_PAGE: usize = 200;
+
+// @implements CT-TRC-004
+/// The coverage filters, in the order the UI lists them. `untraced` lists elements traced
+/// to no requirement; the others list requirements with that gap.
+pub const GAP_FILTERS: [&str; 4] = [
+    "no-parent",
+    "no-implementation",
+    "no-verification",
+    "untraced",
+];
+
+// @implements CT-TRC-004, CT-EFF-005
+/// The largest file the source view opens. A bigger one is refused rather than streamed,
+/// because the view is a read-only look at a tagged line, not an editor.
+pub const MAX_SOURCE_BYTES: usize = 2_000_000;
 
 // @implements CT-USE-007
 /// An error the UI shows: what went wrong, where, and how to fix it.
@@ -137,6 +152,8 @@ pub struct Loaded {
     coverage: HashMap<ElementId, RequirementCoverage>,
     /// Indexes into `Project::requirements` by requirement ID.
     requirements: HashMap<String, usize>,
+    /// The elements behind each of `GAP_FILTERS`, in declaration order.
+    gaps: [Vec<ElementId>; 4],
     /// The search index, or why it could not be opened. SQLite connections are not
     /// shared between threads, so queries take turns.
     index: Mutex<Result<Index, IndexError>>,
@@ -162,7 +179,9 @@ impl Loaded {
             ));
         }
         let project = Project::open(path).map_err(|e| AppError::setup(path, e))?;
-        let coverage = (project_coverage(&project).requirements.into_iter())
+        let found = project_coverage(&project);
+        let gaps = gaps_of(&found.requirements, found.untraced);
+        let coverage = (found.requirements.into_iter())
             .map(|c| (c.requirement, c))
             .collect();
         let requirements = (project.requirements.iter().enumerate())
@@ -176,6 +195,7 @@ impl Loaded {
             project,
             coverage,
             requirements,
+            gaps,
             index: Mutex::new(index),
         })
     }
@@ -195,7 +215,14 @@ impl Loaded {
             .num("problems", p.problems.len())
             .num("warnings", p.warnings.len())
             .bool("search", search)
+            .raw("gaps", &self.gap_counts())
             .end()
+    }
+
+    /// How many elements each coverage filter lists, for the badges on the filters.
+    fn gap_counts(&self) -> String {
+        let counts = GAP_FILTERS.iter().zip(&self.gaps);
+        (counts.fold(Obj::new(), |obj, (name, list)| obj.num(name, list.len()))).end()
     }
 
     fn is_library(&self, e: &Element) -> bool {
@@ -435,6 +462,130 @@ impl Loaded {
             .raw("rows", &array(rows))
             .end())
     }
+}
+
+// @implements CT-TRC-004, CT-EFF-005, CT-EFF-006, CT-USE-007
+impl Loaded {
+    /// One page of the elements a coverage filter lists. The lists are worked out when the
+    /// project opens, so a page is a slice. A requirement waived in full is left out of the
+    /// implementation and verification gaps, as in `clew report coverage`.
+    pub fn coverage_gaps(
+        &self,
+        filter: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<String, AppError> {
+        let Some(at) = GAP_FILTERS.iter().position(|f| *f == filter) else {
+            return Err(AppError::new(
+                format!("unknown coverage filter `{filter}`"),
+                "",
+                format!("Use one of: {}.", GAP_FILTERS.join(", ")),
+            ));
+        };
+        let list = &self.gaps[at];
+        let rows = (page_of(list, offset, limit).iter())
+            .map(|&id| self.gap_row(id))
+            .collect();
+        Ok(page(offset, Some(list.len()), rows))
+    }
+
+    fn gap_row(&self, id: ElementId) -> String {
+        let model = &self.project.model;
+        let e = model.element(id);
+        Obj::new()
+            .num("id", id.0)
+            .str("kind", e.kind.label())
+            .opt_str("name", e.name.as_deref())
+            .opt_str("shortName", e.short_name.as_deref())
+            .str("qualifiedName", &model.qualified_name(id))
+            .str("file", &model.files[e.file])
+            .num("line", e.pos.line)
+            .end()
+    }
+
+    /// One page of the lines of a text file in the project, for the read-only source view.
+    /// `path` is relative to the project folder. A path that leaves the folder, by `..`, an
+    /// absolute path, or a link, is refused (CT-SEC-003).
+    pub fn source(&self, path: &str, offset: usize, limit: usize) -> Result<String, AppError> {
+        let root = &self.project.root;
+        let inside = !path.is_empty()
+            && Path::new(path)
+                .components()
+                .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
+        if !inside {
+            return Err(AppError::new(
+                "that path is not inside the project",
+                path,
+                "Open a file by a path relative to the project folder.",
+            ));
+        }
+        let missing = |_| {
+            AppError::new(
+                "file not found",
+                path,
+                "Check that the file still exists, then open it again.",
+            )
+        };
+        let full = root.join(path).canonicalize().map_err(missing)?;
+        if !full.starts_with(root.canonicalize().map_err(missing)?) {
+            return Err(AppError::new(
+                "that path is not inside the project",
+                path,
+                "Open a file by a path relative to the project folder.",
+            ));
+        }
+        let meta = std::fs::metadata(&full).map_err(missing)?;
+        if !meta.is_file() {
+            return Err(AppError::new(
+                "that path is a folder, not a file",
+                path,
+                "Choose a file to look at.",
+            ));
+        }
+        if usize::try_from(meta.len()).map_or(true, |n| n > MAX_SOURCE_BYTES) {
+            return Err(AppError::new(
+                format!("the file is too large to show (over {MAX_SOURCE_BYTES} bytes)"),
+                path,
+                "Open it in an editor instead.",
+            ));
+        }
+        let bytes = std::fs::read(&full).map_err(missing)?;
+        let text = String::from_utf8(bytes).map_err(|_| {
+            AppError::new(
+                "the file is not text",
+                path,
+                "The source view shows text files only.",
+            )
+        })?;
+        let lines: Vec<&str> = text.lines().collect();
+        let first = offset.min(lines.len());
+        let rows = (page_of(&lines, offset, limit).iter().enumerate())
+            .map(|(i, line)| {
+                Obj::new()
+                    .num("line", first + i + 1)
+                    .str("text", line)
+                    .end()
+            })
+            .collect();
+        Ok(page(offset, Some(lines.len()), rows))
+    }
+}
+
+// @implements CT-TRC-004
+/// The four coverage lists, in the order of `GAP_FILTERS`.
+fn gaps_of(requirements: &[RequirementCoverage], untraced: Vec<ElementId>) -> [Vec<ElementId>; 4] {
+    let list = |test: fn(&RequirementCoverage) -> bool| -> Vec<ElementId> {
+        (requirements.iter())
+            .filter(|r| test(r))
+            .map(|r| r.requirement)
+            .collect()
+    };
+    [
+        list(|r| !r.has_parent),
+        list(|r| !r.implemented && !fully_waived(r)),
+        list(|r| !r.verified && !fully_waived(r)),
+        untraced,
+    ]
 }
 
 // @implements CT-EFF-005
@@ -1014,7 +1165,7 @@ mod tests {
         let state = &generated().1;
         let id = find("PF-00100");
         let budget = Duration::from_millis(100);
-        let calls: [(&str, &dyn Fn() -> String); 9] = [
+        let calls: [(&str, &dyn Fn() -> String); 14] = [
             ("status", &|| state.status()),
             ("children", &|| reply(project.children(0, 0, MAX_PAGE))),
             ("element", &|| reply(project.element(id))),
@@ -1032,6 +1183,21 @@ mod tests {
             ("search", &|| {
                 reply(project.search("system budget", 0, MAX_PAGE))
             }),
+            ("filter no parent", &|| {
+                reply(project.coverage_gaps("no-parent", 0, MAX_PAGE))
+            }),
+            ("filter no implementation", &|| {
+                reply(project.coverage_gaps("no-implementation", 0, MAX_PAGE))
+            }),
+            ("filter no verification", &|| {
+                reply(project.coverage_gaps("no-verification", 0, MAX_PAGE))
+            }),
+            ("filter untraced", &|| {
+                reply(project.coverage_gaps("untraced", 0, MAX_PAGE))
+            }),
+            ("source", &|| {
+                reply(project.source("model/perf.sysml", 0, MAX_PAGE))
+            }),
         ];
         for (name, call) in calls {
             let started = Instant::now();
@@ -1039,6 +1205,202 @@ mod tests {
             let took = started.elapsed();
             assert!(took < budget, "{name} took {took:?}");
             json::parse(&out).unwrap_or_else(|e| panic!("{name}: {e}: {out}"));
+        }
+    }
+
+    // @verifies CT-TRC-004, CT-EFF-005, CT-EFF-006
+    /// A small project with known gaps: two requirements with no parent, two with no
+    /// implementation or verification, and two elements traced to no requirement.
+    fn gappy(name: &str) -> Loaded {
+        let root = folder(name);
+        let files = [
+            (
+                "trace.toml",
+                "[project]\nrequirements = [\"reqs.sysml\"]\nid_pattern = \"X-[0-9]{3}\"\n\
+                 current_phase = 1\n[coverage]\nsource_roots = [\"src\"]\nlanguages = [\"rust\"]\n\
+                 file_level_allowed = []\nmax_scope_lines = 200\n\
+                 [[waiver]]\nid = \"X-004\"\nreason = \"later\"\nstatus = \"approved\"\n\
+                 approved_by = \"John\"\ndate = \"2026-01-01\"\n",
+            ),
+            (
+                "reqs.sysml",
+                "package Reqs {\n  requirement def Req;\n  requirement <'X-001'> top : Req;\n\
+                 \x20 requirement <'X-002'> child : Req {\n    requirement <'X-003'> nested : Req;\n  }\n\
+                 \x20 requirement <'X-004'> lone : Req;\n}\n",
+            ),
+            (
+                "design.sysml",
+                "package Design {\n  part def Engine {\n    satisfy Reqs::top;\n  }\n\
+                 \x20 part def Tester {\n    verify Reqs::child;\n  }\n\
+                 \x20 part def Loose {\n    part inner;\n  }\n\
+                 \x20 #derivation dependency Reqs::child to Reqs::top;\n}\n",
+            ),
+            (
+                "library/Clewtrace.sysml",
+                include_str!("../../../library/Clewtrace.sysml"),
+            ),
+            ("src/lib.rs", "// @implements X-002\nfn a() {}\n"),
+        ];
+        for (path, text) in files {
+            let path = root.join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
+        }
+        Loaded::open(&root).unwrap()
+    }
+
+    // @verifies CT-TRC-004, CT-EFF-005
+    /// The short names or qualified names of the rows of one coverage filter.
+    fn gap_names(project: &Loaded, filter: &str) -> Vec<String> {
+        let page = ok(&reply(project.coverage_gaps(filter, 0, MAX_PAGE)));
+        assert_eq!(num(&page, "total"), page.get("rows").unwrap().items().len());
+        (page.get("rows").unwrap().items().iter())
+            .map(|r| match r.get("shortName") {
+                Some(Json::Str(s)) => s.clone(),
+                _ => text(r, "qualifiedName").to_string(),
+            })
+            .collect()
+    }
+
+    // @verifies CT-TRC-004
+    #[test]
+    fn coverage_filters_list_each_kind_of_gap() {
+        let project = gappy("coverage_filters_list_each_kind_of_gap");
+        assert_eq!(gap_names(&project, "no-parent"), ["X-001", "X-004"]);
+        // X-004 is waived in full, so it is left out of these two, as in `clew report coverage`.
+        assert_eq!(gap_names(&project, "no-implementation"), ["X-003"]);
+        assert_eq!(gap_names(&project, "no-verification"), ["X-001", "X-003"]);
+        assert_eq!(
+            gap_names(&project, "untraced"),
+            ["Design::Loose", "Design::Loose::inner"]
+        );
+    }
+
+    // @verifies CT-TRC-004, CT-EFF-005
+    #[test]
+    fn coverage_rows_can_be_selected_and_come_in_pages() {
+        let project = gappy("coverage_rows_can_be_selected_and_come_i");
+        let page = ok(&reply(project.coverage_gaps("no-parent", 1, 1)));
+        assert_eq!(num(&page, "offset"), 1);
+        assert_eq!(num(&page, "total"), 2);
+        let rows = page.get("rows").unwrap().items();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(text(&rows[0], "shortName"), "X-004");
+        // The row's ID opens the element.
+        let detail = ok(&reply(project.element(num(&rows[0], "id"))));
+        assert_eq!(text(&detail, "shortName"), "X-004");
+        let none = ok(&reply(project.coverage_gaps("no-parent", 50, 10)));
+        assert!(none.get("rows").unwrap().items().is_empty());
+    }
+
+    // @verifies CT-TRC-004, CT-USE-007
+    #[test]
+    fn an_unknown_coverage_filter_is_an_error_that_names_the_choices() {
+        let e = error(&reply(
+            gappy("an_unknown_coverage_filter_is_an_error_t").coverage_gaps("everything", 0, 10),
+        ));
+        assert!(text(&e, "what").contains("everything"), "{e:?}");
+        assert!(text(&e, "help").contains("no-parent"), "{e:?}");
+    }
+
+    // @verifies CT-TRC-004
+    #[test]
+    fn the_summary_counts_each_gap() {
+        let summary = gappy("the_summary_counts_each_gap").summary();
+        let status = json::parse(&summary).unwrap();
+        let gaps = status.get("gaps").expect("the summary has gap counts");
+        assert_eq!(num(gaps, "no-parent"), 2);
+        assert_eq!(num(gaps, "no-implementation"), 1);
+        assert_eq!(num(gaps, "no-verification"), 2);
+        assert_eq!(num(gaps, "untraced"), 2);
+    }
+
+    // @verifies CT-TRC-004, CT-EFF-005
+    #[test]
+    fn the_source_view_returns_the_lines_of_a_project_file_in_pages() {
+        let project = gappy("the_source_view_returns_the_lines_of_a_p");
+        let page = ok(&reply(project.source("src/lib.rs", 0, MAX_PAGE)));
+        assert_eq!(num(&page, "total"), 2);
+        let rows = page.get("rows").unwrap().items();
+        assert_eq!(text(&rows[0], "text"), "// @implements X-002");
+        assert_eq!(num(&rows[0], "line"), 1);
+        assert_eq!(text(&rows[1], "text"), "fn a() {}");
+        let second = ok(&reply(project.source("src/lib.rs", 1, 1)));
+        assert_eq!(num(&second.get("rows").unwrap().items()[0], "line"), 2);
+        // A model file opens the same way.
+        assert!(project.source("reqs.sysml", 0, 1).is_ok());
+    }
+
+    // @verifies CT-TRC-004, CT-SEC-003, CT-USE-007
+    #[test]
+    fn the_source_view_reads_only_files_inside_the_project() {
+        let project = gappy("the_source_view_reads_only_files_inside_");
+        let outside = folder("outside").join("secret.txt");
+        fs::write(&outside, "secret").unwrap();
+        let absolute = outside.display().to_string();
+        for path in [
+            "../outside/secret.txt",
+            "src/../../outside/secret.txt",
+            absolute.as_str(),
+            "src",
+            "src/missing.rs",
+            "",
+        ] {
+            let e = project.source(path, 0, 10).expect_err(path);
+            assert!(!e.what.is_empty() && !e.help.is_empty(), "{path}: {e:?}");
+        }
+    }
+
+    // @verifies CT-TRC-004, CT-SEC-003
+    #[cfg(unix)]
+    #[test]
+    fn the_source_view_does_not_follow_a_link_out_of_the_project() {
+        let project = gappy("the_source_view_does_not_follow_a_link_o");
+        let outside = folder("outside-link").join("secret.txt");
+        fs::write(&outside, "secret").unwrap();
+        let link = project.project.root.join("src").join("link.rs");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        assert!(project.source("src/link.rs", 0, 10).is_err());
+    }
+
+    // @verifies CT-TRC-004, CT-USE-007
+    #[test]
+    fn the_source_view_refuses_a_file_that_is_not_text_or_is_too_large() {
+        let project = gappy("the_source_view_refuses_a_file_that_is_n");
+        let root = project.project.root.clone();
+        fs::write(root.join("src/binary.bin"), [0u8, 159, 146, 150]).unwrap();
+        let e = project.source("src/binary.bin", 0, 10).unwrap_err();
+        assert!(e.what.contains("text"), "{e:?}");
+        let big = vec![b'a'; MAX_SOURCE_BYTES + 1];
+        fs::write(root.join("src/big.rs"), big).unwrap();
+        let e = project.source("src/big.rs", 0, 10).unwrap_err();
+        assert!(e.what.contains("large"), "{e:?}");
+    }
+
+    // @verifies CT-SEC-001, CT-EFF-005
+    #[test]
+    fn every_command_is_listed_for_the_build_and_granted_to_the_window() {
+        let commands = include_str!("commands.rs");
+        let build = include_str!("../build.rs");
+        let capability = include_str!("../capabilities/main.json");
+        let names: Vec<&str> = (commands.lines())
+            .filter_map(|l| {
+                l.strip_prefix("pub fn ")
+                    .or(l.strip_prefix("pub async fn "))
+            })
+            .filter_map(|l| l.split('(').next())
+            .collect();
+        assert!(names.len() >= 12, "{names:?}");
+        for name in names {
+            assert!(
+                build.contains(&format!("\"{name}\"")),
+                "build.rs lacks {name}"
+            );
+            let permission = format!("\"allow-{}\"", name.replace('_', "-"));
+            assert!(
+                capability.contains(&permission),
+                "main.json lacks {permission}"
+            );
         }
     }
 

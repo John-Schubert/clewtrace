@@ -55,7 +55,10 @@ export class PagedRows<Row> {
           return;
         }
         this.loaded.set(page, result.rows);
-        this.count = result.total ?? this.count;
+        // With no total (search), the count grows a page at a time: one placeholder row stands
+        // for the next page, and loads it when it is scrolled into view.
+        const known = page * this.pageSize + result.rows.length;
+        this.count = result.total ?? (result.more ? Math.max(this.count, known + 1) : known);
         this.onchange();
       })
       .catch((e: unknown) => this.onerror(e))

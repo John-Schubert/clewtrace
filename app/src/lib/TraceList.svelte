@@ -1,9 +1,10 @@
 <!-- @begin CT-TRC-005, CT-TRC-006, CT-EFF-005, CT-USE-007 -->
 <script lang="ts" generics="Row extends LinkRow">
   // One titled list of trace rows, fetched a page at a time. Click or Enter follows an
-  // element row; code rows only show their file and lines.
+  // element row, and opens a code row in the source view.
   import type { LinkRow, Page } from './api';
   import { PagedRows } from './pages';
+  import { codeTarget } from './find';
   import { followable } from './trace';
   import VirtualList from './VirtualList.svelte';
 
@@ -14,8 +15,10 @@
     fetch: (offset: number, limit: number) => Promise<Page<Row>>;
     label: (row: Row) => string;
     onfollow: (id: number) => void;
+    /** Opens a code row in the source view. */
+    onopen: (path: string, line: number) => void;
   }
-  let { title, id, fetch, label, onfollow }: Props = $props();
+  let { title, id, fetch, label, onfollow, onopen }: Props = $props();
 
   let version = $state(0);
   let failure = $state('');
@@ -46,6 +49,11 @@
     const target = row && followable(row.other);
     if (target !== undefined) {
       onfollow(target);
+    } else if (row) {
+      const code = codeTarget(row.other);
+      if (code) {
+        onopen(code.path, code.line);
+      }
     }
   }
 </script>

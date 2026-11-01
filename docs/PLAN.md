@@ -700,17 +700,44 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       `every_command_answers_within_100_ms` (now includes both impact calls) on the
       10,000-requirement project, plus a UI test.
       Follow-ups:
-      - The probe is not yet run inside the built app. The existing app probes need a display
-        (xvfb), and a select-and-navigate step has not been added to `probe.rs`.
+      - Closed in 2.7b: the probe now runs select-and-navigate in the built app (the
+        `views` mode of `probe.rs`). The same work found that `element_impact` was left out
+        of `build.rs` and `capabilities/main.json`, so the Impact tab would have been
+        refused in the built app. Fixed, with a test that every command is listed in both.
       - Groups are shown as a sort by kind with the kind at the start of each row, not as
         headings, because rows come in pages. Headings need John's call on design.
       - Code rows cannot be opened until the source view (2.7b) or the editor.
-- [ ] **2.7b Coverage, search, and source view.** Coverage view (no parent, no
+- [x] **2.7b Coverage, search, and source view.** Coverage view (no parent, no
       implementation, no verification, untraced elements) with filters. Search box over the
       FTS5 index with paged results. Read-only source view that opens a code file at the
       tagged line. Probes: filter within 100 ms; search within 200 ms, in the app.
       Refs: CT-TRC-004, CT-EFF-005, CT-EFF-006
       Model: Sonnet
+      Done: `Loaded::coverage_gaps` pages four lists worked out when the project opens: no
+      parent, no implementation, no verification (a requirement waived in full is left out
+      of the last two, as in `clew report coverage`), and untraced. The status counts feed
+      the filter buttons. `Loaded::source` pages the lines of a text file inside the project
+      folder and refuses `..`, absolute paths, links out, non-text, and files over 2 MB.
+      Commands `coverage_gaps` and `source_lines`. UI: `CoverageView`, `SearchView`
+      (over the existing `search` command, which `PagedRows` now pages with no total), and
+      `SourceView`, in the main pane beside the trace panel. Code rows in the trace panel,
+      search hits with no element, and a "Show in source view" button open the source view
+      at the line. Actions: "Show coverage", "Coverage: <filter>", "Search the model".
+      Probe: `CLEW_PROBE=views` opens a 10,000-requirement project plus 300 gap requirements
+      and 300 untraced parts, and runs three filters, two searches, select, follow, and
+      back through the action registry under xvfb. `perf_probe.rs` holds search to 200 ms
+      and every other step to 100 ms. Measured here: filters 24 to 35 ms, select and
+      navigate 8 to 40 ms, search over all 10,300 documents 130 to 145 ms (a cold first
+      launch took 259 ms and is a warm-up, not counted).
+      Follow-ups:
+      - Search has the thinnest margin (about 130 of 200 ms in the app). Watch it on the
+        first CI run.
+      - CT-MOD-005 sync with the editor is still for the editor task. The source view is
+        read-only and has no syntax highlighting or search inside the file.
+      - The coverage view shows one list at a time with counts on the filters. A combined
+        view with filters across the kinds needs John's call on design.
+      - Windows and macOS were not run; the probe steps read the same DOM, but only Linux
+        under xvfb is measured.
       Milestone A: Clewtrace can open and trace its own repo, read-only. Optional
       pre-release for a laptop check.
 - [ ] **2.8 Text editor.** CodeMirror 6 for `.sysml` files (@codemirror/state, view,

@@ -1,5 +1,5 @@
 <script lang="ts">
-  // @begin CT-PLT-001, CT-EFF-004, CT-MOD-005, CT-TRC-005
+  // @begin CT-PLT-001, CT-EFF-004, CT-MOD-005, CT-TRC-005, CT-TRC-004, CT-EFF-006
   // The app window: shows the app name and version, read from the Rust side, and the
   // project opened from the command line once its background load ends.
   import { getName, getVersion } from '@tauri-apps/api/app';
@@ -14,8 +14,13 @@
     type RecentProject,
   } from './lib/api';
   import { ActionRegistry } from './lib/actions';
+  import type { GapFilter } from './lib/api';
+  import { GAP_FILTERS } from './lib/find';
+  import CoverageView from './lib/CoverageView.svelte';
   import DetailView from './lib/DetailView.svelte';
   import ModelBrowser from './lib/ModelBrowser.svelte';
+  import SearchView from './lib/SearchView.svelte';
+  import SourceView from './lib/SourceView.svelte';
   import { NavHistory } from './lib/history';
   import TracePanel from './lib/TracePanel.svelte';
   import ProblemsPanel from './lib/ProblemsPanel.svelte';
@@ -37,6 +42,26 @@
   // Counts the projects opened. The browser and problems panes start again for each one.
   let opened = $state(0);
   let selection = $state<Selection>();
+
+  // What the main view shows: the detail of the selection, the coverage lists, search, or
+  // a source file. The coverage and search views stay up while an element is selected from
+  // them, so a long list can be worked through with the trace panel beside it.
+  type View = 'detail' | 'coverage' | 'search' | 'source';
+  let view = $state<View>('detail');
+  let gapFilter = $state<GapFilter>('no-parent');
+  let gapCounts = $state<Partial<Record<GapFilter, number>>>();
+  let query = $state('');
+  let source = $state<{ path: string; line: number }>();
+
+  function openSource(path: string, line: number) {
+    source = { path, line };
+    view = 'source';
+  }
+
+  function showElement(id: number) {
+    view = 'detail';
+    visit(id);
+  }
 
   // Back and forward through the elements looked at. The flags mirror the history for the
   // trace panel's buttons.
@@ -64,6 +89,10 @@
   function showStatus(status: ProjectStatus) {
     project = describeStatus(status);
     selection = undefined;
+    view = 'detail';
+    source = undefined;
+    query = '';
+    gapCounts = status.state === 'ready' ? status.project.gaps : undefined;
     history.clear();
     syncHistory();
     if (status.state === 'ready') {
@@ -145,7 +174,7 @@
   }
   // @end
 
-  // @begin CT-USE-002, CT-USE-004, CT-TRC-005
+  // @begin CT-USE-002, CT-USE-004, CT-TRC-005, CT-TRC-004, CT-EFF-006
   // The action registry and command palette, and the pane focus order (F6).
   const registry = new ActionRegistry();
   let paletteOpen = $state(false);
@@ -163,6 +192,11 @@
   }
 
   registry.register({ id: 'project.open', title: 'Open project folder...', run: choose });
+  registry.register({ id: 'view.coverage', title: 'Show coverage', run: () => { view = 'coverage'; } });
+  for (const f of GAP_FILTERS) {
+    registry.register({ id: `coverage.${f.id}`, title: `Coverage: ${f.label.toLowerCase()}`, run: () => { gapFilter = f.id; view = 'coverage'; } });
+  }
+  registry.register({ id: 'view.search', title: 'Search the model', run: () => { view = 'search'; } });
   registry.register({ id: 'trace.back', title: 'Trace: back', run: () => goto(history.back()) });
   registry.register({ id: 'trace.forward', title: 'Trace: forward', run: () => goto(history.forward()) });
   registry.register({ id: 'project.clearRecent', title: 'Clear recent projects', run: clear });
@@ -206,7 +240,7 @@
 <svelte:window onkeydown={onwindowkeydown} />
 <!-- @end -->
 
-<!-- @begin CT-PLT-001, CT-EFF-004, CT-SEC-003, CT-USE-007, CT-USE-004, CT-MOD-005, CT-TRC-005 -->
+<!-- @begin CT-PLT-001, CT-EFF-004, CT-SEC-003, CT-USE-007, CT-USE-004, CT-MOD-005, CT-TRC-005, CT-TRC-004, CT-EFF-006 -->
 <Tokens />
 <a class="skip" href="#pane-main">Skip to main view</a>
 <div class="shell">
@@ -227,7 +261,7 @@
     <h2>Model browser</h2>
     {#if opened > 0}
       {#key opened}
-        <ModelBrowser onselect={visit} />
+        <ModelBrowser onselect={showElement} />
       {/key}
     {/if}
     {#if recent.length > 0}
@@ -248,8 +282,27 @@
     {#if problem}
       <p class="problem" role="alert">{problem}</p>
     {/if}
-    {#if selection}
-      <DetailView {selection} />
+    {#if opened > 0}
+      <div class="views" role="group" aria-label="Main views">
+        <button type="button" aria-pressed={view === 'detail'} onclick={() => (view = 'detail')}>Detail</button>
+        <button type="button" aria-pressed={view === 'coverage'} onclick={() => (view = 'coverage')}>Coverage</button>
+        <button type="button" aria-pressed={view === 'search'} onclick={() => (view = 'search')}>Search</button>
+        {#if source}
+          <button type="button" aria-pressed={view === 'source'} onclick={() => (view = 'source')}>Source</button>
+        {/if}
+      </div>
+      {#key opened}
+        {#if view === 'coverage'}
+          <CoverageView filter={gapFilter} counts={gapCounts} onfilter={(f) => (gapFilter = f)} onselect={visit} />
+        {:else if view === 'search'}
+          <SearchView {query} onquery={(q) => (query = q)} onselect={visit} onopen={openSource} />
+        {:else if view === 'source' && source}
+          <SourceView path={source.path} line={source.line} />
+        {/if}
+      {/key}
+    {/if}
+    {#if selection && (view === 'detail' || opened === 0)}
+      <DetailView {selection} onopen={openSource} />
     {/if}
   </main>
   <aside id="pane-trace" tabindex="-1" aria-label="Trace panel">
@@ -262,6 +315,7 @@
         onfollow={visit}
         onback={() => goto(history.back())}
         onforward={() => goto(history.forward())}
+        onopen={openSource}
       />
     {/if}
   </aside>
@@ -269,7 +323,7 @@
     <h2>Problems</h2>
     {#if opened > 0}
       {#key opened}
-        <ProblemsPanel onselect={(p) => (selection = { kind: 'problem', problem: p })} />
+        <ProblemsPanel onselect={(p) => { view = 'detail'; selection = { kind: 'problem', problem: p }; }} />
       {/key}
     {/if}
   </section>
@@ -372,6 +426,14 @@
   }
   .project {
     max-width: 40rem;
+  }
+  .views {
+    display: flex;
+    gap: 0.25rem;
+    margin: 0.5rem 0;
+  }
+  .views button[aria-pressed='true'] {
+    background: var(--row-selected);
   }
   .problem {
     max-width: 40rem;

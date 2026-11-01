@@ -1,11 +1,11 @@
-<!-- @begin CT-EFF-005, CT-USE-007 -->
+<!-- @begin CT-EFF-005, CT-USE-007, CT-TRC-004 -->
 <script lang="ts">
   // The main view's detail of what is selected: an element from the tree, or a problem from
   // the problems list.
   import { elementDetail, type ElementDetail } from './api';
   import { detailFields, problemSummary, type Selection } from './describe';
 
-  let { selection }: { selection: Selection } = $props();
+  let { selection, onopen }: { selection: Selection; onopen: (path: string, line: number) => void } = $props();
 
   let detail = $state<ElementDetail>();
   let failure = $state('');
@@ -49,6 +49,7 @@
       <dd>{field.value}</dd>
     {/each}
   </dl>
+  <p><button type="button" onclick={() => onopen(detail!.file, detail!.line)}>Show in source view</button></p>
 {:else}
   <p class="muted">Loading...</p>
 {/if}

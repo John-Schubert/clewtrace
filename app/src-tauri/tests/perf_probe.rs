@@ -287,3 +287,121 @@ fn the_app_opens_ten_thousand_requirements_within_its_budgets() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// CT-EFF-005: selecting, filtering, and navigating respond within 100 ms in the built app.
+// @verifies CT-EFF-005
+const MAX_INTERACTION_MS: f64 = 100.0;
+
+/// CT-EFF-006: a full-text search over 10,000 requirements returns within 200 ms in the
+/// built app.
+// @verifies CT-EFF-006
+const MAX_SEARCH_MS: f64 = 200.0;
+
+/// The steps a `views` probe report must hold, by the title prefix `probe.rs` gives them.
+// @verifies CT-EFF-005, CT-EFF-006
+const VIEW_PREFIXES: [&str; 4] = ["Coverage: ", "Search: ", "Select: ", "Navigate: "];
+
+/// What is wrong with a `views` probe report, empty when every step meets its budget: a
+/// search step the 200 ms of CT-EFF-006, every other step the 100 ms of CT-EFF-005.
+// @verifies CT-EFF-005, CT-EFF-006
+fn view_failures(report: &str) -> Vec<String> {
+    let json = match parse(report) {
+        Ok(json) => json,
+        Err(e) => return vec![format!("the report is not JSON: {e:?}")],
+    };
+    let steps = json.get("actions").map(Json::items).unwrap_or_default();
+    let mut failures = Vec::new();
+    for prefix in VIEW_PREFIXES {
+        let found = steps.iter().any(|s| {
+            s.get("title")
+                .and_then(Json::as_str)
+                .is_some_and(|t| t.starts_with(prefix))
+        });
+        if !found {
+            failures.push(format!("the report has no `{prefix}` step"));
+        }
+    }
+    for step in steps {
+        let title = step.get("title").and_then(Json::as_str).unwrap_or("?");
+        let (id, budget) = if title.starts_with("Search: ") {
+            ("CT-EFF-006", MAX_SEARCH_MS)
+        } else {
+            ("CT-EFF-005", MAX_INTERACTION_MS)
+        };
+        match number(step, "ms") {
+            Ok(ms) if ms > budget => failures.push(format!(
+                "{id}: `{title}` took {ms} ms, over the {budget} ms budget"
+            )),
+            Ok(_) => {}
+            Err(e) => failures.push(e),
+        }
+    }
+    failures
+}
+
+// @verifies CT-EFF-005, CT-EFF-006
+#[test]
+fn the_views_check_passes_on_the_budgets_and_fails_one_unit_over() {
+    let report = |filter: &str, search: &str| {
+        format!(
+            r#"{{"actions":[{{"title":"Coverage: untraced","ms":{filter}}},{{"title":"Search: system budget","ms":{search}}},{{"title":"Select: a hit","ms":1.0}},{{"title":"Navigate: back","ms":1.0}}]}}"#
+        )
+    };
+    assert!(view_failures(&report("100.0", "200.0")).is_empty());
+    let failures = view_failures(&report("100.1", "200.1"));
+    assert_eq!(failures.len(), 2, "{failures:?}");
+    assert!(failures[0].starts_with("CT-EFF-005"), "{failures:?}");
+    assert!(failures[1].starts_with("CT-EFF-006"), "{failures:?}");
+    // A report that leaves a kind of step out cannot pass.
+    assert_eq!(view_failures(r#"{"actions":[]}"#).len(), 4);
+    assert_eq!(view_failures("not json").len(), 1);
+}
+
+/// The 10,000-requirement project of CT-EFF-004, plus a file of 300 requirements with no
+/// parent, implementation, or verification (typed by a definition that is not top level, so
+/// they need a parent) and 300 parts traced to nothing, so the coverage
+/// filters list a full page.
+// @verifies CT-EFF-005, CT-EFF-006
+fn views_project(dir: &std::path::Path) {
+    generate::generate(dir, 10_000, 50_000);
+    let mut gaps = String::from("package Gaps {\n    requirement def Loose;\n");
+    for i in 0..300 {
+        gaps.push_str(&format!(
+            "    requirement <'PF-{:05}'> g{i} : Loose {{\n        doc /* A gap {i}. */\n    }}\n    part u{i};\n",
+            90_000 + i
+        ));
+    }
+    gaps.push_str("}\n");
+    std::fs::write(dir.join("model/gaps.sysml"), gaps).unwrap();
+}
+
+// @verifies CT-EFF-005, CT-EFF-006
+#[test]
+#[ignore = "needs a display and the perf CI limits: run under xvfb-run, see the module docs"]
+fn the_app_selects_filters_searches_and_navigates_within_its_budgets() {
+    let dir = std::env::temp_dir().join(format!("clew-views-{}", std::process::id()));
+    views_project(&dir);
+    let mut failures = Vec::new();
+    for run in 0..=MEASURED_LAUNCHES {
+        let output = Command::new(env!("CARGO_BIN_EXE_clewtrace"))
+            .env("CLEW_PROBE", "views")
+            .arg(&dir)
+            .output()
+            .expect("the app starts");
+        assert!(
+            output.status.success(),
+            "the probe failed ({}). Is a display set? Run under xvfb-run.\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let report = stdout.lines().last().expect("the probe prints a report");
+        println!("{report}");
+        // The first launch is a warm-up, as for CT-EFF-003.
+        if run > 0 {
+            failures.extend(view_failures(report));
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

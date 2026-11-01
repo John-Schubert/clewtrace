@@ -504,7 +504,7 @@ pub fn coverage_text(model: &Model, coverage: &Coverage) -> String {
 // @implements CT-DEV-003, CT-TRC-004
 /// Whether a requirement has a waiver for the whole of it, which leaves it out of the
 /// implementation and verification gaps. A waiver with a `part` does not.
-fn fully_waived(row: &RequirementCoverage) -> bool {
+pub fn fully_waived(row: &RequirementCoverage) -> bool {
     row.waiver.as_ref().is_some_and(|w| w.part.is_none())
 }
 

@@ -35,6 +35,7 @@ const props = (over: object = {}) => ({
   onfollow: vi.fn(),
   onback: vi.fn(),
   onforward: vi.fn(),
+  onopen: vi.fn(),
   ...over,
 });
 const options = () => [...document.querySelectorAll('[role="option"]')] as HTMLElement[];
@@ -71,6 +72,26 @@ describe('TracePanel', () => {
     expect(p.onfollow).toHaveBeenCalledWith(2);
     options()[1].click();
     expect(p.onfollow).toHaveBeenCalledTimes(1);
+  });
+
+  // @verifies CT-TRC-004, CT-TRC-006
+  it('opens a code row in the source view at its first line', async () => {
+    vi.mocked(api.elementLinks).mockResolvedValue(
+      page([{ kind: 'implements', other: { path: 'src/a.rs', startLine: 3, endLine: 9 }, file: 'src/a.rs', line: 3 }]),
+    );
+    const p = props();
+    instance = mount(TracePanel, { target: document.body, props: p });
+    await settle();
+    options()[0].click();
+    expect(p.onopen).toHaveBeenCalledWith('src/a.rs', 3);
+  });
+
+  // @verifies CT-EFF-005
+  it('names the element it shows, so the in-app probe can tell when a trace has loaded', async () => {
+    vi.mocked(api.elementLinks).mockResolvedValue(page([]));
+    instance = mount(TracePanel, { target: document.body, props: props({ id: 42 }) });
+    await settle();
+    expect((document.querySelector('[data-element]') as HTMLElement).dataset.element).toBe('42');
   });
 
   // @verifies CT-TRC-005
