@@ -30,7 +30,9 @@ whenever a capability, a Tauri feature, or a dependency changes. Record the resu
 - [x] `app/src-tauri/capabilities/` grants only `core:app:allow-name`,
       `core:app:allow-version`, and the `allow-` permissions of the app's own commands
       (`project_status`, `wait_for_project`, `tree_children`, `element_detail`,
-      `element_links`, `problems`, `search`; task 2.3a, ADR-0004; and `pick_folder`,
+      `element_links`, `problems`, `search`; task 2.3a, ADR-0004; `element_impact`, task 2.7a;
+      `coverage_gaps` and `source_lines`, task 2.7b, which reads a text file inside the
+      project folder and refuses any path that leaves it; and `pick_folder`,
       `open_project`, `recent_projects`, `clear_recent`; task 2.3b). None reaches the
       network: the app commands read the open project and its local SQLite index, show
       the OS folder dialog, and read or write the recent-projects file only.

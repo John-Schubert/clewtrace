@@ -37,6 +37,29 @@ export interface Page<Row> {
   rows: Row[];
 }
 
+// @implements CT-TRC-004
+/** The coverage filters, as the Rust side names them (`GAP_FILTERS` in data.rs). */
+export type GapFilter = 'no-parent' | 'no-implementation' | 'no-verification' | 'untraced';
+
+// @implements CT-TRC-004, CT-EFF-005
+/** An element a coverage filter lists. */
+export interface GapRow {
+  id: number;
+  kind: string;
+  name: string | null;
+  shortName: string | null;
+  qualifiedName: string;
+  file: string;
+  line: number;
+}
+
+// @implements CT-TRC-004, CT-EFF-005
+/** One line of a project file in the source view. */
+export interface SourceLine {
+  line: number;
+  text: string;
+}
+
 // @implements CT-EFF-004
 /** The counts of an open project. `search` is false when its index could not be opened. */
 export interface ProjectSummary {
@@ -47,6 +70,8 @@ export interface ProjectSummary {
   problems: number;
   warnings: number;
   search: boolean;
+  /** How many elements each coverage filter lists. */
+  gaps: Record<GapFilter, number>;
 }
 
 // @implements CT-EFF-004, CT-USE-007
@@ -193,6 +218,18 @@ export function elementImpact(
   limit = MAX_PAGE,
 ): Promise<Page<ImpactRow>> {
   return call('element_impact', { id, direction, offset, limit });
+}
+
+// @implements CT-TRC-004, CT-EFF-005
+/** One page of the elements a coverage filter lists. */
+export function coverageGaps(filter: GapFilter, offset = 0, limit = MAX_PAGE): Promise<Page<GapRow>> {
+  return call('coverage_gaps', { filter, offset, limit });
+}
+
+// @implements CT-TRC-004, CT-EFF-005
+/** One page of the lines of a project file, by a path relative to the project folder. */
+export function sourceLines(path: string, offset = 0, limit = MAX_PAGE): Promise<Page<SourceLine>> {
+  return call('source_lines', { path, offset, limit });
 }
 
 // @implements CT-EFF-005, CT-USE-007

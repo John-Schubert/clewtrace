@@ -90,6 +90,32 @@ pub fn element_impact(
     Response::new(reply(result))
 }
 
+// @implements CT-TRC-004, CT-EFF-005
+/// One page of the elements a coverage filter lists.
+#[tauri::command(async)]
+pub fn coverage_gaps(
+    state: State<'_, Arc<AppState>>,
+    filter: String,
+    offset: usize,
+    limit: usize,
+) -> Response {
+    let result = (state.project()).and_then(|p| p.coverage_gaps(&filter, offset, limit));
+    Response::new(reply(result))
+}
+
+// @implements CT-TRC-004, CT-EFF-005, CT-SEC-003
+/// One page of the lines of a project file, for the read-only source view.
+#[tauri::command(async)]
+pub fn source_lines(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+    offset: usize,
+    limit: usize,
+) -> Response {
+    let result = state.project().and_then(|p| p.source(&path, offset, limit));
+    Response::new(reply(result))
+}
+
 // @implements CT-EFF-005, CT-USE-007
 /// One page of the project's errors and warnings.
 #[tauri::command(async)]

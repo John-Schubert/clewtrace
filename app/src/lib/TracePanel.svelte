@@ -14,12 +14,14 @@
     onfollow: (id: number) => void;
     onback: () => void;
     onforward: () => void;
+    onopen: (path: string, line: number) => void;
   }
-  let { id, canBack, canForward, onfollow, onback, onforward }: Props = $props();
+  let { id, canBack, canForward, onfollow, onback, onforward, onopen }: Props = $props();
 
   let tab = $state<'links' | 'impact'>('links');
 </script>
 
+<div class="panel" data-element={id}>
 <div class="bar">
   <button type="button" disabled={!canBack} onclick={onback}>Back</button>
   <button type="button" disabled={!canForward} onclick={onforward}>Forward</button>
@@ -29,12 +31,13 @@
 {#if id === undefined}
   <p class="muted">Select an element to see its trace links.</p>
 {:else if tab === 'links'}
-  <TraceList title="Traces to" {id} fetch={(o, l) => elementLinks(id, 'from', o, l)} label={linkLabel} {onfollow} />
-  <TraceList title="Traced by" {id} fetch={(o, l) => elementLinks(id, 'to', o, l)} label={linkLabel} {onfollow} />
+  <TraceList title="Traces to" {id} fetch={(o, l) => elementLinks(id, 'from', o, l)} label={linkLabel} {onfollow} {onopen} />
+  <TraceList title="Traced by" {id} fetch={(o, l) => elementLinks(id, 'to', o, l)} label={linkLabel} {onfollow} {onopen} />
 {:else}
-  <TraceList title="Upstream" {id} fetch={(o, l) => elementImpact(id, 'upstream', o, l)} label={impactLabel} {onfollow} />
-  <TraceList title="Downstream" {id} fetch={(o, l) => elementImpact(id, 'downstream', o, l)} label={impactLabel} {onfollow} />
+  <TraceList title="Upstream" {id} fetch={(o, l) => elementImpact(id, 'upstream', o, l)} label={impactLabel} {onfollow} {onopen} />
+  <TraceList title="Downstream" {id} fetch={(o, l) => elementImpact(id, 'downstream', o, l)} label={impactLabel} {onfollow} {onopen} />
 {/if}
+</div>
 
 <style>
   .bar {

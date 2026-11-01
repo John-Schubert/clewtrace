@@ -3,7 +3,7 @@
   // The one list component for anything that can pass 200 rows. It renders only the rows in
   // view; the caller supplies a row snippet and the number of rows. Arrow keys, Home, and End
   // move the selection; the list is one tab stop (roving selection).
-  import type { Snippet } from 'svelte';
+  import { untrack, type Snippet } from 'svelte';
   import { scrollTopFor, visibleRange } from './virtual';
 
   interface Props {
@@ -33,6 +33,14 @@
     }
     onselect?.(selected);
   }
+
+  // A selection set from outside, such as the line the source view opens at, comes into view.
+  $effect(() => {
+    if (scroller && selected >= 0 && selected < count) {
+      const top = untrack(() => scroller?.scrollTop ?? 0);
+      scroller.scrollTop = scrollTopFor({ index: selected, rowHeight, viewport, scrollTop: top });
+    }
+  });
 
   function onkeydown(event: KeyboardEvent) {
     const page = Math.max(1, Math.floor(viewport / rowHeight) - 1);

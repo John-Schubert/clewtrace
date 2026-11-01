@@ -11,6 +11,10 @@
 //!   Windows and macOS read memory from a CI workflow step instead.
 //! - `script` mode also runs a fixed list of actions through the command palette, which
 //!   runs them in the action registry, and logs the time from each to the next painted frame.
+//! - `views` mode opens the project given on the command line and runs `VIEW_STEPS`: the
+//!   coverage filters, two searches, selecting a hit, following a trace link, and going
+//!   back (CT-EFF-005, CT-EFF-006). Each step is timed from its start to the painted frame
+//!   after its result is on screen.
 
 use std::fmt::Write as _;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,6 +32,84 @@ pub const SCRIPT: [&str; 5] = [
     "Go to Problems",
     "Go to Main view",
     "Theme: follow the OS setting",
+];
+
+/// One timed step of the `views` mode: an optional action run through the command palette,
+/// then some script that does what a user's hand does (typing, clicking), then a wait until
+/// the result is on screen.
+// @implements CT-EFF-005, CT-EFF-006
+#[derive(Clone, Copy, Debug)]
+pub struct Step<'a> {
+    /// What the report calls the step. It starts with `Coverage: ` and `Navigate: ` (a
+    /// budget of 100 ms), `Select: `, or `Search: ` (200 ms).
+    pub title: &'a str,
+    /// The title of a registered action to run first, or empty for none.
+    pub action: &'a str,
+    /// Script that runs after the action. `probe` is an object that keeps values between steps.
+    pub drive: &'a str,
+    /// A JavaScript expression that is true once the step's result is on screen.
+    pub done: &'a str,
+}
+
+/// The state of the trace panel when the trace of an element has loaded: it names the
+/// element, lists rows, and holds no "Loading..." row.
+// @implements CT-EFF-005
+const TRACE_LOADED: &str = "(() => { const p = document.querySelector('#pane-trace [data-element]'); return p !== null && p.querySelector('[role=option]') !== null && !p.textContent.includes('Loading'); })()";
+
+/// The steps `views` mode runs, in order. The project has requirements with no parent,
+/// implementation, or verification, and elements traced to nothing, so every filter lists
+/// a page. Selecting a search hit for `PF-00101` lets the next step follow its first trace
+/// link (to the requirement it derives from) and the last go back.
+// @implements CT-EFF-005, CT-EFF-006
+pub const VIEW_STEPS: [Step<'static>; 8] = [
+    Step {
+        title: "Coverage: no verification",
+        action: "Coverage: no verification",
+        drive: "",
+        done: "document.querySelector('[data-view=coverage][data-filter=\"no-verification\"][data-ready] [role=option]') !== null",
+    },
+    Step {
+        title: "Coverage: no parent",
+        action: "Coverage: no parent",
+        drive: "",
+        done: "document.querySelector('[data-view=coverage][data-filter=\"no-parent\"][data-ready] [role=option]') !== null",
+    },
+    Step {
+        title: "Coverage: untraced",
+        action: "Coverage: untraced",
+        drive: "",
+        done: "document.querySelector('[data-view=coverage][data-filter=\"untraced\"][data-ready] [role=option]') !== null",
+    },
+    Step {
+        title: "Search: system budget",
+        action: "Search the model",
+        drive: "const box = document.querySelector('#search-input'); box.value = 'system budget'; box.dispatchEvent(new Event('input', { bubbles: true }));",
+        done: "document.querySelector('[data-view=search][data-query=\"system budget\"][data-ready] [role=option]') !== null",
+    },
+    Step {
+        title: "Search: PF-00101",
+        action: "",
+        drive: "const box = document.querySelector('#search-input'); box.value = 'PF-00101'; box.dispatchEvent(new Event('input', { bubbles: true }));",
+        done: "document.querySelector('[data-view=search][data-query=\"PF-00101\"][data-ready] [role=option]') !== null",
+    },
+    Step {
+        title: "Select: a search hit",
+        action: "",
+        drive: "document.querySelector('[data-view=search] [role=option]').click();",
+        done: TRACE_LOADED,
+    },
+    Step {
+        title: "Navigate: follow a trace link",
+        action: "",
+        drive: "probe.from = document.querySelector('#pane-trace [data-element]').dataset.element; document.querySelector('#pane-trace [role=option]').click();",
+        done: "document.querySelector('#pane-trace [data-element]').dataset.element !== probe.from && (() => { const p = document.querySelector('#pane-trace [data-element]'); return p.querySelector('[role=option]') !== null && !p.textContent.includes('Loading'); })()",
+    },
+    Step {
+        title: "Navigate: back",
+        action: "Trace: back",
+        drive: "",
+        done: "document.querySelector('#pane-trace [data-element]').dataset.element === probe.from && (() => { const p = document.querySelector('#pane-trace [data-element]'); return p.querySelector('[role=option]') !== null && !p.textContent.includes('Loading'); })()",
+    },
 ];
 
 /// One process: its ID, its parent, its name, and its resident memory.
@@ -181,19 +263,51 @@ pub fn report_json(report: &Report) -> String {
 /// painted frame. A failure sets `clew-probe:error:...` instead.
 // @implements CT-EFF-003
 pub fn step_script(title: &str, step: usize) -> String {
-    let title = quote(title);
-    format!(
-        r#"(async () => {{
-  try {{
-    const turn = () => new Promise((resolve) => setTimeout(resolve, 0));
-    window.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'p', ctrlKey: true, shiftKey: true, bubbles: true }}));
+    step_script_for(
+        &Step {
+            title: "",
+            action: title,
+            drive: "",
+            done: "true",
+        },
+        step,
+    )
+}
+
+/// The script for a `Step`: its action through the palette (if any), its drive, then a wait
+/// for its `done` test, then the title change after the second painted frame.
+// @implements CT-EFF-003, CT-EFF-005, CT-EFF-006
+pub fn step_script_for(step: &Step, index: usize) -> String {
+    let action = if step.action.is_empty() {
+        String::new()
+    } else {
+        let title = quote(step.action);
+        format!(
+            r#"window.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'p', ctrlKey: true, shiftKey: true, bubbles: true }}));
     await turn();
     const input = document.querySelector('[role=combobox]');
     input.value = {title};
     input.dispatchEvent(new Event('input', {{ bubbles: true }}));
     await turn();
     input.closest('[role=dialog]').dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', bubbles: true }}));
-    requestAnimationFrame(() => requestAnimationFrame(() => {{ document.title = 'clew-probe:done:{step}'; }}));
+    await turn();"#
+        )
+    };
+    let (drive, done) = (step.drive, step.done);
+    format!(
+        r#"(async () => {{
+  try {{
+    const turn = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const waitFor = (test) => new Promise((resolve) => {{
+      if (test()) {{ resolve(); return; }}
+      const observer = new MutationObserver(() => {{ if (test()) {{ observer.disconnect(); resolve(); }} }});
+      observer.observe(document.body, {{ childList: true, subtree: true, characterData: true, attributes: true }});
+    }});
+    const probe = (window.__clewProbe = window.__clewProbe || {{}});
+    {action}
+    {drive}
+    await waitFor(() => {done});
+    requestAnimationFrame(() => requestAnimationFrame(() => {{ document.title = 'clew-probe:done:{index}'; }}));
   }} catch (e) {{
     document.title = 'clew-probe:error:' + e;
   }}
@@ -254,6 +368,17 @@ enum Mode {
     /// Open the project given on the command line, and report the time to its first tree
     /// row on screen and the memory then (CT-EFF-004).
     Project,
+    /// Open the project given on the command line, then run `VIEW_STEPS` and report the time
+    /// of each (CT-EFF-005, CT-EFF-006).
+    Views,
+}
+
+// @implements CT-EFF-004, CT-EFF-005
+impl Mode {
+    /// Whether the mode waits for the project's first tree row before it is ready.
+    fn opens_project(self) -> bool {
+        matches!(self, Mode::Project | Mode::Views)
+    }
 }
 
 // @implements CT-EFF-002, CT-EFF-003, CT-EFF-004
@@ -262,6 +387,7 @@ fn parse_mode(value: Option<&str>) -> Option<Mode> {
         Some("idle") => Some(Mode::Idle),
         Some("script") => Some(Mode::Script),
         Some("project") => Some(Mode::Project),
+        Some("views") => Some(Mode::Views),
         _ => None,
     }
 }
@@ -297,13 +423,14 @@ pub fn ready_script(project: bool) -> String {
 /// What has been measured so far.
 // @implements CT-EFF-002, CT-EFF-003
 struct Run {
-    mode: Mode,
     started: Instant,
     interactive: Option<Duration>,
     memory: Option<Memory>,
     step: usize,
     step_started: Instant,
     actions: Vec<(String, Duration)>,
+    /// The title and script of each step this mode runs.
+    steps: Vec<(String, String)>,
 }
 
 /// With a probe requested, the window is created in `start` instead of from the config, so
@@ -317,6 +444,21 @@ pub fn prepare(context: &mut tauri::Context<tauri::Wry>) {
     }
 }
 
+/// The titles and scripts of the steps a mode runs after the window is ready: none for
+/// `idle` and `project`.
+// @implements CT-EFF-003, CT-EFF-005, CT-EFF-006
+fn steps_of(mode: Mode) -> Vec<(String, String)> {
+    match mode {
+        Mode::Script => (SCRIPT.iter().enumerate())
+            .map(|(i, title)| (title.to_string(), step_script(title, i)))
+            .collect(),
+        Mode::Views => (VIEW_STEPS.iter().enumerate())
+            .map(|(i, step)| (step.title.to_string(), step_script_for(step, i)))
+            .collect(),
+        Mode::Idle | Mode::Project => Vec::new(),
+    }
+}
+
 /// Opens the window with the probe hooks when a probe was requested; otherwise does nothing,
 /// since the window came from the config.
 // @implements CT-EFF-002, CT-EFF-003, CT-EFF-004
@@ -326,13 +468,13 @@ pub fn start(app: &tauri::App, started: Instant) -> Result<(), Box<dyn std::erro
     };
     let config = app.config().app.windows[0].clone();
     let run = Arc::new(Mutex::new(Run {
-        mode,
         started,
         interactive: None,
         memory: None,
         step: 0,
         step_started: started,
         actions: Vec::new(),
+        steps: steps_of(mode),
     }));
     let finished = Arc::new(AtomicBool::new(false));
 
@@ -351,7 +493,7 @@ pub fn start(app: &tauri::App, started: Instant) -> Result<(), Box<dyn std::erro
         if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
             // Ready when the second frame after the load has been painted (with a project,
             // after its first tree row is on screen).
-            let _ = window.eval(ready_script(mode == Mode::Project));
+            let _ = window.eval(ready_script(mode.opens_project()));
         }
     };
     tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?
@@ -360,12 +502,18 @@ pub fn start(app: &tauri::App, started: Instant) -> Result<(), Box<dyn std::erro
         .build()?;
 
     let handle = app.handle().clone();
+    let watched = Arc::clone(&run);
     std::thread::Builder::new()
         .name("clew-probe-watchdog".into())
         .spawn(move || {
             std::thread::sleep(WATCHDOG);
             if !finished.load(Ordering::SeqCst) {
-                eprintln!("probe failed: no result within {WATCHDOG:?}");
+                let guard = watched.lock().unwrap_or_else(PoisonError::into_inner);
+                let waiting = guard
+                    .steps
+                    .get(guard.step)
+                    .map_or("the page", |s| s.0.as_str());
+                eprintln!("probe failed: no result within {WATCHDOG:?}, waiting on `{waiting}`");
                 handle.exit(1);
             }
         })?;
@@ -395,7 +543,7 @@ fn on_event(
                 std::thread::sleep(IDLE_SETTLE);
                 let mut guard = run.lock().unwrap_or_else(PoisonError::into_inner);
                 guard.memory = memory_of(&read_processes(), std::process::id());
-                if guard.mode == Mode::Script {
+                if !guard.steps.is_empty() {
                     run_step(&mut guard, &window);
                 } else {
                     finish(&guard, &finished, &window);
@@ -404,9 +552,10 @@ fn on_event(
     } else if event.starts_with("done:") {
         let step = guard.step;
         let took = guard.step_started.elapsed();
-        guard.actions.push((SCRIPT[step].to_string(), took));
+        let title = guard.steps[step].0.clone();
+        guard.actions.push((title, took));
         guard.step += 1;
-        if guard.step < SCRIPT.len() {
+        if guard.step < guard.steps.len() {
             run_step(&mut guard, window);
         } else {
             finish(&guard, finished, window);
@@ -417,7 +566,7 @@ fn on_event(
 // @implements CT-EFF-003
 fn run_step(run: &mut Run, window: &tauri::WebviewWindow) {
     run.step_started = Instant::now();
-    let _ = window.eval(step_script(SCRIPT[run.step], run.step));
+    let _ = window.eval(run.steps[run.step].1.clone());
 }
 
 // @implements CT-EFF-002, CT-EFF-003
@@ -576,6 +725,82 @@ mod tests {
         assert!(script.contains("clew-probe:done:3"));
         assert!(script.contains("clew-probe:error:"));
         assert_eq!(script.matches("requestAnimationFrame").count(), 2);
+    }
+
+    // @verifies CT-EFF-005, CT-EFF-006
+    #[test]
+    fn the_views_mode_is_named_by_the_environment_and_opens_a_project() {
+        assert_eq!(parse_mode(Some("views")), Some(Mode::Views));
+        assert!(Mode::Views.opens_project());
+        assert!(Mode::Project.opens_project());
+        assert!(!Mode::Script.opens_project());
+    }
+
+    // @verifies CT-EFF-005, CT-EFF-006
+    #[test]
+    fn a_view_step_runs_its_action_then_its_drive_then_waits_for_its_done_test() {
+        let step = Step {
+            title: "Search: \"x\"",
+            action: "Search the model",
+            drive: "probe.ran = 1;",
+            done: "probe.ran === 1",
+        };
+        let script = step_script_for(&step, 4);
+        let at = |needle: &str| script.find(needle).unwrap_or_else(|| panic!("no {needle}"));
+        assert!(at("\"Search the model\"") < at("probe.ran = 1;"));
+        assert!(at("probe.ran = 1;") < at("probe.ran === 1"));
+        assert!(at("probe.ran === 1") < at("clew-probe:done:4"));
+        assert_eq!(script.matches("requestAnimationFrame").count(), 2);
+        assert!(script.contains("clew-probe:error:"));
+        // No action: the palette is not opened.
+        let plain = step_script_for(&Step { action: "", ..step }, 0);
+        assert!(!plain.contains("role=combobox"));
+    }
+
+    // @verifies CT-EFF-005, CT-EFF-006
+    #[test]
+    fn the_view_steps_filter_search_select_and_navigate() {
+        let titles: Vec<&str> = VIEW_STEPS.iter().map(|s| s.title).collect();
+        assert!(
+            titles.iter().any(|t| t.starts_with("Coverage: ")),
+            "{titles:?}"
+        );
+        assert!(
+            titles.iter().any(|t| t.starts_with("Search: ")),
+            "{titles:?}"
+        );
+        assert!(
+            titles.iter().any(|t| t.starts_with("Select: ")),
+            "{titles:?}"
+        );
+        assert!(
+            titles.iter().any(|t| t.starts_with("Navigate: ")),
+            "{titles:?}"
+        );
+    }
+
+    // @verifies CT-EFF-005, CT-EFF-006
+    #[test]
+    fn every_view_step_action_is_a_registered_palette_title() {
+        let app = include_str!("../../src/App.svelte");
+        let filters = include_str!("../../src/lib/find.ts");
+        for step in VIEW_STEPS.iter().filter(|s| !s.action.is_empty()) {
+            // `Coverage: <filter>` actions are built from the filter labels in find.ts.
+            let registered = match step.action.strip_prefix("Coverage: ") {
+                Some(filter) => {
+                    app.contains("title: `Coverage: ${f.label.toLowerCase()}`")
+                        && filters
+                            .lines()
+                            .any(|l| l.to_lowercase().contains(&format!("label: '{filter}'")))
+                }
+                None => app.contains(&format!("title: '{}'", step.action)),
+            };
+            assert!(
+                registered,
+                "App.svelte registers no action titled {}",
+                step.action
+            );
+        }
     }
 
     // @verifies CT-EFF-003
