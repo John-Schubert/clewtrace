@@ -82,7 +82,7 @@ export type ProjectStatus =
   | { state: 'failed'; error: Problem };
 
 // @implements CT-EFF-005
-/** An element in the model tree. Element IDs last until the project is opened again. */
+/** An element in the model tree. Element IDs are stable across edits while the element keeps its place. */
 export interface TreeRow {
   id: number;
   kind: string;
@@ -146,6 +146,24 @@ export interface ImpactRow extends LinkRow {
 // @implements CT-EFF-005, CT-USE-007
 export interface ProblemRow extends Problem {
   severity: 'error' | 'warning';
+}
+
+// @implements CT-MOD-003, CT-USE-007
+/** A problem in the file being edited, with its place as a line and column. */
+export interface DiagnosticRow extends ProblemRow {
+  line: number;
+  column: number;
+}
+
+// @implements CT-MOD-003, CT-MOD-005
+/**
+ * What an edit gives back: the problems in the edited file, for the editor's markers, and
+ * the project counts. `revision` rises with each edit the Rust side takes.
+ */
+export interface EditReply {
+  revision: number;
+  diagnostics: DiagnosticRow[];
+  summary: ProjectSummary;
 }
 
 // @implements CT-EFF-005, CT-EFF-006
@@ -242,6 +260,18 @@ export function sourceText(path: string): Promise<{ path: string; text: string }
 /** Saves text over an existing `.sysml` file in the project; the Rust side writes atomically. */
 export function saveSource(path: string, text: string): Promise<{ path: string; bytes: number }> {
   return call('save_source', { path, text });
+}
+
+// @implements CT-MOD-003, CT-EFF-005
+/** Gives the unsaved text of a `.sysml` file to the Rust side, which rebuilds the project from it. */
+export function validateSource(path: string, text: string): Promise<EditReply> {
+  return call('validate_source', { path, text });
+}
+
+// @implements CT-MOD-003
+/** Takes the saved text of a file again, after the user discards their edits. */
+export function revertSource(path: string): Promise<EditReply> {
+  return call('revert_source', { path });
 }
 
 // @implements CT-MOD-004

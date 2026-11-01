@@ -1,14 +1,15 @@
-<!-- @begin CT-MOD-005, CT-EFF-005, CT-USE-004, CT-USE-007 -->
+<!-- @begin CT-MOD-005, CT-MOD-003, CT-EFF-005, CT-USE-004, CT-USE-007 -->
 <script lang="ts">
   // The model tree: packages, definitions, and usages, loaded a page at a time as the user
   // opens a package or scrolls. Right opens, Left closes or moves to the parent, Enter selects.
   import { onMount } from 'svelte';
   import { treeChildren } from './api';
   import { treeLabel } from './describe';
+  import type { Refresher } from './live';
   import { TreeModel } from './tree';
   import VirtualList from './VirtualList.svelte';
 
-  let { onselect }: { onselect: (id: number) => void } = $props();
+  let { onselect, refresher }: { onselect: (id: number) => void; refresher?: Refresher } = $props();
 
   let version = $state(0);
   let problem = $state('');
@@ -24,8 +25,19 @@
   });
   let selected = $state(-1);
 
+  // After an edit the tree is fetched again, keeping the open packages, and the selection
+  // follows its element to the row it moved to.
+  async function refresh() {
+    const keep = tree.at(selected)?.row?.id;
+    await tree.refresh();
+    if (keep !== undefined) {
+      selected = tree.indexOf(keep);
+    }
+  }
+
   onMount(() => {
     void tree.reset();
+    return refresher?.subscribe(() => void refresh());
   });
 
   // A copy of the node, so the row is drawn again when the model changes it in place.

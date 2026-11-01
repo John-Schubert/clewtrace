@@ -13,8 +13,10 @@ browser, the detail view, or the problems panel changes. Record the result below
 - [ ] Selecting an element shows its kind, qualified name, doc, attributes, and file and line.
 - [ ] The problems panel lists each error, then each warning, as file:line:column with its
       fix hint. Selecting one shows where, what went wrong, and how to fix it.
-- [ ] With the text editor (a later task): editing the text updates the tree as you type.
-      This item cannot be run until the editor exists.
+- [ ] With the text editor: open a `.sysml` file, add a part, and pause for a moment. The
+      tree shows the new part without closing the open packages, and the selected row stays
+      selected. Task 2.9b built this; the unit tests cover it, and it has not been demonstrated
+      by hand in the running app yet.
 
 ## Result
 

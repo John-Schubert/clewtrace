@@ -25,6 +25,30 @@ export class PagedRows<Row> {
     this.onchange();
   }
 
+  /**
+   * Fetches again every page it holds, after the data changed, and swaps them in together,
+   * so the list is never shown empty. When a fetch fails, the old rows stay.
+   */
+  async refresh(): Promise<void> {
+    const generation = ++this.generation;
+    this.pending.clear();
+    const held = [...new Set([0, ...this.loaded.keys()])].sort((a, b) => a - b);
+    try {
+      const results = await Promise.all(held.map((page) => this.fetch(page * this.pageSize, this.pageSize)));
+      if (generation !== this.generation) {
+        return;
+      }
+      this.loaded.clear();
+      results.forEach((result, i) => this.loaded.set(held[i], result.rows));
+      const last = results[results.length - 1];
+      const known = held[held.length - 1] * this.pageSize + last.rows.length;
+      this.count = results[0].total ?? (last.more ? known + 1 : known);
+      this.onchange();
+    } catch (e) {
+      this.onerror(e);
+    }
+  }
+
   /** The row at an index, or undefined while its page loads (which this starts). */
   at(index: number): Row | undefined {
     const page = Math.floor(index / this.pageSize);

@@ -1,10 +1,11 @@
-<!-- @begin CT-TRC-005, CT-TRC-006, CT-EFF-005 -->
+<!-- @begin CT-TRC-005, CT-TRC-006, CT-MOD-003, CT-EFF-005 -->
 <script lang="ts">
   // The trace panel: links to and from the selected element, grouped by kind, and an impact
   // view of everything upstream and downstream. Back and forward step through the elements
   // looked at.
   import { elementImpact, elementLinks } from './api';
   import { impactLabel, linkLabel } from './trace';
+  import type { Refresher } from './live';
   import TraceList from './TraceList.svelte';
 
   interface Props {
@@ -15,8 +16,9 @@
     onback: () => void;
     onforward: () => void;
     onopen: (path: string, line: number) => void;
+    refresher?: Refresher;
   }
-  let { id, canBack, canForward, onfollow, onback, onforward, onopen }: Props = $props();
+  let { id, canBack, canForward, onfollow, onback, onforward, onopen, refresher }: Props = $props();
 
   let tab = $state<'links' | 'impact'>('links');
 </script>
@@ -31,11 +33,11 @@
 {#if id === undefined}
   <p class="muted">Select an element to see its trace links.</p>
 {:else if tab === 'links'}
-  <TraceList title="Traces to" {id} fetch={(o, l) => elementLinks(id, 'from', o, l)} label={linkLabel} {onfollow} {onopen} />
-  <TraceList title="Traced by" {id} fetch={(o, l) => elementLinks(id, 'to', o, l)} label={linkLabel} {onfollow} {onopen} />
+  <TraceList title="Traces to" {id} fetch={(o, l) => elementLinks(id, 'from', o, l)} label={linkLabel} {onfollow} {onopen} {refresher} />
+  <TraceList title="Traced by" {id} fetch={(o, l) => elementLinks(id, 'to', o, l)} label={linkLabel} {onfollow} {onopen} {refresher} />
 {:else}
-  <TraceList title="Upstream" {id} fetch={(o, l) => elementImpact(id, 'upstream', o, l)} label={impactLabel} {onfollow} {onopen} />
-  <TraceList title="Downstream" {id} fetch={(o, l) => elementImpact(id, 'downstream', o, l)} label={impactLabel} {onfollow} {onopen} />
+  <TraceList title="Upstream" {id} fetch={(o, l) => elementImpact(id, 'upstream', o, l)} label={impactLabel} {onfollow} {onopen} {refresher} />
+  <TraceList title="Downstream" {id} fetch={(o, l) => elementImpact(id, 'downstream', o, l)} label={impactLabel} {onfollow} {onopen} {refresher} />
 {/if}
 </div>
 

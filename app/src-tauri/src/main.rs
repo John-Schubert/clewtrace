@@ -95,6 +95,8 @@ fn main() {
             commands::source_lines,
             commands::source_text,
             commands::save_source,
+            commands::validate_source,
+            commands::revert_source,
             commands::editor_keywords,
             commands::problems,
             commands::search,
@@ -180,7 +182,7 @@ mod no_network {
     /// The `allow-` permissions of the app's own commands (build.rs) only read the project
     /// the app has open, show the folder dialog, read and write the recent-projects file, or
     /// save an existing `.sysml` file in the open project; none of them opens a connection.
-    const OFFLINE_PERMISSIONS: [&str; 19] = [
+    const OFFLINE_PERMISSIONS: [&str; 21] = [
         "core:app:allow-name",
         "core:app:allow-version",
         "allow-project-status",
@@ -193,6 +195,8 @@ mod no_network {
         "allow-source-lines",
         "allow-source-text",
         "allow-save-source",
+        "allow-validate-source",
+        "allow-revert-source",
         "allow-editor-keywords",
         "allow-problems",
         "allow-search",

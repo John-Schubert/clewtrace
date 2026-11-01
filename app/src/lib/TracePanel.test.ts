@@ -10,6 +10,7 @@ vi.mock('./api', async (original) => {
 
 import * as api from './api';
 import TracePanel from './TracePanel.svelte';
+import { Refresher } from './live';
 
 let instance: Record<string, unknown> | undefined;
 afterEach(() => {
@@ -139,6 +140,21 @@ describe('TracePanel', () => {
     await settle();
     expect(options().length).toBeGreaterThan(0);
     expect(performance.now() - started).toBeLessThan(100);
+  });
+
+  // @verifies CT-MOD-003, CT-TRC-005
+  it('shows the links again after an edit rebuilt the trace graph', async () => {
+    vi.mocked(api.elementLinks).mockResolvedValue(page([]));
+    const refresher = new Refresher();
+    instance = mount(TracePanel, { target: document.body, props: props({ refresher }) });
+    await settle();
+    expect(options()).toHaveLength(0);
+    vi.mocked(api.elementLinks).mockImplementation(async (_id, direction) =>
+      page(direction === 'from' ? [{ kind: 'satisfies', other: { id: 2, kind: 'requirement', name: 'R::top' }, file: 'd.sysml', line: 3 }] : []),
+    );
+    refresher.fire();
+    await settle();
+    expect(options().map((o) => o.textContent?.trim())).toContain('satisfies requirement R::top');
   });
 });
 // @end

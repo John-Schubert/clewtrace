@@ -50,5 +50,43 @@ describe('PagedRows', () => {
     expect(rows.count).toBe(0);
     expect(onerror).toHaveBeenCalledOnce();
   });
+  // @verifies CT-EFF-005, CT-MOD-005
+  it('refreshes the pages it holds without showing an empty list', async () => {
+    let total = 450;
+    const fetch = vi.fn(async (offset: number, limit: number): Promise<Page<number>> => {
+      const rows = Array.from({ length: Math.max(0, Math.min(total - offset, limit)) }, (_, i) => total * 1000 + offset + i);
+      return { offset, total, more: offset + limit < total, rows };
+    });
+    const counts: number[] = [];
+    const rows = new PagedRows(fetch, () => counts.push(rows.count), 200);
+    await rows.reset();
+    expect(rows.at(250)).toBeUndefined();
+    await rows.idle();
+    expect(rows.at(250)).toBe(450_250);
+    total = 300;
+    counts.length = 0;
+    fetch.mockClear();
+    await rows.refresh();
+    expect(counts.every((n) => n > 0)).toBe(true);
+    expect(rows.count).toBe(300);
+    expect(rows.at(5)).toBe(300_005);
+    expect(rows.at(250)).toBe(300_250);
+    // Only the pages it held were fetched again.
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  // @verifies CT-USE-007
+  it('keeps the old rows and reports the error when a refresh fails', async () => {
+    let fail = false;
+    const base = fake(5);
+    const onerror = vi.fn();
+    const rows = new PagedRows<number>(async (...a) => (fail ? Promise.reject(new Error('boom')) : base(...a)), () => {}, 200, onerror);
+    await rows.reset();
+    fail = true;
+    await rows.refresh();
+    expect(rows.count).toBe(5);
+    expect(rows.at(0)).toBe(0);
+    expect(onerror).toHaveBeenCalledOnce();
+  });
 });
 // @end

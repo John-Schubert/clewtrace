@@ -1,8 +1,10 @@
-<!-- @begin CT-TRC-005, CT-TRC-006, CT-EFF-005, CT-USE-007 -->
+<!-- @begin CT-TRC-005, CT-TRC-006, CT-MOD-003, CT-EFF-005, CT-USE-007 -->
 <script lang="ts" generics="Row extends LinkRow">
   // One titled list of trace rows, fetched a page at a time. Click or Enter follows an
   // element row, and opens a code row in the source view.
   import type { LinkRow, Page } from './api';
+  import { onMount } from 'svelte';
+  import type { Refresher } from './live';
   import { PagedRows } from './pages';
   import { codeTarget } from './find';
   import { followable } from './trace';
@@ -17,8 +19,10 @@
     onfollow: (id: number) => void;
     /** Opens a code row in the source view. */
     onopen: (path: string, line: number) => void;
+    /** Fetches the rows again after an edit rebuilt the trace graph. */
+    refresher?: Refresher;
   }
-  let { title, id, fetch, label, onfollow, onopen }: Props = $props();
+  let { title, id, fetch, label, onfollow, onopen, refresher }: Props = $props();
 
   let version = $state(0);
   let failure = $state('');
@@ -38,6 +42,8 @@
     failure = '';
     void rows.reset();
   });
+
+  onMount(() => refresher?.subscribe(() => void rows.refresh()));
 
   function at(index: number) {
     void version;

@@ -1,14 +1,15 @@
-<!-- @begin CT-USE-007, CT-EFF-005, CT-USE-004 -->
+<!-- @begin CT-USE-007, CT-MOD-003, CT-EFF-005, CT-USE-004 -->
 <script lang="ts">
   // Every syntax, name, and trace problem as file:line:column, what went wrong, and the
   // fix hint. Errors come first, then warnings. Click or arrow to select a problem.
   import { onMount } from 'svelte';
   import { problems, type ProblemRow } from './api';
   import { problemSummary } from './describe';
+  import type { Refresher } from './live';
   import { PagedRows } from './pages';
   import VirtualList from './VirtualList.svelte';
 
-  let { onselect }: { onselect: (problem: ProblemRow) => void } = $props();
+  let { onselect, refresher }: { onselect: (problem: ProblemRow) => void; refresher?: Refresher } = $props();
 
   let version = $state(0);
   let failure = $state('');
@@ -25,6 +26,7 @@
 
   onMount(() => {
     void rows.reset();
+    return refresher?.subscribe(() => void rows.refresh());
   });
 
   function at(index: number) {

@@ -1,19 +1,28 @@
-<!-- @begin CT-EFF-005, CT-USE-007, CT-TRC-004, CT-MOD-004 -->
+<!-- @begin CT-EFF-005, CT-USE-007, CT-TRC-004, CT-MOD-004, CT-MOD-003 -->
 <script lang="ts">
   // The main view's detail of what is selected: an element from the tree, or a problem from
   // the problems list.
   import { elementDetail, type ElementDetail } from './api';
   import { detailFields, problemSummary, type Selection } from './describe';
+  import { onMount } from 'svelte';
   import { canEdit, placeOf } from './editor';
+  import type { Refresher } from './live';
 
-  let { selection, onopen }: { selection: Selection; onopen: (path: string, line: number) => void } = $props();
+  let {
+    selection,
+    onopen,
+    refresher,
+  }: { selection: Selection; onopen: (path: string, line: number) => void; refresher?: Refresher } = $props();
 
   let detail = $state<ElementDetail>();
   let failure = $state('');
 
-  $effect(() => {
-    const current = selection;
-    detail = undefined;
+  // Fetches the element again. Keeps what is shown until the answer arrives, so an edit does
+  // not blank the view. An element that an edit removed gives its error.
+  function load(current: Selection, keep = false) {
+    if (!keep) {
+      detail = undefined;
+    }
     failure = '';
     if (current.kind === 'element') {
       elementDetail(current.id)
@@ -23,10 +32,19 @@
           }
         })
         .catch((e: unknown) => {
-          failure = e instanceof Error ? e.message : String(e);
+          if (selection === current) {
+            detail = undefined;
+            failure = e instanceof Error ? e.message : String(e);
+          }
         });
     }
+  }
+
+  $effect(() => {
+    load(selection);
   });
+
+  onMount(() => refresher?.subscribe(() => load(selection, true)));
 </script>
 
 {#if failure}

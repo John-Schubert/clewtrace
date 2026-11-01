@@ -69,6 +69,8 @@ edit point got a new ID on a rebuild, and the UI would lose its selection and hi
   is an estimate. 2.9b must run the 2.6 probe again after it moves the app to
   `Workspace`, for the real figure. If that is over 400 MB, compact the stable-ID table
   first, since it copies every element's name (John, 2026-11-01).
+  **Measured in task 2.9b:** 358 MB total PSS on the same 10,000-requirement project, with
+  the app on `Workspace`. That is under 400 MB, so the table was not compacted.
 - A setup error costs a second rebuild, since the last project was dropped. Such errors
   are rare while typing, and the rebuild is about as fast as the edit itself.
 - An element gets a new stable ID when it is renamed, changes kind, moves to another owner

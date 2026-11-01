@@ -1,9 +1,10 @@
-// @begin CT-MOD-004, CT-USE-003, CT-USE-008, CT-EFF-005
+// @begin CT-MOD-004, CT-MOD-003, CT-USE-003, CT-USE-008, CT-EFF-005
 // The text editor for .sysml files: CodeMirror 6 set up with highlighting from the
 // lexer's own keyword list, keyword completion, search, undo and redo, and an explicit
 // save. The logic lives here so the Svelte component stays thin.
 import { autocompletion, completionKeymap, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { lintGutter, setDiagnostics, type Diagnostic } from '@codemirror/lint';
 import { indentUnit, StreamLanguage, syntaxTree, type StreamParser } from '@codemirror/language';
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
 import { EditorState, RangeSetBuilder, type Text } from '@codemirror/state';
@@ -174,6 +175,9 @@ export function saveCommand(onSave: (text: string) => void): Command {
   };
 }
 
+// @end
+
+// @begin CT-MOD-004, CT-MOD-003, CT-USE-003, CT-USE-004, CT-USE-008, CT-EFF-005
 /** The colors come from the app's design tokens, so the editor follows the theme. */
 const theme = EditorView.theme({
   '&': { height: '100%', color: 'var(--text)', backgroundColor: 'var(--surface)' },
@@ -211,6 +215,7 @@ export function editorState(doc: string, keywords: readonly string[], hooks: Edi
       autocompletion({ override: [completeKeywords(keywords)] }),
       search({ top: true }),
       highlightSelectionMatches(),
+      lintGutter(),
       keymap.of([
         { key: 'Mod-s', run: saveCommand(hooks.onSave), preventDefault: true },
         ...completionKeymap,
@@ -252,6 +257,11 @@ export function openView(host: HTMLElement, state: EditorState): EditorView {
   parent.style.height = '100%';
   root.append(parent);
   return new EditorView({ state, parent, root });
+}
+
+/** Shows these problems as markers in the text, in place of the ones shown before. */
+export function showDiagnostics(view: EditorView, diagnostics: Diagnostic[]): void {
+  view.dispatch(setDiagnostics(view.state, diagnostics));
 }
 
 /** Puts the cursor at the start of a line (1-based, clamped) and scrolls it into view. */

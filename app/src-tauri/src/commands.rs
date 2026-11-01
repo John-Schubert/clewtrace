@@ -131,6 +131,24 @@ pub fn save_source(state: State<'_, Arc<AppState>>, path: String, text: String) 
     Response::new(reply(result))
 }
 
+// @implements CT-MOD-003, CT-EFF-005
+/// Takes the editor's unsaved text for a `.sysml` file and rebuilds the project from it.
+/// Replies with the problems found in that file and the new project counts.
+#[tauri::command(async)]
+pub fn validate_source(state: State<'_, Arc<AppState>>, path: String, text: String) -> Response {
+    let result = state.project().and_then(|p| p.edit(&path, &text));
+    Response::new(reply(result))
+}
+
+// @implements CT-MOD-003, CT-EFF-005
+/// Takes the saved text of a `.sysml` file in place of any unsaved edit, after the user
+/// discards their changes.
+#[tauri::command(async)]
+pub fn revert_source(state: State<'_, Arc<AppState>>, path: String) -> Response {
+    let result = state.project().and_then(|p| p.revert(&path));
+    Response::new(reply(result))
+}
+
 // @implements CT-MOD-004
 /// The SysML v2 keywords, from the lexer, for the editor's highlighting and completion.
 #[tauri::command(async)]

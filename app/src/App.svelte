@@ -1,15 +1,17 @@
 <script lang="ts">
-  // @begin CT-PLT-001, CT-EFF-004, CT-MOD-005, CT-TRC-005, CT-TRC-004, CT-EFF-006, CT-MOD-004, CT-USE-008
+  // @begin CT-PLT-001, CT-EFF-004, CT-MOD-005, CT-TRC-005, CT-TRC-004, CT-EFF-006, CT-MOD-004, CT-USE-008, CT-MOD-003
   // The app window: shows the app name and version, read from the Rust side, and the
   // project opened from the command line once its background load ends.
   import { getName, getVersion } from '@tauri-apps/api/app';
   import {
     clearRecent,
     describeStatus,
+    type EditReply,
     type ProjectStatus,
     openProject,
     pickFolder,
     recentProjects,
+    revertSource,
     waitForProject,
     type RecentProject,
   } from './lib/api';
@@ -24,6 +26,7 @@
   import SearchView from './lib/SearchView.svelte';
   import SourceView from './lib/SourceView.svelte';
   import { NavHistory } from './lib/history';
+  import { Refresher } from './lib/live';
   import TracePanel from './lib/TracePanel.svelte';
   import ProblemsPanel from './lib/ProblemsPanel.svelte';
   import type { Selection } from './lib/describe';
@@ -85,17 +88,36 @@
     editing = { path, line };
   }
 
+  // Live validation. Each time the Rust side rebuilds the project from the editor's unsaved
+  // text, the browser, problems, detail, and trace panes fetch again, and the status line
+  // and coverage counts follow. Selection and history keep their element IDs, which are
+  // stable across edits; an element an edit removed shows its error in the detail view.
+  const refresher = new Refresher();
+
+  function validated(reply: EditReply) {
+    project = describeStatus({ state: 'ready', project: reply.summary });
+    gapCounts = reply.summary.gaps;
+    refresher.fire();
+  }
+
   async function saveAndOpen() {
     if (blocked && (await editor?.save())) {
       openEditor(blocked.path, blocked.line);
     }
   }
 
-  function discardAndOpen() {
-    if (blocked) {
+  // Discarding edits takes the saved text of the file again, so the project matches the disk.
+  async function discardAndOpen() {
+    if (blocked && editing) {
       const next = blocked;
+      const discarded = editing.path;
       editorDirty = false;
       openEditor(next.path, next.line);
+      try {
+        validated(await revertSource(discarded));
+      } catch (e) {
+        show(e);
+      }
     }
   }
 
@@ -305,7 +327,7 @@
     <h2>Model browser</h2>
     {#if opened > 0}
       {#key opened}
-        <ModelBrowser onselect={showElement} />
+        <ModelBrowser onselect={showElement} {refresher} />
       {/key}
     {/if}
     {#if recent.length > 0}
@@ -350,7 +372,7 @@
       {/if}
       {#if editing}
         <div class="editor-pane" hidden={view !== 'editor'}>
-          <TextEditor bind:this={editor} path={editing.path} line={editing.line} ondirty={(d) => (editorDirty = d)} />
+          <TextEditor bind:this={editor} path={editing.path} line={editing.line} ondirty={(d) => (editorDirty = d)} onvalidated={validated} />
         </div>
       {/if}
       {#key opened}
@@ -364,7 +386,7 @@
       {/key}
     {/if}
     {#if selection && (view === 'detail' || opened === 0)}
-      <DetailView {selection} onopen={openSource} />
+      <DetailView {selection} onopen={openSource} {refresher} />
     {/if}
   </main>
   <aside id="pane-trace" tabindex="-1" aria-label="Trace panel">
@@ -378,6 +400,7 @@
         onback={() => goto(history.back())}
         onforward={() => goto(history.forward())}
         onopen={openSource}
+        {refresher}
       />
     {/if}
   </aside>
@@ -385,7 +408,7 @@
     <h2>Problems</h2>
     {#if opened > 0}
       {#key opened}
-        <ProblemsPanel onselect={(p) => { view = 'detail'; selection = { kind: 'problem', problem: p }; }} />
+        <ProblemsPanel {refresher} onselect={(p) => { view = 'detail'; selection = { kind: 'problem', problem: p }; }} />
       {/key}
     {/if}
   </section>
