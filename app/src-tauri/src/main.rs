@@ -93,6 +93,9 @@ fn main() {
             commands::element_impact,
             commands::coverage_gaps,
             commands::source_lines,
+            commands::source_text,
+            commands::save_source,
+            commands::editor_keywords,
             commands::problems,
             commands::search,
             commands::pick_folder,
@@ -175,9 +178,9 @@ mod no_network {
     /// Permissions reviewed as granting no network access. Adding one here needs the same
     /// review, recorded in docs/verification/no-network.md.
     /// The `allow-` permissions of the app's own commands (build.rs) only read the project
-    /// the app has open, show the folder dialog, or read and write the recent-projects
-    /// file; none of them opens a connection.
-    const OFFLINE_PERMISSIONS: [&str; 16] = [
+    /// the app has open, show the folder dialog, read and write the recent-projects file, or
+    /// save an existing `.sysml` file in the open project; none of them opens a connection.
+    const OFFLINE_PERMISSIONS: [&str; 19] = [
         "core:app:allow-name",
         "core:app:allow-version",
         "allow-project-status",
@@ -188,6 +191,9 @@ mod no_network {
         "allow-element-impact",
         "allow-coverage-gaps",
         "allow-source-lines",
+        "allow-source-text",
+        "allow-save-source",
+        "allow-editor-keywords",
         "allow-problems",
         "allow-search",
         "allow-pick-folder",

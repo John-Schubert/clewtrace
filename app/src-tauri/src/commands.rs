@@ -9,7 +9,7 @@ use clew_core::json::quote;
 use tauri::ipc::Response;
 use tauri::{AppHandle, Manager, State};
 
-use crate::data::{AppError, AppState, reply};
+use crate::data::{self, AppError, AppState, reply};
 use crate::recent::{self, RECENT_FILE};
 
 // @implements CT-SEC-003, CT-USE-007
@@ -114,6 +114,28 @@ pub fn source_lines(
 ) -> Response {
     let result = state.project().and_then(|p| p.source(&path, offset, limit));
     Response::new(reply(result))
+}
+
+// @implements CT-MOD-004, CT-EFF-005
+/// The whole text of a `.sysml` file in the project, for the editor.
+#[tauri::command(async)]
+pub fn source_text(state: State<'_, Arc<AppState>>, path: String) -> Response {
+    Response::new(reply(state.project().and_then(|p| p.source_text(&path))))
+}
+
+// @implements CT-USE-008, CT-SEC-003
+/// Saves the editor's text over an existing `.sysml` file in the project, atomically.
+#[tauri::command(async)]
+pub fn save_source(state: State<'_, Arc<AppState>>, path: String, text: String) -> Response {
+    let result = state.project().and_then(|p| p.save_source(&path, &text));
+    Response::new(reply(result))
+}
+
+// @implements CT-MOD-004
+/// The SysML v2 keywords, from the lexer, for the editor's highlighting and completion.
+#[tauri::command(async)]
+pub fn editor_keywords() -> Response {
+    Response::new(reply(Ok(data::editor_keywords())))
 }
 
 // @implements CT-EFF-005, CT-USE-007

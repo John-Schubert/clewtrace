@@ -740,7 +740,7 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
         under xvfb is measured.
       Milestone A: Clewtrace can open and trace its own repo, read-only. Optional
       pre-release for a laptop check.
-- [ ] **2.8 Text editor.** CodeMirror 6 for `.sysml` files (@codemirror/state, view,
+- [x] **2.8 Text editor.** CodeMirror 6 for `.sysml` files (@codemirror/state, view,
       commands, language, lint, autocomplete, search; MIT, bundled locally, PR #27).
       Syntax highlighting from a keyword list that a core command serves from the Rust lexer
       at run time, so the two cannot drift. Open a file at a position from the browser,
@@ -749,6 +749,41 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       rename. Never the system temp folder. Undo and redo, with tests.
       Refs: CT-MOD-004, CT-USE-003, CT-USE-008, CT-EFF-005, CT-SEC-003
       Model: Sonnet
+      Done: `clew-core/src/io.rs` has `write_atomic`: a hidden temp file in the target's own
+      folder, flushed and synced, then renamed over the target; the temp file is removed on
+      failure and the file mode is kept. `Loaded::source_text` and `Loaded::save_source`
+      share one path check with the source view (no `..`, absolute path, link out, folder,
+      or file over 2 MB). Saving writes an existing `.sysml` file only: never a new file or
+      another file type. `editor_keywords` serves the lexer's own `KEYWORDS`, with a test
+      that they are equal. Commands `source_text`, `save_source`, `editor_keywords`, listed
+      in `build.rs` and `capabilities/main.json`, and reviewed in
+      `docs/verification/no-network.md`. UI: `editor.ts` holds the CodeMirror setup
+      (tokenizer from the keyword list, keyword completion, search, history, Ctrl+S,
+      theme from the design tokens) and `TextEditor.svelte` is thin, with Save, Undo, and
+      Redo buttons. A `.sysml` file opens in the editor from the detail view's "Open in
+      editor" button (element or problem), the trace panel, and search hits; other files
+      keep the read-only source view. The editor stays mounted while a file is open, and
+      opening a different file with unsaved edits asks: save, discard, or keep editing.
+      The six CodeMirror packages are in `deps.toml` (state, view, commands, language,
+      autocomplete, search). The JS bundle is 434 KB (144 KB gzip).
+      The app perf probes pass. In Chromium under the app's real CSP, the built bundle
+      shows highlighting, completion, undo, and Ctrl+S with no console errors.
+      Follow-ups:
+      - `@codemirror/lint` was approved but not added: nothing in 2.8 uses it. Task 2.9b
+        adds it with its `deps.toml` entry, for diagnostics as editor markers.
+      - CSP: the app forbids inline styles, and CodeMirror adds `<style>` tags unless it is
+        mounted in a shadow root, where it uses a constructed style sheet. So the editor
+        runs in a shadow root, and `supportsEditor()` falls back to the read-only source
+        view on a web view without constructed style sheets (WebKit before 16.4). macOS 13.0
+        to 13.2 may be such a case. John to check on a macOS 13 machine. Windows and macOS
+        were not run; Chromium and Linux WebKitGTK only.
+      - A save does not refresh the browser, problems, or trace panel; that is 2.9a and
+        2.9b, with file watching in 2.10b. Until then, reopen the project to see them.
+      - Unsaved edits are lost if the project is switched or the window is closed. Autosave
+        on blur and close in 2.10a covers it.
+      - CT-MOD-004 also names go-to-definition, which 2.8 does not do.
+      - Highlighting marks keywords, comments, strings, and numbers only.
+      - A problem's place is read as a project-relative `file:line:column`.
 - [ ] **2.9a Incremental validation in the core.** An API that takes one file's new text,
       re-parses only that file, then re-resolves names and rebuilds the trace graph from the
       cached syntax trees of the other files. Perf tests: an edit in a 10,000-line file is
