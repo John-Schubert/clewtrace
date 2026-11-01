@@ -159,12 +159,53 @@ scope = "build-only"
 serves = ["CT-USE-002", "CT-USE-005", "CT-EFF-005"]
 why = "Fake DOM for UI tests under vitest, so no browser is needed. Approved by John for task 2.4"
 
-# [[dep]]
-# name = "codemirror"
-# ecosystem = "npm"
-# license = "MIT"
-# serves = ["CT-MOD-004", "CT-USE-004"]
-# why = "Small, accessible text editor for SysML v2"
+[[dep]]
+name = "@codemirror/state"
+ecosystem = "npm"
+license = "MIT"
+scope = "shipped"
+serves = ["CT-MOD-004", "CT-USE-003", "CT-USE-004"]
+why = "CodeMirror 6 text editor for .sysml files (approved by John, task 2.8). Version 6.7.6. Editor document and selection model, and the undo history's state"
+
+[[dep]]
+name = "@codemirror/view"
+ecosystem = "npm"
+license = "MIT"
+scope = "shipped"
+serves = ["CT-MOD-004", "CT-USE-003", "CT-USE-004"]
+why = "CodeMirror 6 text editor for .sysml files (approved by John, task 2.8). Version 6.43.15. Editor view: rendering, keymaps, decorations for highlighting. Mounted in a shadow root so its styles use a constructed style sheet and pass the CSP"
+
+[[dep]]
+name = "@codemirror/commands"
+ecosystem = "npm"
+license = "MIT"
+scope = "shipped"
+serves = ["CT-MOD-004", "CT-USE-003", "CT-USE-004"]
+why = "CodeMirror 6 text editor for .sysml files (approved by John, task 2.8). Version 6.11.1. Editing commands, default keymap, and undo and redo history (CT-USE-003)"
+
+[[dep]]
+name = "@codemirror/language"
+ecosystem = "npm"
+license = "MIT"
+scope = "shipped"
+serves = ["CT-MOD-004", "CT-USE-003", "CT-USE-004"]
+why = "CodeMirror 6 text editor for .sysml files (approved by John, task 2.8). Version 6.13.1. Incremental SysML tokenizer through StreamLanguage, driven by the lexer's keyword list"
+
+[[dep]]
+name = "@codemirror/autocomplete"
+ecosystem = "npm"
+license = "MIT"
+scope = "shipped"
+serves = ["CT-MOD-004", "CT-USE-003", "CT-USE-004"]
+why = "CodeMirror 6 text editor for .sysml files (approved by John, task 2.8). Version 6.20.4. Keyword completion from the lexer's keyword list"
+
+[[dep]]
+name = "@codemirror/search"
+ecosystem = "npm"
+license = "MIT"
+scope = "shipped"
+serves = ["CT-MOD-004", "CT-USE-003", "CT-USE-004"]
+why = "CodeMirror 6 text editor for .sysml files (approved by John, task 2.8). Version 6.7.2. Find and replace inside the open file"
 
 [[dep]]
 name = "cargo-deny"

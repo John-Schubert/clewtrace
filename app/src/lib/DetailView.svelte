@@ -1,9 +1,10 @@
-<!-- @begin CT-EFF-005, CT-USE-007, CT-TRC-004 -->
+<!-- @begin CT-EFF-005, CT-USE-007, CT-TRC-004, CT-MOD-004 -->
 <script lang="ts">
   // The main view's detail of what is selected: an element from the tree, or a problem from
   // the problems list.
   import { elementDetail, type ElementDetail } from './api';
   import { detailFields, problemSummary, type Selection } from './describe';
+  import { canEdit, placeOf } from './editor';
 
   let { selection, onopen }: { selection: Selection; onopen: (path: string, line: number) => void } = $props();
 
@@ -41,6 +42,10 @@
     <dd>{selection.problem.help}</dd>
   </dl>
   <p class="muted">{problemSummary(selection.problem)}</p>
+  {#if placeOf(selection.problem.where)}
+    {@const place = placeOf(selection.problem.where)!}
+    <p><button type="button" onclick={() => onopen(place.path, place.line)}>{canEdit(place.path) ? 'Open in editor' : 'Show in source view'}</button></p>
+  {/if}
 {:else if detail}
   <h2>{detail.shortName ?? detail.name ?? '(unnamed)'}</h2>
   <dl>
@@ -49,7 +54,7 @@
       <dd>{field.value}</dd>
     {/each}
   </dl>
-  <p><button type="button" onclick={() => onopen(detail!.file, detail!.line)}>Show in source view</button></p>
+  <p><button type="button" onclick={() => onopen(detail!.file, detail!.line)}>{canEdit(detail.file) ? 'Open in editor' : 'Show in source view'}</button></p>
 {:else}
   <p class="muted">Loading...</p>
 {/if}

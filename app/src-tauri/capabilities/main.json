@@ -1,6 +1,6 @@
 {
   "identifier": "main",
-  "description": "The main window may read the app name and version and call the app's own project commands (read-only, plus the folder dialog and recent-projects list), and nothing else.",
+  "description": "The main window may read the app name and version and call the app's own project commands (read-only, plus the folder dialog, the recent-projects list, and saving an existing .sysml file in the open project), and nothing else.",
   "windows": ["main"],
   "permissions": [
     "core:app:allow-name",
@@ -13,6 +13,9 @@
     "allow-element-impact",
     "allow-coverage-gaps",
     "allow-source-lines",
+    "allow-source-text",
+    "allow-save-source",
+    "allow-editor-keywords",
     "allow-problems",
     "allow-search",
     "allow-pick-folder",

@@ -3,7 +3,7 @@
 //! one is denied unless a capability grants its `allow-` permission.
 
 /// The commands in `src/commands.rs`. A command missing here cannot be called at all.
-// @implements CT-SEC-001, CT-EFF-005, CT-TRC-004
+// @implements CT-SEC-001, CT-EFF-005, CT-TRC-004, CT-MOD-004, CT-USE-008
 const COMMANDS: &[&str] = &[
     "project_status",
     "wait_for_project",
@@ -13,6 +13,9 @@ const COMMANDS: &[&str] = &[
     "element_impact",
     "coverage_gaps",
     "source_lines",
+    "source_text",
+    "save_source",
+    "editor_keywords",
     "problems",
     "search",
     "pick_folder",

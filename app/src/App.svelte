@@ -1,5 +1,5 @@
 <script lang="ts">
-  // @begin CT-PLT-001, CT-EFF-004, CT-MOD-005, CT-TRC-005, CT-TRC-004, CT-EFF-006
+  // @begin CT-PLT-001, CT-EFF-004, CT-MOD-005, CT-TRC-005, CT-TRC-004, CT-EFF-006, CT-MOD-004, CT-USE-008
   // The app window: shows the app name and version, read from the Rust side, and the
   // project opened from the command line once its background load ends.
   import { getName, getVersion } from '@tauri-apps/api/app';
@@ -18,6 +18,8 @@
   import { GAP_FILTERS } from './lib/find';
   import CoverageView from './lib/CoverageView.svelte';
   import DetailView from './lib/DetailView.svelte';
+  import TextEditor from './lib/TextEditor.svelte';
+  import { canEdit, decideOpen, supportsEditor } from './lib/editor';
   import ModelBrowser from './lib/ModelBrowser.svelte';
   import SearchView from './lib/SearchView.svelte';
   import SourceView from './lib/SourceView.svelte';
@@ -46,16 +48,55 @@
   // What the main view shows: the detail of the selection, the coverage lists, search, or
   // a source file. The coverage and search views stay up while an element is selected from
   // them, so a long list can be worked through with the trace panel beside it.
-  type View = 'detail' | 'coverage' | 'search' | 'source';
+  type View = 'detail' | 'coverage' | 'search' | 'source' | 'editor';
   let view = $state<View>('detail');
   let gapFilter = $state<GapFilter>('no-parent');
   let gapCounts = $state<Partial<Record<GapFilter, number>>>();
   let query = $state('');
   let source = $state<{ path: string; line: number }>();
 
+  // The editor for .sysml files. It stays mounted while a file is open, so a switch to
+  // another view never drops unsaved edits. Opening a different file while there are
+  // unsaved edits waits in `blocked` until the user chooses.
+  let editing = $state<{ path: string; line: number }>();
+  let editorDirty = $state(false);
+  let blocked = $state<{ path: string; line: number }>();
+  let editor = $state<ReturnType<typeof TextEditor>>();
+
   function openSource(path: string, line: number) {
-    source = { path, line };
-    view = 'source';
+    if (canEdit(path) && supportsEditor()) {
+      openEditor(path, line);
+    } else {
+      source = { path, line };
+      view = 'source';
+    }
+  }
+
+  function openEditor(path: string, line: number) {
+    view = 'editor';
+    if (decideOpen(editing?.path, editorDirty, path) === 'ask') {
+      blocked = { path, line };
+      return;
+    }
+    blocked = undefined;
+    if (editing?.path === path) {
+      editor?.goto(line);
+    }
+    editing = { path, line };
+  }
+
+  async function saveAndOpen() {
+    if (blocked && (await editor?.save())) {
+      openEditor(blocked.path, blocked.line);
+    }
+  }
+
+  function discardAndOpen() {
+    if (blocked) {
+      const next = blocked;
+      editorDirty = false;
+      openEditor(next.path, next.line);
+    }
   }
 
   function showElement(id: number) {
@@ -91,6 +132,9 @@
     selection = undefined;
     view = 'detail';
     source = undefined;
+    editing = undefined;
+    editorDirty = false;
+    blocked = undefined;
     query = '';
     gapCounts = status.state === 'ready' ? status.project.gaps : undefined;
     history.clear();
@@ -240,7 +284,7 @@
 <svelte:window onkeydown={onwindowkeydown} />
 <!-- @end -->
 
-<!-- @begin CT-PLT-001, CT-EFF-004, CT-SEC-003, CT-USE-007, CT-USE-004, CT-MOD-005, CT-TRC-005, CT-TRC-004, CT-EFF-006 -->
+<!-- @begin CT-PLT-001, CT-EFF-004, CT-SEC-003, CT-USE-007, CT-USE-004, CT-MOD-005, CT-TRC-005, CT-TRC-004, CT-EFF-006, CT-MOD-004, CT-USE-008 -->
 <Tokens />
 <a class="skip" href="#pane-main">Skip to main view</a>
 <div class="shell">
@@ -290,7 +334,25 @@
         {#if source}
           <button type="button" aria-pressed={view === 'source'} onclick={() => (view = 'source')}>Source</button>
         {/if}
+        {#if editing}
+          <button type="button" aria-pressed={view === 'editor'} onclick={() => (view = 'editor')}>
+            Editor{editorDirty ? ' (unsaved)' : ''}
+          </button>
+        {/if}
       </div>
+      {#if blocked && editing}
+        <div class="ask" role="alertdialog" aria-label="Unsaved changes">
+          <p>{editing.path} has changes that are not saved. Opening {blocked.path} would lose them.</p>
+          <button type="button" onclick={saveAndOpen}>Save and open {blocked.path}</button>
+          <button type="button" onclick={discardAndOpen}>Discard and open {blocked.path}</button>
+          <button type="button" onclick={() => (blocked = undefined)}>Keep editing</button>
+        </div>
+      {/if}
+      {#if editing}
+        <div class="editor-pane" hidden={view !== 'editor'}>
+          <TextEditor bind:this={editor} path={editing.path} line={editing.line} ondirty={(d) => (editorDirty = d)} />
+        </div>
+      {/if}
       {#key opened}
         {#if view === 'coverage'}
           <CoverageView filter={gapFilter} counts={gapCounts} onfilter={(f) => (gapFilter = f)} onselect={visit} />
@@ -431,6 +493,18 @@
     display: flex;
     gap: 0.25rem;
     margin: 0.5rem 0;
+  }
+  .editor-pane {
+    height: calc(100% - 6rem);
+  }
+  .editor-pane[hidden] {
+    display: none;
+  }
+  .ask {
+    max-width: 40rem;
+    margin: 0.5rem 0;
+    padding: 0.25rem 0.75rem 0.5rem;
+    border: 1px solid var(--danger);
   }
   .views button[aria-pressed='true'] {
     background: var(--row-selected);

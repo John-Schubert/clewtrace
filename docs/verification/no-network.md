@@ -58,3 +58,4 @@ whenever a capability, a Tauri feature, or a dependency changes. Record the resu
 | 2026-10-21 | task 0.9 | Pass, resolved-tree check added for six desktop targets | Claude Code |
 | 2026-10-31 | task 2.3a | Pass, seven read-only app command permissions reviewed; clew-core manifest checked | Claude Code |
 | 2026-10-31 | task 2.3b | Pass, four folder and recent-list permissions reviewed; rfd 0.17.2 (gtk3 only) added, no network crate in the six desktop trees | Claude Code |
+| 2026-11-01 | task 2.8 | Pass, three editor permissions reviewed (`source_text` and `editor_keywords` read, `save_source` writes one existing `.sysml` file in the open project through a temp file in its folder); no new Rust crate | Claude Code |

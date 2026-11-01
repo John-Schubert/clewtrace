@@ -503,10 +503,11 @@ impl Loaded {
             .end()
     }
 
-    /// One page of the lines of a text file in the project, for the read-only source view.
-    /// `path` is relative to the project folder. A path that leaves the folder, by `..`, an
-    /// absolute path, or a link, is refused (CT-SEC-003).
-    pub fn source(&self, path: &str, offset: usize, limit: usize) -> Result<String, AppError> {
+    /// The full path of a file in the project, checked. `path` is relative to the project
+    /// folder. A path that leaves the folder, by `..`, an absolute path, or a link, is
+    /// refused (CT-SEC-003), as is a folder or a file over `MAX_SOURCE_BYTES`.
+    // @implements CT-TRC-004, CT-MOD-004, CT-SEC-003
+    fn project_file(&self, path: &str) -> Result<PathBuf, AppError> {
         let root = &self.project.root;
         let inside = !path.is_empty()
             && Path::new(path)
@@ -549,14 +550,73 @@ impl Loaded {
                 "Open it in an editor instead.",
             ));
         }
-        let bytes = std::fs::read(&full).map_err(missing)?;
-        let text = String::from_utf8(bytes).map_err(|_| {
+        Ok(full)
+    }
+
+    /// The text of a project file. Refuses what `project_file` refuses and a file that is
+    /// not UTF-8 text.
+    // @implements CT-TRC-004, CT-MOD-004
+    fn read_text(&self, path: &str) -> Result<String, AppError> {
+        let full = self.project_file(path)?;
+        let bytes = std::fs::read(&full).map_err(|_| {
+            AppError::new(
+                "file not found",
+                path,
+                "Check that the file still exists, then open it again.",
+            )
+        })?;
+        String::from_utf8(bytes).map_err(|_| {
             AppError::new(
                 "the file is not text",
                 path,
                 "The source view shows text files only.",
             )
+        })
+    }
+
+    /// The whole text of a `.sysml` file, for the editor. Files are capped at
+    /// `MAX_SOURCE_BYTES`, so the web view never holds a large file.
+    // @implements CT-MOD-004, CT-EFF-005
+    pub fn source_text(&self, path: &str) -> Result<String, AppError> {
+        let text = self.read_text(path)?;
+        Ok(Obj::new().str("path", path).str("text", &text).end())
+    }
+
+    /// Saves the editor's text over an existing `.sysml` file in the project, through an
+    /// atomic write (CT-USE-008). Nothing else can be written: not a new file, not another
+    /// kind of file, not a path outside the project folder (CT-SEC-003).
+    // @implements CT-USE-008, CT-SEC-003
+    pub fn save_source(&self, path: &str, text: &str) -> Result<String, AppError> {
+        let full = self.project_file(path)?;
+        if full.extension().is_none_or(|e| e != "sysml") {
+            return Err(AppError::new(
+                "only .sysml files can be saved",
+                path,
+                "Edit this file in another program.",
+            ));
+        }
+        if text.len() > MAX_SOURCE_BYTES {
+            return Err(AppError::new(
+                format!("the text is too large to save (over {MAX_SOURCE_BYTES} bytes)"),
+                path,
+                "Split the model into smaller files.",
+            ));
+        }
+        clew_core::io::write_atomic(&full, text.as_bytes()).map_err(|e| {
+            AppError::new(
+                format!("the file could not be saved: {e}"),
+                path,
+                "Your edits are still in the editor. Check the folder is writable, then save again.",
+            )
         })?;
+        Ok(Obj::new().str("path", path).num("bytes", text.len()).end())
+    }
+
+    /// One page of the lines of a text file in the project, for the read-only source view.
+    /// `path` is relative to the project folder.
+    // @implements CT-TRC-004, CT-EFF-005
+    pub fn source(&self, path: &str, offset: usize, limit: usize) -> Result<String, AppError> {
+        let text = self.read_text(path)?;
         let lines: Vec<&str> = text.lines().collect();
         let first = offset.min(lines.len());
         let rows = (page_of(&lines, offset, limit).iter().enumerate())
@@ -749,6 +809,18 @@ pub fn reply(result: Result<String, AppError>) -> String {
         Ok(value) => format!("{{\"ok\":{value}}}"),
         Err(e) => format!("{{\"error\":{}}}", e.json()),
     }
+}
+
+// @implements CT-MOD-004
+/// The SysML v2 reserved words as a JSON array of strings. They come from the lexer's own
+/// list, so the editor's highlighting cannot drift from what the parser treats as a keyword.
+pub fn editor_keywords() -> String {
+    array(
+        clew_core::parse::lexer::KEYWORDS
+            .iter()
+            .map(|k| quote(k))
+            .collect(),
+    )
 }
 
 // @implements CT-EFF-005
@@ -1165,7 +1237,7 @@ mod tests {
         let state = &generated().1;
         let id = find("PF-00100");
         let budget = Duration::from_millis(100);
-        let calls: [(&str, &dyn Fn() -> String); 14] = [
+        let calls: [(&str, &dyn Fn() -> String); 16] = [
             ("status", &|| state.status()),
             ("children", &|| reply(project.children(0, 0, MAX_PAGE))),
             ("element", &|| reply(project.element(id))),
@@ -1198,6 +1270,10 @@ mod tests {
             ("source", &|| {
                 reply(project.source("model/perf.sysml", 0, MAX_PAGE))
             }),
+            ("editor text", &|| {
+                reply(project.source_text("model/perf.sysml"))
+            }),
+            ("editor keywords", &|| reply(Ok(editor_keywords()))),
         ];
         for (name, call) in calls {
             let started = Instant::now();
@@ -1375,6 +1451,94 @@ mod tests {
         fs::write(root.join("src/big.rs"), big).unwrap();
         let e = project.source("src/big.rs", 0, 10).unwrap_err();
         assert!(e.what.contains("large"), "{e:?}");
+    }
+
+    // @verifies CT-MOD-004, CT-EFF-005
+    #[test]
+    fn the_editor_opens_a_model_file_whole_and_refuses_what_the_source_view_refuses() {
+        let project = gappy("the_editor_opens_a_model_file_whole");
+        let root = project.project.root.clone();
+        let opened = ok(&reply(project.source_text("reqs.sysml")));
+        assert_eq!(text(&opened, "path"), "reqs.sysml");
+        assert_eq!(
+            text(&opened, "text"),
+            fs::read_to_string(root.join("reqs.sysml")).unwrap()
+        );
+        for bad in ["../outside.sysml", "/etc/passwd", "", "nope.sysml"] {
+            assert!(project.source_text(bad).is_err(), "{bad}");
+        }
+        fs::write(root.join("big.sysml"), vec![b'a'; MAX_SOURCE_BYTES + 1]).unwrap();
+        assert!(project.source_text("big.sysml").is_err());
+        fs::write(root.join("bin.sysml"), [0u8, 159, 146, 150]).unwrap();
+        assert!(project.source_text("bin.sysml").is_err());
+    }
+
+    // @verifies CT-USE-008, CT-SEC-003
+    #[test]
+    fn saving_replaces_a_model_file_inside_the_project_and_nothing_else() {
+        let project = gappy("saving_replaces_a_model_file_inside");
+        let root = project.project.root.clone();
+        let saved = ok(&reply(project.save_source("reqs.sysml", "package P {}\n")));
+        assert_eq!(text(&saved, "path"), "reqs.sysml");
+        assert_eq!(num(&saved, "bytes"), 13);
+        assert_eq!(
+            fs::read_to_string(root.join("reqs.sysml")).unwrap(),
+            "package P {}\n"
+        );
+        // Only an existing `.sysml` file inside the folder can be saved.
+        for bad in [
+            "../escape.sysml",
+            "/tmp/escape.sysml",
+            "new.sysml",
+            "src/lib.rs",
+            "trace.toml",
+            "",
+        ] {
+            assert!(project.save_source(bad, "x").is_err(), "{bad}");
+        }
+        assert!(!root.join("new.sysml").exists());
+        assert_eq!(
+            fs::read_to_string(root.join("src/lib.rs")).unwrap(),
+            "// @implements X-002\nfn a() {}\n"
+        );
+        let big = "a".repeat(MAX_SOURCE_BYTES + 1);
+        assert!(project.save_source("reqs.sysml", &big).is_err());
+        let leftovers = (fs::read_dir(&root).unwrap())
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".clewtmp")
+            })
+            .count();
+        assert_eq!(leftovers, 0);
+    }
+
+    // @verifies CT-USE-008, CT-SEC-003
+    #[cfg(unix)]
+    #[test]
+    fn saving_does_not_follow_a_link_out_of_the_project() {
+        let project = gappy("saving_does_not_follow_a_link_out");
+        let root = project.project.root.clone();
+        let outside = root.parent().unwrap().join("saving-outside.sysml");
+        fs::write(&outside, "secret").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("link.sysml")).unwrap();
+        assert!(project.save_source("link.sysml", "x").is_err());
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "secret");
+    }
+
+    // @verifies CT-MOD-004
+    #[test]
+    fn the_editor_keywords_are_the_lexers_own() {
+        let served = ok(&reply(Ok(editor_keywords())));
+        let served: Vec<&str> = (served.items().iter())
+            .map(|k| match k {
+                Json::Str(s) => s.as_str(),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(served, clew_core::parse::lexer::KEYWORDS);
     }
 
     // @verifies CT-SEC-001, CT-EFF-005

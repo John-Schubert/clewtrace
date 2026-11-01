@@ -232,6 +232,24 @@ export function sourceLines(path: string, offset = 0, limit = MAX_PAGE): Promise
   return call('source_lines', { path, offset, limit });
 }
 
+// @implements CT-MOD-004, CT-EFF-005
+/** A `.sysml` file's whole text, for the editor. */
+export function sourceText(path: string): Promise<{ path: string; text: string }> {
+  return call('source_text', { path });
+}
+
+// @implements CT-USE-008, CT-SEC-003
+/** Saves text over an existing `.sysml` file in the project; the Rust side writes atomically. */
+export function saveSource(path: string, text: string): Promise<{ path: string; bytes: number }> {
+  return call('save_source', { path, text });
+}
+
+// @implements CT-MOD-004
+/** The SysML v2 keywords, from the Rust lexer, for highlighting and completion. */
+export function editorKeywords(): Promise<string[]> {
+  return call('editor_keywords', {});
+}
+
 // @implements CT-EFF-005, CT-USE-007
 /** One page of the project's errors, then its warnings. */
 export function problems(offset = 0, limit = MAX_PAGE): Promise<Page<ProblemRow>> {
