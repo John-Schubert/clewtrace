@@ -9,7 +9,7 @@ members = ["crates/clew-core", "crates/clew-cli", "app/src-tauri"]
 default-members = ["crates/clew-core", "crates/clew-cli"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "BUSL-1.1"
 repository = "https://github.com/John-Schubert/clewtrace"
