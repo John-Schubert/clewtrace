@@ -803,9 +803,10 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       grows `r000.sysml` to 10,000 lines and times an edit that breaks a name: 334 to
       390 ms and 1 file re-parsed, core peak 189 MB (was 138 MB), on a 4 CPU machine.
       Follow-ups:
-      - ADR-0005 is Proposed. John to accept it.
+      - ADR-0005 accepted (John, 2026-11-01).
       - Estimated app total with the workspace is about 384 MB PSS (2.6 probe: 333 MB at a
-        138 MB core peak), under 400 MB with little margin. 2.9b re-runs the 2.6 probe.
+        138 MB core peak), under 400 MB with little margin. 2.9b must re-run the 2.6
+        probe; if it is over 400 MB, compact the stable-ID table first.
       - The app still uses model indexes as element IDs. 2.9b moves `data.rs` to
         `Workspace` and sends stable IDs to the UI.
       - Code files, checklists, and documents are read at `open` only; 2.10b refreshes them

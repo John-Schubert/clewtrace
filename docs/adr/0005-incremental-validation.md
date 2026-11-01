@@ -1,6 +1,6 @@
 # ADR-0005: Incremental validation and stable element IDs
 
-- Status: Proposed (for John's review in the 2.9a pull request)
+- Status: Accepted (John, 2026-11-01)
 - Date: 2026-11-01
 - Serves: CT-MOD-003, CT-EFF-007, CT-EFF-004
 
@@ -66,8 +66,9 @@ edit point got a new ID on a rebuild, and the UI would lose its selection and hi
 - **Estimated app total: about 384 MB, under the 400 MB budget with little margin.** The
   2.6 in-app probe measured 333 MB total PSS for the same project when the core peaked
   at 138 MB, so the app adds about 195 MB. 195 MB plus the core's 189 MB is 384 MB. This
-  is an estimate. The 2.6 probe, run again after 2.9b moves the app to `Workspace`,
-  gives the real figure.
+  is an estimate. 2.9b must run the 2.6 probe again after it moves the app to
+  `Workspace`, for the real figure. If that is over 400 MB, compact the stable-ID table
+  first, since it copies every element's name (John, 2026-11-01).
 - A setup error costs a second rebuild, since the last project was dropped. Such errors
   are rare while typing, and the rebuild is about as fast as the edit itself.
 - An element gets a new stable ID when it is renamed, changes kind, moves to another owner
