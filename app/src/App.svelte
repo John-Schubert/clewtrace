@@ -6,6 +6,7 @@
   import {
     clearRecent,
     describeStatus,
+    elementDetail,
     type EditReply,
     type ProjectStatus,
     openProject,
@@ -26,7 +27,7 @@
   import SearchView from './lib/SearchView.svelte';
   import SourceView from './lib/SourceView.svelte';
   import { NavHistory } from './lib/history';
-  import { Refresher } from './lib/live';
+  import { Refresher, stillThere } from './lib/live';
   import TracePanel from './lib/TracePanel.svelte';
   import ProblemsPanel from './lib/ProblemsPanel.svelte';
   import type { Selection } from './lib/describe';
@@ -91,12 +92,22 @@
   // Live validation. Each time the Rust side rebuilds the project from the editor's unsaved
   // text, the browser, problems, detail, and trace panes fetch again, and the status line
   // and coverage counts follow. Selection and history keep their element IDs, which are
-  // stable across edits; an element an edit removed shows its error in the detail view.
+  // stable across edits. When an edit renames or removes the selected element, the selection
+  // is cleared with a short note (ADR-0005), before the panes fetch.
   const refresher = new Refresher();
+  let note = $state('');
 
-  function validated(reply: EditReply) {
+  async function validated(reply: EditReply) {
     project = describeStatus({ state: 'ready', project: reply.summary });
     gapCounts = reply.summary.gaps;
+    try {
+      if (selection?.kind === 'element' && !(await stillThere(selection.id, elementDetail))) {
+        selection = undefined;
+        note = 'The selected element was renamed or removed';
+      }
+    } catch (e) {
+      show(e);
+    }
     refresher.fire();
   }
 
@@ -140,8 +151,18 @@
   function goto(id: number | undefined) {
     if (id !== undefined) {
       selection = { kind: 'element', id };
+      note = '';
     }
     syncHistory();
+  }
+
+  // Back and Forward skip the elements an edit removed or renamed.
+  async function move(direction: 'back' | 'forward') {
+    try {
+      goto(await history.step(direction, (id) => stillThere(id, elementDetail)));
+    } catch (e) {
+      show(e);
+    }
   }
 
   function visit(id: number) {
@@ -152,6 +173,7 @@
   function showStatus(status: ProjectStatus) {
     project = describeStatus(status);
     selection = undefined;
+    note = '';
     view = 'detail';
     source = undefined;
     editing = undefined;
@@ -263,8 +285,8 @@
     registry.register({ id: `coverage.${f.id}`, title: `Coverage: ${f.label.toLowerCase()}`, run: () => { gapFilter = f.id; view = 'coverage'; } });
   }
   registry.register({ id: 'view.search', title: 'Search the model', run: () => { view = 'search'; } });
-  registry.register({ id: 'trace.back', title: 'Trace: back', run: () => goto(history.back()) });
-  registry.register({ id: 'trace.forward', title: 'Trace: forward', run: () => goto(history.forward()) });
+  registry.register({ id: 'trace.back', title: 'Trace: back', run: () => void move('back') });
+  registry.register({ id: 'trace.forward', title: 'Trace: forward', run: () => void move('forward') });
   registry.register({ id: 'project.clearRecent', title: 'Clear recent projects', run: clear });
   registry.register({ id: 'view.theme.system', title: 'Theme: follow the OS setting', run: () => setTheme('system') });
   registry.register({ id: 'view.theme.light', title: 'Theme: light', run: () => setTheme('light') });
@@ -385,6 +407,9 @@
         {/if}
       {/key}
     {/if}
+    {#if note && !selection}
+      <p class="note" role="status">{note}</p>
+    {/if}
     {#if selection && (view === 'detail' || opened === 0)}
       <DetailView {selection} onopen={openSource} {refresher} />
     {/if}
@@ -397,8 +422,8 @@
         {canBack}
         {canForward}
         onfollow={visit}
-        onback={() => goto(history.back())}
-        onforward={() => goto(history.forward())}
+        onback={() => void move('back')}
+        onforward={() => void move('forward')}
         onopen={openSource}
         {refresher}
       />
@@ -420,6 +445,9 @@
 
 <style>
   /* @begin CT-PLT-001, CT-USE-005, CT-USE-004 */
+  .note {
+    color: var(--text-muted);
+  }
   :global(body) {
     margin: 0;
     font-family: system-ui, sans-serif;

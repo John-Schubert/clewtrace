@@ -50,5 +50,36 @@ describe('NavHistory', () => {
     expect(h.current).toBeUndefined();
     expect(h.canBack).toBe(false);
   });
+
+  // @verifies CT-TRC-005, CT-MOD-005
+  it('skips entries whose elements are gone, going back and going forward', async () => {
+    const h = new NavHistory();
+    [1, 2, 3, 4, 5].forEach((id) => h.visit(id));
+    const gone = new Set([2, 4]);
+    const exists = async (id: number) => !gone.has(id);
+    expect(await h.step('back', exists)).toBe(3);
+    expect(await h.step('back', exists)).toBe(1);
+    expect(h.current).toBe(1);
+    expect(await h.step('forward', exists)).toBe(3);
+    expect(await h.step('forward', exists)).toBe(5);
+    expect(h.canForward).toBe(false);
+  });
+
+  // @verifies CT-TRC-005, CT-MOD-005
+  it('stays where it is when every entry in that direction is gone', async () => {
+    const h = new NavHistory();
+    [1, 2, 3].forEach((id) => h.visit(id));
+    expect(await h.step('back', async (id) => id === 3)).toBeUndefined();
+    expect(h.current).toBe(3);
+    expect(await h.step('forward', async () => true)).toBeUndefined();
+    expect(h.current).toBe(3);
+  });
+
+  // @verifies CT-TRC-005, CT-MOD-005
+  it('steps over a gone entry the selection was on, so Back leaves it', async () => {
+    const h = new NavHistory();
+    [1, 2, 3].forEach((id) => h.visit(id));
+    expect(await h.step('back', async (id) => id !== 3 && id !== 2)).toBe(1);
+  });
 });
 // @end

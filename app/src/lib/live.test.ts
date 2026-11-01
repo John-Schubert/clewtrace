@@ -2,8 +2,8 @@
 // Tests for live validation's logic: the one-shot quiet timer and the markers.
 import { Text } from '@codemirror/state';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DiagnosticRow } from './api';
-import { markers, QUIET_MS, QuietTimer } from './live';
+import { ClewError, type DiagnosticRow } from './api';
+import { markers, QUIET_MS, QuietTimer, stillThere } from './live';
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -112,6 +112,22 @@ describe('markers', () => {
       expect(m.to).toBeLessThanOrEqual(doc.length);
       expect(m.to).toBeGreaterThanOrEqual(m.from);
     }
+  });
+});
+
+describe('stillThere', () => {
+  // @verifies CT-MOD-005
+  it('is true when the element answers and false when the Rust side says it is gone', async () => {
+    expect(await stillThere(1, async () => ({}))).toBe(true);
+    const gone = async () => {
+      throw new ClewError({ what: 'no element has ID 1', where: '', help: 'Pick it again' });
+    };
+    expect(await stillThere(1, gone)).toBe(false);
+  });
+
+  // @verifies CT-MOD-005
+  it('does not call an element gone because the call itself failed', async () => {
+    await expect(stillThere(1, async () => Promise.reject(new Error('ipc closed')))).rejects.toThrow('ipc closed');
   });
 });
 // @end
