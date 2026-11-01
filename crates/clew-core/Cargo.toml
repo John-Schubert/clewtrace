@@ -15,3 +15,11 @@ tree-sitter-rust = "0.24.2"
 tree-sitter-typescript = "0.23.2"
 rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
 sha2 = { version = "0.10.9", default-features = false }
+
+# OS file events for watching a project folder in the app (task 2.10b). Linux and macOS only
+# for now: notify's Windows watcher wakes every 100 ms, so Windows gets its own in task 2.10c
+# (CT-EFF-008). macos_fsevent keeps FSEvents as the macOS watcher; without it notify falls
+# back to polling there.
+[target.'cfg(not(windows))'.dependencies]
+notify = { version = "8.2.1", default-features = false, features = ["macos_fsevent"] }
+

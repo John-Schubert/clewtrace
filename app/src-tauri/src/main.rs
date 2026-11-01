@@ -87,6 +87,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::project_status,
             commands::wait_for_project,
+            commands::wait_for_disk_change,
             commands::tree_children,
             commands::element_detail,
             commands::element_links,
@@ -185,7 +186,7 @@ mod no_network {
     /// The `core:event` listen and unlisten permissions and `core:window:allow-destroy` let
     /// the page hear its own window's close request and then close the window, so the
     /// editor saves first (CT-USE-008). They pass events inside the app only.
-    const OFFLINE_PERMISSIONS: [&str; 24] = [
+    const OFFLINE_PERMISSIONS: [&str; 25] = [
         "core:app:allow-name",
         "core:app:allow-version",
         "core:event:allow-listen",
@@ -193,6 +194,7 @@ mod no_network {
         "core:window:allow-destroy",
         "allow-project-status",
         "allow-wait-for-project",
+        "allow-wait-for-disk-change",
         "allow-tree-children",
         "allow-element-detail",
         "allow-element-links",
@@ -214,14 +216,16 @@ mod no_network {
 
     /// Features each pinned crate may enable, with its default features off. None of them
     /// pulls in a TLS stack, an HTTP client, or a plugin. The Tauri crates are in the app's
-    /// manifest; the others are in clew-core's, which the app links.
-    const ALLOWED_FEATURES: [(&str, &[&str]); 6] = [
+    /// manifest; the others are in clew-core's, which the app links. notify's
+    /// `macos_fsevent` selects the macOS file event API, which is local only.
+    const ALLOWED_FEATURES: [(&str, &[&str]); 7] = [
         ("tauri", &["wry"]),
         ("tauri-build", &["config-json"]),
         ("rfd", &["gtk3"]),
         ("rusqlite", &["bundled"]),
         ("tree-sitter", &[]),
         ("sha2", &[]),
+        ("notify", &["macos_fsevent"]),
     ];
 
     /// The manifests of the crates the app is built from, relative to app/src-tauri.

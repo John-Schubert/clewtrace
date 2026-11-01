@@ -40,6 +40,18 @@ pub fn wait_for_project(state: State<'_, Arc<AppState>>) -> Response {
     Response::new(state.wait())
 }
 
+// @implements CT-EFF-008, CT-EFF-007, CT-USE-009
+/// Waits until file events change the open project, then replies with what changed: the
+/// files reloaded, the files with unsaved edits that changed on disk, any trouble, and the
+/// new counts. The UI calls it again after each reply, instead of polling. The wait runs on
+/// a blocking-pool thread, so it never holds one of the threads that answer commands.
+#[tauri::command]
+pub async fn wait_for_disk_change(app: AppHandle) -> Response {
+    let state = Arc::clone(&app.state::<Arc<AppState>>());
+    let waited = tauri::async_runtime::spawn_blocking(move || state.wait_for_disk_change()).await;
+    Response::new(waited.unwrap_or_else(|_| "{\"watching\":false}".to_string()))
+}
+
 // @implements CT-EFF-005
 /// One page of the tree children of an element; 0 is the root.
 #[tauri::command(async)]

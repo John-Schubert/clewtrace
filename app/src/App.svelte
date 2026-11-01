@@ -5,18 +5,23 @@
   import { getName, getVersion } from '@tauri-apps/api/app';
   import { CloseGuard, MAIN_WINDOW, windowCloseRequests } from './lib/autosave';
   import {
+    ClewError,
     clearRecent,
     describeStatus,
+    type DiskNews,
     elementDetail,
     type EditReply,
+    type ProjectSummary,
     type ProjectStatus,
     openProject,
     pickFolder,
     recentProjects,
     revertSource,
+    waitForDiskChange,
     waitForProject,
     type RecentProject,
   } from './lib/api';
+  import { decideDisk, DiskWatch } from './lib/disk';
   import { ActionRegistry } from './lib/actions';
   import type { GapFilter } from './lib/api';
   import { GAP_FILTERS } from './lib/find';
@@ -90,6 +95,9 @@
     editing = { path, line };
   }
 
+  // @end
+
+  // @begin CT-PLT-001, CT-EFF-004, CT-MOD-005, CT-TRC-005, CT-TRC-004, CT-EFF-006, CT-MOD-004, CT-USE-008, CT-MOD-003
   // Live validation. Each time the Rust side rebuilds the project from the editor's unsaved
   // text, the browser, problems, detail, and trace panes fetch again, and the status line
   // and coverage counts follow. Selection and history keep their element IDs, which are
@@ -99,8 +107,13 @@
   let note = $state('');
 
   async function validated(reply: EditReply) {
-    project = describeStatus({ state: 'ready', project: reply.summary });
-    gapCounts = reply.summary.gaps;
+    await refreshed(reply.summary);
+  }
+
+  // The project was rebuilt, by an edit or by file events; the panes fetch again.
+  async function refreshed(summary: ProjectSummary) {
+    project = describeStatus({ state: 'ready', project: summary });
+    gapCounts = summary.gaps;
     try {
       if (selection?.kind === 'element' && !(await stillThere(selection.id, elementDetail))) {
         selection = undefined;
@@ -184,8 +197,10 @@
     gapCounts = status.state === 'ready' ? status.project.gaps : undefined;
     history.clear();
     syncHistory();
+    diskConflict = undefined;
     if (status.state === 'ready') {
       opened += 1;
+      void diskWatch.start();
     }
   }
 
@@ -194,6 +209,52 @@
     version = v;
   });
   waitForProject().then(showStatus);
+  // @end
+
+  // @begin CT-EFF-008, CT-USE-009, CT-USE-008, CT-EFF-007
+  // File watching. The Rust side watches the project folder and re-reads what changed on
+  // disk (a git pull, another editor); one long wait at a time brings the news, never a
+  // poll. A clean editor takes the new text; one with unsaved edits stops saving and asks
+  // which text to keep. Windows is not watched until task 2.10c.
+  let diskConflict = $state<string>();
+  const diskWatch = new DiskWatch(waitForDiskChange, heardFromDisk, (e) => show(e));
+
+  async function heardFromDisk(news: DiskNews) {
+    if (news.problems.length) {
+      show(new ClewError(news.problems[0]));
+    }
+    const decision = decideDisk(editing?.path, editorDirty, news);
+    if (decision === 'reload') {
+      await editor?.reloadFromDisk();
+    } else if (decision === 'ask' && editing) {
+      editor?.hold();
+      diskConflict = editing.path;
+    }
+    if (news.summary) {
+      await refreshed(news.summary);
+    }
+  }
+
+  // Drops the unsaved edits and takes the file as it is on disk.
+  async function takeDiskVersion() {
+    const path = diskConflict;
+    diskConflict = undefined;
+    editor?.release(false);
+    if (path) {
+      try {
+        await validated(await revertSource(path));
+      } catch (e) {
+        show(e);
+      }
+      await editor?.reloadFromDisk();
+    }
+  }
+
+  // Keeps the edits; autosave then saves them over the disk version.
+  function keepMyEdits() {
+    diskConflict = undefined;
+    editor?.release(true);
+  }
   // @end
 
 
@@ -350,7 +411,7 @@
 <svelte:window onkeydown={onwindowkeydown} />
 <!-- @end -->
 
-<!-- @begin CT-PLT-001, CT-EFF-004, CT-SEC-003, CT-USE-007, CT-USE-004, CT-MOD-005, CT-TRC-005, CT-TRC-004, CT-EFF-006, CT-MOD-004, CT-USE-008 -->
+<!-- @begin CT-PLT-001, CT-EFF-004, CT-SEC-003, CT-USE-007, CT-USE-004, CT-MOD-005, CT-TRC-005, CT-TRC-004, CT-EFF-006, CT-MOD-004, CT-USE-008, CT-USE-009 -->
 <Tokens />
 <a class="skip" href="#pane-main">Skip to main view</a>
 <div class="shell">
@@ -412,6 +473,13 @@
           <button type="button" onclick={saveAndOpen}>Save and open {blocked.path}</button>
           <button type="button" onclick={discardAndOpen}>Discard and open {blocked.path}</button>
           <button type="button" onclick={() => (blocked = undefined)}>Keep editing</button>
+        </div>
+      {/if}
+      {#if diskConflict}
+        <div class="ask" role="alertdialog" aria-label="Changed on disk">
+          <p>{diskConflict} changed on disk while it has unsaved edits here. Nothing is saved until you choose.</p>
+          <button type="button" onclick={takeDiskVersion}>Load the version on disk</button>
+          <button type="button" onclick={keepMyEdits}>Keep my edits</button>
         </div>
       {/if}
       {#if editing}
