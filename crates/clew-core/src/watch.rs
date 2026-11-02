@@ -94,6 +94,14 @@ fn relative(root: &Path, path: &Path) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join("/"))
 }
 
+// @implements CT-EFF-008, CT-EFF-007
+/// The root as file events name it: its real path, with links resolved. FSEvents on macOS
+/// reports real paths (`/private/var` for `/var`), so a root kept as given would match no
+/// event. When the real path cannot be found, the absolute path is used.
+fn watch_root(root: &Path) -> std::io::Result<PathBuf> {
+    std::fs::canonicalize(root).or_else(|_| std::path::absolute(root))
+}
+
 // @implements CT-EFF-008
 /// `dir` and the folders under it that the project reads files from, by the rules of
 /// `relative`.
@@ -148,7 +156,7 @@ pub fn watch_project(
         what: format!("could not watch the project folder for changes: {e}"),
         help: "Reopen the project to see changes made outside Clewtrace.".to_string(),
     };
-    let root = std::path::absolute(root).map_err(|e| failed(&e))?;
+    let root = watch_root(root).map_err(|e| failed(&e))?;
     let (tx, rx) = mpsc::channel();
     let event_root = root.clone();
     let handler = move |event: notify::Result<notify::Event>| {
@@ -357,6 +365,25 @@ mod tests {
         assert_eq!(kind, WatcherKind::Inotify);
         #[cfg(target_os = "macos")]
         assert_eq!(kind, WatcherKind::Fsevent);
+    }
+
+    // @verifies CT-EFF-008, CT-EFF-007
+    #[cfg(unix)]
+    #[test]
+    fn a_root_opened_through_a_link_matches_events_by_its_real_path() {
+        // macOS reports FSEvents paths with links resolved, such as /private/var for
+        // /var, so a root kept as given would match no event.
+        let real = folder("real-root");
+        fs::create_dir_all(real.join("model")).unwrap();
+        let link = folder("link-root").join("project");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let root = watch_root(&link).unwrap();
+        assert_eq!(root, fs::canonicalize(&real).unwrap());
+        let event_path = fs::canonicalize(&real).unwrap().join("model/a.sysml");
+        assert_eq!(
+            relative(&root, &event_path).as_deref(),
+            Some("model/a.sysml")
+        );
     }
 
     // @verifies CT-EFF-008, CT-EFF-007
