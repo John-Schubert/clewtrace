@@ -1,12 +1,9 @@
 //! Watching a project folder with OS file events, so changes made outside the app (a git
-//! pull, another editor) reach the open project (task 2.10b). Nothing runs while no files
-//! change: the watcher thread sleeps in the OS until an event comes, and the burst timer
-//! exists only between the first event of a burst and its end (CT-EFF-008).
-
-// @begin CT-EFF-008
-// Windows has no watcher until task 2.10c, so the burst and path code is unused there.
-#![cfg_attr(windows, allow(dead_code, unused_imports))]
-// @end
+//! pull, another editor) reach the open project (tasks 2.10b and 2.10c). Nothing runs
+//! while no files change: the watcher thread sleeps in the OS until an event comes, and
+//! the burst timer exists only between the first event of a burst and its end
+//! (CT-EFF-008). Linux and macOS use notify; Windows uses `win.rs`, since notify's
+//! Windows thread wakes every 100 ms.
 
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
@@ -41,6 +38,7 @@ pub struct Batch {
     /// What went wrong while watching.
     pub trouble: Vec<Trouble>,
     /// New folders to watch, on systems that watch folder by folder.
+    #[cfg_attr(windows, allow(dead_code))]
     folders: Vec<PathBuf>,
 }
 
@@ -51,6 +49,7 @@ enum Seen {
     Paths(Vec<String>),
     Everything,
     /// A new folder, by its full path.
+    #[cfg_attr(windows, allow(dead_code))]
     Folder(PathBuf),
     Trouble(Trouble),
 }
@@ -58,6 +57,7 @@ enum Seen {
 // @implements CT-EFF-008, CT-USE-007
 /// The report when the OS has no file watches left. Clewtrace never falls back to polling,
 /// so this says how to raise the limit.
+#[cfg_attr(windows, allow(dead_code))]
 fn out_of_watches() -> Trouble {
     Trouble {
         what: "the system ran out of file watches, so some changes made outside Clewtrace \
@@ -105,7 +105,7 @@ fn watch_root(root: &Path) -> std::io::Result<PathBuf> {
 // @implements CT-EFF-008
 /// `dir` and the folders under it that the project reads files from, by the rules of
 /// `relative`.
-#[cfg_attr(target_os = "macos", allow(dead_code))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn folders_under(dir: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut pending = vec![dir.to_path_buf()];
@@ -129,6 +129,11 @@ fn folders_under(dir: &Path) -> Vec<PathBuf> {
 
 mod burst;
 use burst::debounce;
+// @begin CT-EFF-008
+// The Windows watcher; its decoding is tested on every system.
+#[cfg(any(windows, test))]
+mod win;
+// @end
 
 // @implements CT-EFF-008
 /// A running watch of a project folder. Dropping it stops the OS watch; its thread then
@@ -136,12 +141,24 @@ use burst::debounce;
 pub struct ProjectWatcher {
     #[cfg(not(windows))]
     _watcher: std::sync::Arc<std::sync::Mutex<notify::RecommendedWatcher>>,
+    #[cfg(windows)]
+    _stop: win::Stop,
+}
+
+// @implements CT-EFF-008, CT-USE-007
+/// The trouble when the watch cannot start.
+fn cannot_watch(e: &dyn std::fmt::Display) -> Trouble {
+    Trouble {
+        what: format!("could not watch the project folder for changes: {e}"),
+        help: "Reopen the project to see changes made outside Clewtrace.".to_string(),
+    }
 }
 
 // @implements CT-EFF-008, CT-EFF-007, CT-USE-009
 /// Watches the project under `root` with the OS's own file events and calls `on_change`
-/// with each burst of changes, on a thread of its own. Returns `None` on Windows, which is
-/// not watched yet (task 2.10c), and the trouble when the watch cannot start.
+/// with each burst of changes, on a thread of its own. Returns the trouble when the watch
+/// cannot start. Always `Some` when it starts; the `Option` is kept for a system with no
+/// watcher.
 ///
 /// Linux watches each folder the project reads, adding new folders as they appear, and
 /// reports running out of watches with how to raise the limit; it never polls. macOS
@@ -152,10 +169,7 @@ pub fn watch_project(
     mut on_change: impl FnMut(Batch) + Send + 'static,
 ) -> Result<Option<ProjectWatcher>, Trouble> {
     use std::sync::{Arc, Mutex, mpsc};
-    let failed = |e: &dyn std::fmt::Display| Trouble {
-        what: format!("could not watch the project folder for changes: {e}"),
-        help: "Reopen the project to see changes made outside Clewtrace.".to_string(),
-    };
+    let failed = cannot_watch;
     let root = watch_root(root).map_err(|e| failed(&e))?;
     let (tx, rx) = mpsc::channel();
     let event_root = root.clone();
@@ -206,15 +220,25 @@ pub fn watch_project(
     Ok(Some(ProjectWatcher { _watcher: watcher }))
 }
 
-// @implements CT-EFF-008
-/// Windows is not watched yet: notify's Windows watcher wakes every 100 ms, which
-/// CT-EFF-008 rules out. Task 2.10c adds one that waits on the OS.
+// @implements CT-EFF-008, CT-EFF-007, CT-USE-009
+/// Watches the project under `root` with `ReadDirectoryChangesW` over the whole tree and
+/// calls `on_change` with each burst of changes, on a thread of its own. The OS thread
+/// waits with no timeout (`win.rs`); the burst thread is the same as on other systems.
+/// Returns the trouble when the watch cannot start.
 #[cfg(windows)]
 pub fn watch_project(
-    _root: &Path,
-    _on_change: impl FnMut(Batch) + Send + 'static,
+    root: &Path,
+    on_change: impl FnMut(Batch) + Send + 'static,
 ) -> Result<Option<ProjectWatcher>, Trouble> {
-    Ok(None)
+    let root = watch_root(root).map_err(|e| cannot_watch(&e))?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let stop = win::start(&root, tx).map_err(|e| cannot_watch(&e))?;
+    let run = move || debounce(&rx, QUIET, LONGEST_BURST, on_change);
+    std::thread::Builder::new()
+        .name("clew-watch".into())
+        .spawn(run)
+        .map_err(|e| cannot_watch(&e))?;
+    Ok(Some(ProjectWatcher { _stop: stop }))
 }
 
 // @implements CT-EFF-008, CT-USE-007

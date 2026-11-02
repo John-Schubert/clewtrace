@@ -2273,7 +2273,6 @@ mod tests {
     }
 
     // @verifies CT-EFF-008, CT-EFF-007, CT-USE-009
-    #[cfg(not(windows))]
     #[test]
     fn an_open_project_is_watched_and_the_ui_hears_of_changes() {
         let root = gappy("watched").root();

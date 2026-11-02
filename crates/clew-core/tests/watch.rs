@@ -1,11 +1,7 @@
-//! Watching a real folder with the OS's file events (CT-EFF-008, task 2.10b). These tests
+//! Watching a real folder with the OS's file events (CT-EFF-008, tasks 2.10b and 2.10c):
+//! inotify on Linux, FSEvents on macOS, and ReadDirectoryChangesW on Windows. These tests
 //! sleep and wait with timeouts so that a missed event fails the test instead of hanging
 //! it, which `tests/idle_cpu.rs` allows for this file by name. Test only, never shipped.
-
-// @begin CT-EFF-008
-// Windows is not watched until task 2.10c.
-#![cfg(not(windows))]
-// @end
 
 use std::fs;
 use std::path::PathBuf;
@@ -23,7 +19,6 @@ fn folder(name: &str) -> PathBuf {
 }
 
 // @verifies CT-EFF-008, CT-EFF-007, CT-USE-009
-#[cfg(not(windows))]
 #[test]
 fn changes_on_disk_arrive_as_project_relative_paths() {
     let root = folder("live");
@@ -52,7 +47,6 @@ fn changes_on_disk_arrive_as_project_relative_paths() {
 }
 
 // @verifies CT-EFF-008, CT-EFF-007
-#[cfg(not(windows))]
 #[test]
 fn a_new_folder_is_watched_too() {
     let root = folder("new-folder");
@@ -77,7 +71,6 @@ fn a_new_folder_is_watched_too() {
 }
 
 // @verifies CT-EFF-008
-#[cfg(not(windows))]
 #[test]
 fn dropping_the_watcher_ends_its_thread() {
     let root = folder("drop");
@@ -89,4 +82,26 @@ fn dropping_the_watcher_ends_its_thread() {
         got.recv_timeout(Duration::from_secs(5)),
         Err(mpsc::RecvTimeoutError::Disconnected)
     ));
+}
+
+// @verifies CT-EFF-008, CT-EFF-007
+#[test]
+fn a_folder_renamed_away_asks_for_everything() {
+    let root = folder("renamed");
+    fs::create_dir_all(root.join("old")).unwrap();
+    fs::write(root.join("old/a.sysml"), "package A;\n").unwrap();
+    let (out, got) = mpsc::channel();
+    let _watcher = watch_project(&root, move |c| out.send(c).unwrap())
+        .unwrap()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    fs::rename(root.join("old"), root.join("new")).unwrap();
+    let mut everything = false;
+    while let Ok(batch) = got.recv_timeout(Duration::from_secs(5)) {
+        everything |= batch.everything;
+        if everything {
+            break;
+        }
+    }
+    assert!(everything);
 }
