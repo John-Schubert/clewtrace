@@ -9,7 +9,7 @@ It supports the review. It is not the verification: that is the test
 allowlist. Update this page when a task adds a timer, listener, or thread, and add the
 task's probe to that test.
 
-Last reviewed at task 2.10b, which added the file watcher.
+Last reviewed at task 2.10c, which added the Windows file watcher.
 
 ## Rust side (app/src-tauri)
 
@@ -21,9 +21,10 @@ Last reviewed at task 2.10b, which added the file watcher.
 | Command threads | `commands.rs` | Tauri's thread pool runs a command when the UI calls it and parks the worker after. The UI calls `wait_for_project` once, not in a loop. |
 | Folder dialog | `commands.rs`, `pick_folder` | `rfd` runs the OS dialog and returns when the user picks or cancels. |
 | Recent-projects file | `recent.rs` | Read at start and written when the list changes. It is not watched. |
-| notify's watcher thread (task 2.10b) | `clew-core/src/watch.rs`, `watch_project` | Linux: inotify, and the thread blocks in `poll` with no timeout. macOS: FSEvents, and the thread waits in its run loop. Only notify's recommended watcher is used, never its polling watcher or a notify-debouncer crate; a test checks the watcher kind. Windows is not watched: notify's Windows thread wakes every 100 ms, so task 2.10c adds a watcher that waits on the OS. |
+| notify's watcher thread (task 2.10b) | `clew-core/src/watch.rs`, `watch_project` | Linux: inotify, and the thread blocks in `poll` with no timeout. macOS: FSEvents, and the thread waits in its run loop. Only notify's recommended watcher is used, never its polling watcher or a notify-debouncer crate; a test checks the watcher kind. notify is not used on Windows: its Windows thread wakes every 100 ms. |
+| `clew-watch-os` thread, Windows (task 2.10c) | `clew-core/src/watch/win.rs`, `run` | One overlapped `ReadDirectoryChangesW` on the project root, over the whole tree. The thread waits in `WaitForMultipleObjects` with `INFINITE` on two events: the read finishing and the stop event, which dropping the watcher signals. It then passes the changes to the burst thread and starts the next read. No timeout and no loop that wakes on its own. |
 | `clew-watch` burst thread (task 2.10b) | `clew-core/src/watch/burst.rs`, `debounce` | Blocks in `recv` with no timeout until the OS reports a file event. Then one `recv_timeout` runs until the burst has been still for 200 ms or has lasted 2 s, the project is re-read, and the thread goes back to `recv`. The only shipped `recv_timeout`, allowed by name in the test. |
-| Wait for file news (task 2.10b) | `data.rs`, `AppState::wait_for_disk_change` | A `Condvar` wait with no timeout, on a blocking-pool thread so it holds no command thread. The burst thread calls `notify_all` after a change. Replies at once when nothing is watched, so on Windows the UI asks once and stops. |
+| Wait for file news (task 2.10b) | `data.rs`, `AppState::wait_for_disk_change` | A `Condvar` wait with no timeout, on a blocking-pool thread so it holds no command thread. The burst thread calls `notify_all` after a change. Replies at once when nothing is watched, so the UI asks once and stops. |
 
 Probe threads (`probe.rs`) exist only in builds with the `perf-probe` feature, which release
 builds never use (`probe_gate.rs` checks it). They sleep once for the idle settle time and

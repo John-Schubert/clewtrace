@@ -954,11 +954,35 @@ tier in ADR-0003 before adding it. Phase 2 has 21 tasks plus the gate. Milestone
         `objc2-core-services` (macOS, under notify) is new. Task 2.14 should fetch its file too.
       Milestone B: John models in Clewtrace. From here, edit `model/requirements.sysml` in
       the app; changes still go through pull requests.
-- [ ] **2.10c Windows file watcher.** ReadDirectoryChangesW through windows-sys with a wait
+- [x] **2.10c Windows file watcher.** ReadDirectoryChangesW through windows-sys with a wait
       that blocks until a change arrives, never a timeout loop (CT-EFF-008). Tested on the
       Windows CI runner.
       Refs: CT-EFF-008, CT-EFF-007, CT-USE-009
       Model: Opus
+      Done: `clew-core/src/watch/win.rs` and `win/os.rs`. One overlapped
+      `ReadDirectoryChangesW` on the project root, over the whole tree, for file and folder
+      names, size, and last write only, so reads and attribute changes are not changes. The
+      `clew-watch-os` thread waits in `WaitForMultipleObjects` with `INFINITE` on the read's
+      event and a stop event; dropping `ProjectWatcher` signals the stop event, and the
+      pending read is cancelled and collected before its buffer is freed. The first read
+      starts before `watch_project` returns. The buffer is 64 KB; an overflow reads the
+      whole project again. Changes go to the same burst thread (`burst.rs`) as on Linux and
+      macOS. A changed folder is ignored (Windows reports one for each file change in it);
+      a folder added, removed, or renamed reads everything. Decoding the change records and
+      what they mean is plain Rust, tested on every OS; `tests/watch.rs` and the app's
+      watch test now run on Windows too, with a new folder rename test. windows-sys 0.61.2
+      (already in the build under tauri) is a clew-core dependency on `cfg(windows)` only,
+      with Win32_Foundation, Win32_Security, Win32_Storage_FileSystem, Win32_System_IO and
+      Win32_System_Threading; listed in `deps.toml`. `docs/verification/idle-cpu.md`
+      updated.
+      Follow-ups:
+      - The Windows code was type-checked and linted for the Windows target here, but not
+        built or run: the Windows CI test job runs it. Check its result on the PR.
+      - Windows idle memory with the watcher comes from the app-idle-memory job on the PR
+        (gate 81 MB, about 71 MB before). The watcher adds two threads and a 64 KB buffer.
+      - A rename of a file whose name has no extension reads the whole project, the same
+        rule as on Linux, since a folder renamed away cannot be told from such a file.
+      - The manual check of a `git pull` while the app is open on Windows is for John.
 - [ ] **2.11 Go to definition and completion.** F12 and Ctrl or Cmd+click go to the
       definition. Find references from the model and trace links. Completion for keywords,
       names in scope, and requirement short names after `satisfy` and `verify`.

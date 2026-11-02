@@ -78,7 +78,15 @@ ecosystem = "cargo"
 license = "CC0-1.0"
 scope = "shipped"
 serves = ["CT-EFF-008", "CT-EFF-007", "CT-USE-009"]
-why = "OS file events for watching the open project folder (task 2.10b). Version 8.2.1, approved by John with a per-crate CC0-1.0 exception (decisions 16 and 20 on PR #27). Linux (inotify) and macOS (FSEvents) only: its Windows watcher wakes every 100 ms, so Windows gets its own in task 2.10c. Default features off; macos_fsevent only, so macOS never falls back to polling. Its polling watcher and the notify-debouncer crates are never used"
+why = "OS file events for watching the open project folder (task 2.10b). Version 8.2.1, approved by John with a per-crate CC0-1.0 exception (decisions 16 and 20 on PR #27). Linux (inotify) and macOS (FSEvents) only: its Windows watcher wakes every 100 ms, so Windows uses windows-sys (task 2.10c). Default features off; macos_fsevent only, so macOS never falls back to polling. Its polling watcher and the notify-debouncer crates are never used"
+
+[[dep]]
+name = "windows-sys"
+ecosystem = "cargo"
+license = "MIT OR Apache-2.0"
+scope = "shipped"
+serves = ["CT-EFF-008", "CT-EFF-007", "CT-USE-009"]
+why = "The Windows file watcher (task 2.10c, approved by John): ReadDirectoryChangesW with overlapped I/O and a wait with no timeout, since notify's Windows thread wakes every 100 ms. clew-core on cfg(windows) only. Version 0.61.2, already in the build under tauri. Features: Win32_Foundation, Win32_Security (CreateFileW and CreateEventW take a null SECURITY_ATTRIBUTES), Win32_Storage_FileSystem, Win32_System_IO, Win32_System_Threading"
 
 # [[dep]]
 # name = "ed25519-dalek"
