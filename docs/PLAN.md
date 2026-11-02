@@ -403,7 +403,7 @@ Planned in `docs/planning/phase-2-3-plan.md` and reviewed in `docs/planning/phas
 John approved the plan and the review's splits and fixes on PR #27 (2026-10-31). A task that
 fails twice moves to Opus. A dependency marked "PR #27" was approved in intent there; the task
 still adds its `deps.toml` entry with the settings shown, and confirms its license against the
-tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone A is after
+tier in ADR-0003 before adding it. Phase 2 has 21 tasks plus the gate. Milestone A is after
 2.7b, and Milestone B (John models in Clewtrace) is after 2.10b, the 16th session.
 
 - [x] **2.0 Phase 2 housekeeping.** Applied John's decisions on PR #27.
@@ -880,7 +880,7 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       `tests/kill_save.rs` kills a writer process mid-save 12 times.
       Follow-ups:
       - A killed save leaves its hidden `.clewtmp` temp file next to the target. It is never
-        read as a model file, but nothing removes it yet.
+        read as a model file. Done in 2.10b: opening the project removes it.
       - The "could not be saved" prompt now shows only when a save fails. If the editor has
         the focus, clicking Discard first tries one more save on blur.
       - A writer that rebuilds the index with no gap can hold the lock past the 10 s
@@ -891,7 +891,7 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       - The desktop crate's tests (permission allowlist) did not build in the session for
         lack of GTK; CI runs them. The autosave checklist item in `model-browser-demo.md`
         is for John to run by hand once.
-- [ ] **2.10b File watching.** Watch the project folder with OS file events through notify
+- [x] **2.10b File watching.** Watch the project folder with OS file events through notify
       8.2.1 alone, using its recommended watcher only (CC0-1.0 for notify and ISC for
       inotify and inotify-sys as per-crate exceptions, PR #27). Debounce with a one-shot
       timer that starts on the first event and ends after the burst; nothing runs while no
@@ -903,8 +903,62 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       `docs/verification/idle-cpu.md`.
       Refs: CT-EFF-007, CT-EFF-008, CT-USE-008, CT-USE-009
       Model: Opus
+      Scope (John, 2026-11-01): Linux and macOS only. notify 8.2.1's Windows watcher wakes
+      every 100 ms (`WaitForSingleObjectEx(.., 100, ..)` in `windows.rs`, the same in
+      9.0.0-rc.7), so Windows is not watched here and works as before; see 2.10c. Also:
+      remove stale `.clewtmp` files on open, and note `*.clewtmp` in `docs/MODELING.md`.
+      Done: `clew-core/src/watch.rs` has `watch_project`, which watches each folder the
+      project reads on Linux (inotify, one non-recursive watch per folder, skipping hidden
+      and `CACHEDIR.TAG` folders, and adding new folders as they appear) and the root on
+      macOS (FSEvents). notify is a clew-core dependency for `cfg(not(windows))` only, with
+      default features off and `macos_fsevent` on, so macOS never falls back to polling; a
+      test checks the watcher kind. File reads and metadata changes are not changes, so the
+      app's own reads never cause a reload. `watch/burst.rs` gathers each burst: `recv` with
+      no timeout, then `recv_timeout` until 200 ms of quiet or 2 s, then a batch. Running
+      out of inotify watches is reported with the `sysctl` command to raise the limit,
+      never a fallback to polling. `live.rs` has `Workspace::reload(paths)`: it parses only
+      changed model files and scans only changed code files, re-reads checklists and
+      documents only for a `.md` change, and re-reads everything for `trace.toml` or a
+      folder change (`reload_all`). A file whose hash matches what the app last read or
+      saved (`Workspace::saved`) is skipped, so the app's own saves cost one hash. A model
+      file with unsaved edits that changed on disk is a conflict and keeps the edits. A
+      change that breaks the setup puts the old inputs back. `Workspace::open` removes
+      `.clewtmp` files older than a minute (`io::remove_stale_temps`). In the app,
+      `data.rs` starts the watch when a project loads (the project owns the watcher, which
+      holds the state and project weakly), updates the project and search index on each
+      burst, and the new command `wait_for_disk_change` waits on the `Condvar` on a
+      blocking-pool thread. `save_source` now saves and notes the save under the write
+      lock. In the UI, `lib/disk.ts` has `DiskWatch` (one wait at a time, stops when not
+      watched) and `decideDisk`; a clean editor reloads its file and keeps the cursor line,
+      and one with unsaved edits stops autosaving (`hold`) and asks "Load the version on
+      disk" or "Keep my edits". The panes refresh from the new counts. `*.clewtmp` added to
+      this repo's `.gitignore`. CT-EFF-002 set back to 74 MB on Windows (John: the 78 MB
+      came in by mistake with the 2.5b follow-up). JS bundle 462 KB (153.6 KB gzip), from
+      460 KB (153.0 KB gzip).
+      Follow-ups:
+      - The two new `ALLOWED` entries in `tests/idle_cpu.rs` (the burst timer in
+        `watch/burst.rs`, and the test-only `tests/watch.rs`) were approved by John on PR 48.
+      - The Windows idle memory job failed at 74.07 MB on a2ffc62, with no Windows code
+        change since 30b2af4 passed at 72.66 MB (run-to-run noise of about 1.4 MB, in the
+        largest web view renderer). John approved raising CT-EFF-002 on Windows to 81 MB on
+        PR 48 (ci.yml gate 81e6), recorded with the 13 CI runs on main and PR 48 since task
+        2.5b: highest 74.07 MB, and about 4 MB added by the text editor in task 2.8.
+      - The watcher was tested on Linux only (inotify). macOS (FSEvents) runs in CI; the
+        manual check of a `git pull` while the app is open is for John.
+      - A model file deleted on disk while it has unsaved edits stays in the editor and the
+        project, listed as a conflict. Keeping the edits then fails to save, since
+        `save_source` saves existing files only. John added the fix to task 2.12.
+      - Linux watches `node_modules` and other unhidden folders without a `CACHEDIR.TAG`,
+        because model files are read from them too. A large one costs watches.
+      - `clew notices` now warns about 17 shipped packages with no license file, from 16:
+        `objc2-core-services` (macOS, under notify) is new. Task 2.14 should fetch its file too.
       Milestone B: John models in Clewtrace. From here, edit `model/requirements.sysml` in
       the app; changes still go through pull requests.
+- [ ] **2.10c Windows file watcher.** ReadDirectoryChangesW through windows-sys with a wait
+      that blocks until a change arrives, never a timeout loop (CT-EFF-008). Tested on the
+      Windows CI runner.
+      Refs: CT-EFF-008, CT-EFF-007, CT-USE-009
+      Model: Opus
 - [ ] **2.11 Go to definition and completion.** F12 and Ctrl or Cmd+click go to the
       definition. Find references from the model and trace links. Completion for keywords,
       names in scope, and requirement short names after `satisfy` and `verify`.
@@ -916,6 +970,8 @@ tier in ADR-0003 before adding it. Phase 2 has 20 tasks plus the gate. Milestone
       lines, invalid UTF-8, and very large files are reported, not fatal. A fixed-seed stress
       test (deep nesting, random bytes, truncated files) runs in `cargo test` with no new
       dependency. Full fuzzing comes with the importers in 3.8.
+      Keep my edits on a file deleted on disk saves it again at the same path (a .sysml
+      file inside the project only).
       Refs: CT-SEC-009, CT-USE-007
       Model: Sonnet
 - [ ] **2.13 Accessibility and keyboard pass.** `docs/verification/accessibility.md`: WCAG 2.1

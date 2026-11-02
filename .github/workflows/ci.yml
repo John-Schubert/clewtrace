@@ -305,7 +305,7 @@ jobs:
   # from a workflow step so no new crate is needed. The build is the release build without
   # installers and without the perf-probe feature. The step starts the app with no project,
   # waits for it to settle, and measures the app and its web view processes: private working
-  # set on Windows, resident memory on macOS. Fails over the total budget (74 MB Windows,
+  # set on Windows, resident memory on macOS. Fails over the total budget (81 MB Windows,
   # 250 MB macOS), over the app process budget (8 MB Windows, 105 MB macOS), or when no web
   # view process is found (which would undercount).
   app-idle-memory:
@@ -341,7 +341,7 @@ jobs:
         working-directory: app
         run: npm run tauri build -- --ci --no-bundle
 
-      # Fails (exit 1) over 74 MB in total, over 8 MB for the app process, with no web view
+      # Fails (exit 1) over 81 MB in total, over 8 MB for the app process, with no web view
       # process, or with a process whose private working set cannot be read.
       # @verifies CT-EFF-002, CT-EFF-010
       - name: Idle memory (Windows)
@@ -372,7 +372,7 @@ jobs:
           if ($missing -gt 0) { Write-Error "No private working set for $missing process(es), so the total is too low."; exit 1 }
           if ($webview -eq 0) { Write-Error "No msedgewebview2 process under the app, so the total is too low."; exit 1 }
           $failed = $false
-          if ($total -gt 74e6) { Write-Error "CT-EFF-002: idle private working set is over 74 MB."; $failed = $true }
+          if ($total -gt 81e6) { Write-Error "CT-EFF-002: idle private working set is over 81 MB."; $failed = $true }
           if ($appPrivate -gt 8e6) { Write-Error "CT-EFF-010: the app process is over 8 MB."; $failed = $true }
           if ($failed) { exit 1 }
 

@@ -5,7 +5,7 @@
 //! JSON text. Element IDs are indexes into the loaded model and stay valid until the
 //! project is opened again. Nothing here depends on Tauri, so tests call it directly.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::Display;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard};
@@ -14,11 +14,12 @@ use std::thread::JoinHandle;
 use clew_core::check::{SetupError, TRACE_CONFIG};
 use clew_core::index::{Index, IndexError};
 use clew_core::json::quote;
-use clew_core::live::Workspace;
+use clew_core::live::{Reloaded, Workspace};
 use clew_core::model::{Element, ElementId, LIBRARY_PATH, Model};
 use clew_core::project::find_root;
 use clew_core::report::{Project, RequirementCoverage, fully_waived, project_coverage};
 use clew_core::trace::{End, Link, Toward};
+use clew_core::watch::{ProjectWatcher, Trouble, watch_project};
 
 // @implements CT-EFF-005, CT-EFF-004
 /// The most rows one page holds. Lists longer than this are virtualized in the UI, which
@@ -165,6 +166,20 @@ struct Live {
     revision: u64,
 }
 
+// @implements CT-EFF-007, CT-USE-009, CT-USE-008
+/// What a burst of file events did to the open project.
+#[derive(Debug)]
+pub struct DiskNews {
+    /// Files whose new content on disk the project now uses.
+    pub reloaded: Vec<String>,
+    /// Model files with unsaved edits that changed on disk.
+    pub conflicts: Vec<String>,
+    /// Why the new content could not be used; the project is the last one built.
+    pub error: Option<AppError>,
+    /// The project counts after the change, as `summary` gives them.
+    pub summary: String,
+}
+
 // @implements CT-EFF-004, CT-EFF-005, CT-MOD-001, CT-MOD-003, CT-USE-007
 impl Live {
     /// Reads the project that holds `path`, then brings its search index up to date.
@@ -269,6 +284,24 @@ impl Live {
             .raw("diagnostics", &array(rows))
             .raw("summary", &self.summary())
             .end()
+    }
+
+    /// Takes the content on disk of the `changed` paths, or of the whole project when
+    /// `everything` is set, after file events. Model files with unsaved edits keep them
+    /// and are listed as conflicts. Nothing is written; the search index is brought up to
+    /// date by the caller.
+    // @implements CT-EFF-007, CT-USE-009, CT-USE-008
+    fn disk_changed(&mut self, changed: &[String], everything: bool) -> Reloaded {
+        let done = if everything {
+            self.workspace.reload_all()
+        } else {
+            self.workspace.reload(changed)
+        };
+        if !done.reloaded.is_empty() {
+            self.derive();
+            self.revision += 1;
+        }
+        done
     }
 
     /// Counts the status bar and the first view need.
@@ -708,6 +741,8 @@ impl Live {
 /// alone while it rebuilds, which is about as long as the core takes to re-parse one file.
 pub struct Loaded {
     live: RwLock<Live>,
+    /// The watch of the project folder, while the project is open (CT-EFF-008).
+    watcher: Mutex<Option<ProjectWatcher>>,
 }
 
 // @implements CT-EFF-004, CT-EFF-005, CT-MOD-001, CT-MOD-003, CT-MOD-005, CT-USE-007
@@ -716,6 +751,7 @@ impl Loaded {
     pub fn open(path: &Path) -> Result<Loaded, AppError> {
         Ok(Loaded {
             live: RwLock::new(Live::open(path)?),
+            watcher: Mutex::new(None),
         })
     }
 
@@ -802,8 +838,38 @@ impl Loaded {
         self.read().source_text(path)
     }
 
+    /// Saves the editor's text and notes it, so the file event the save causes is known as
+    /// the app's own. The save and the note happen under one lock, so a file event handled
+    /// in between cannot take the save for a change made elsewhere.
+    // @implements CT-USE-008, CT-USE-009
     pub fn save_source(&self, path: &str, text: &str) -> Result<String, AppError> {
-        self.read().save_source(path, text)
+        let mut live = self.live.write().unwrap_or_else(PoisonError::into_inner);
+        let reply = live.save_source(path, text)?;
+        live.workspace.saved(path, text);
+        Ok(reply)
+    }
+
+    /// Takes the content on disk of the `changed` project-relative paths, or of the whole
+    /// project when `everything` is set, then brings the search index up to date. Only
+    /// changed files are parsed and indexed again (CT-EFF-007).
+    // @implements CT-EFF-007, CT-USE-009, CT-USE-008
+    pub fn disk_changed(&self, changed: &[String], everything: bool) -> DiskNews {
+        let mut live = self.live.write().unwrap_or_else(PoisonError::into_inner);
+        let done = live.disk_changed(changed, everything);
+        drop(live);
+        let live = self.read();
+        let models = everything || (done.reloaded.iter()).any(|p| p.ends_with(".sysml"));
+        if models && let Ok(index) = lock(&live.index).as_mut() {
+            // The index is a rebuildable cache; a failed update leaves search a step behind.
+            let _ = index.update();
+        }
+        let root = live.project().root.clone();
+        DiskNews {
+            reloaded: done.reloaded,
+            conflicts: done.conflicts,
+            error: done.error.map(|e| AppError::setup(&root, e)),
+            summary: live.summary(),
+        }
     }
 
     pub fn source(&self, path: &str, offset: usize, limit: usize) -> Result<String, AppError> {
@@ -895,6 +961,51 @@ struct Opened {
     status: Option<Status>,
     /// Counts calls to `open`, so a slow earlier load cannot replace a later one.
     generation: u64,
+    /// What file events did since the UI last asked.
+    news: Pending,
+}
+
+// @implements CT-EFF-008, CT-EFF-007, CT-USE-009
+/// File event news the UI has not taken yet, merged across bursts.
+#[derive(Default)]
+struct Pending {
+    /// Whether the open project's folder is being watched.
+    watching: bool,
+    reloaded: BTreeSet<String>,
+    conflicts: BTreeSet<String>,
+    /// Trouble and errors, as `{what, where, help}` JSON.
+    problems: Vec<String>,
+    /// The project counts after the latest change, or `None` when nothing was rebuilt.
+    summary: Option<String>,
+}
+
+// @implements CT-EFF-008, CT-USE-009
+impl Pending {
+    fn is_empty(&self) -> bool {
+        self.reloaded.is_empty()
+            && self.conflicts.is_empty()
+            && self.problems.is_empty()
+            && self.summary.is_none()
+    }
+
+    /// The news as JSON for the UI, emptied so the next wait starts afresh.
+    fn take(&mut self) -> String {
+        let strings = |set: &mut BTreeSet<String>| {
+            array(std::mem::take(set).iter().map(|p| quote(p)).collect())
+        };
+        Obj::new()
+            .bool("watching", self.watching)
+            .raw("reloaded", &strings(&mut self.reloaded))
+            .raw("conflicts", &strings(&mut self.conflicts))
+            .raw("problems", &array(std::mem::take(&mut self.problems)))
+            .raw("summary", self.summary.take().as_deref().unwrap_or("null"))
+            .end()
+    }
+}
+
+// @implements CT-EFF-008, CT-USE-007
+fn trouble_json(trouble: &Trouble) -> String {
+    AppError::new(trouble.what.clone(), "", trouble.help.clone()).json()
 }
 
 // @implements CT-EFF-004, CT-EFF-005, CT-EFF-008
@@ -916,12 +1027,19 @@ impl AppState {
             let mut opened = lock(&self.opened);
             opened.generation += 1;
             opened.status = Some(Status::Loading(path.clone()));
+            opened.news = Pending::default();
             opened.generation
         };
+        // A waiting `wait_for_disk_change` hears that the project changed.
+        self.changed.notify_all();
         let state = Arc::clone(self);
         let load = move || {
             let status = match Loaded::open(&path) {
-                Ok(loaded) => Status::Ready(Arc::new(loaded)),
+                Ok(loaded) => {
+                    let loaded = Arc::new(loaded);
+                    state.watch(&loaded, generation);
+                    Status::Ready(loaded)
+                }
                 Err(e) => Status::Failed(e),
             };
             let mut opened = lock(&state.opened);
@@ -965,6 +1083,75 @@ impl AppState {
                 .unwrap_or_else(PoisonError::into_inner);
         }
         status_json(&opened)
+    }
+
+    /// Starts watching the folder of `loaded`, the project of open number `generation`.
+    /// Each burst of file events updates the project on the watcher's thread, then wakes
+    /// the UI's `wait_for_disk_change`. The watcher holds the state and the project weakly,
+    /// so it never keeps a closed project alive; the project owns the watcher, so it stops
+    /// when the project is dropped.
+    // @implements CT-EFF-008, CT-EFF-007, CT-USE-009, CT-USE-007
+    fn watch(self: &Arc<Self>, loaded: &Arc<Loaded>, generation: u64) {
+        let state = Arc::downgrade(self);
+        let project = Arc::downgrade(loaded);
+        let root = loaded.read().project().root.clone();
+        let started = watch_project(&root, move |batch| {
+            let (Some(state), Some(project)) = (state.upgrade(), project.upgrade()) else {
+                return;
+            };
+            let news = (!batch.paths.is_empty() || batch.everything)
+                .then(|| project.disk_changed(&batch.paths, batch.everything));
+            let mut opened = lock(&state.opened);
+            if opened.generation != generation {
+                return;
+            }
+            let pending = &mut opened.news;
+            pending
+                .problems
+                .extend(batch.trouble.iter().map(trouble_json));
+            if let Some(news) = news {
+                if !news.reloaded.is_empty() {
+                    pending.summary = Some(news.summary);
+                }
+                pending.reloaded.extend(news.reloaded);
+                pending.conflicts.extend(news.conflicts);
+                pending.problems.extend(news.error.map(|e| e.json()));
+            }
+            let wake = !pending.is_empty();
+            drop(opened);
+            if wake {
+                state.changed.notify_all();
+            }
+        });
+        let mut opened = lock(&self.opened);
+        if opened.generation != generation {
+            return;
+        }
+        match started {
+            Ok(Some(watcher)) => {
+                *lock(&loaded.watcher) = Some(watcher);
+                opened.news.watching = true;
+            }
+            Ok(None) => {}
+            Err(trouble) => opened.news.problems.push(trouble_json(&trouble)),
+        }
+    }
+
+    /// Waits until file events have changed the open project, then replies with what
+    /// changed since the last call: `watching`, `reloaded` and `conflicts` paths,
+    /// `problems`, and the new project `summary` or null. Replies at once when the project
+    /// is not watched (none is open, it is loading, or the OS is Windows), and when another
+    /// project opens. The wait sleeps on a condition variable: no polling (CT-EFF-008).
+    // @implements CT-EFF-008, CT-USE-009
+    pub fn wait_for_disk_change(&self) -> String {
+        let mut opened = lock(&self.opened);
+        let generation = opened.generation;
+        while opened.news.watching && opened.news.is_empty() && opened.generation == generation {
+            opened = (self.changed)
+                .wait(opened)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+        opened.news.take()
     }
 
     /// The loaded project, or why there is none.
@@ -2010,5 +2197,100 @@ mod tests {
             .end();
         assert_eq!(out, r#"{"a\"b":"line\nbreak","n":3,"none":null}"#);
         assert_eq!(array(Vec::new()), "[]");
+    }
+
+    // @verifies CT-EFF-007, CT-USE-009
+    fn paths(list: &[&str]) -> Vec<String> {
+        list.iter().map(ToString::to_string).collect()
+    }
+
+    // @verifies CT-USE-009, CT-USE-008
+    #[test]
+    fn the_apps_own_save_is_not_reported_back_as_a_disk_change() {
+        let project = gappy("own_save_is_not_news");
+        project.save_source("reqs.sysml", "package Reqs;\n").ok();
+        let text = fs::read_to_string(project.root().join("design.sysml")).unwrap();
+        project
+            .edit("design.sysml", &format!("{text}// more\n"))
+            .unwrap();
+        project
+            .save_source("design.sysml", &format!("{text}// more\n"))
+            .unwrap();
+        let news = project.disk_changed(&paths(&["design.sysml"]), false);
+        assert!(news.reloaded.is_empty(), "{:?}", news.reloaded);
+        assert!(news.conflicts.is_empty(), "{:?}", news.conflicts);
+    }
+
+    // @verifies CT-EFF-007, CT-USE-009
+    #[test]
+    fn a_file_changed_on_disk_reaches_the_queries_and_the_search_index() {
+        let project = gappy("disk_change_reaches_queries");
+        let root = project.root();
+        let text = fs::read_to_string(root.join("design.sysml")).unwrap();
+        let text = text.replace("part def Loose {", "part def Gearbox;\n  part def Loose {");
+        fs::write(root.join("design.sysml"), text).unwrap();
+        let news = project.disk_changed(&paths(&["design.sysml"]), false);
+        assert_eq!(news.reloaded, ["design.sysml"]);
+        assert!(news.error.is_none(), "{:?}", news.error);
+        let hits = ok(&reply(project.search("Gearbox", 0, 10)));
+        assert_eq!(hits.get("rows").unwrap().items().len(), 1, "{hits:?}");
+        assert!(
+            project
+                .read()
+                .project()
+                .model
+                .find("Design::Gearbox")
+                .is_some()
+        );
+    }
+
+    // @verifies CT-USE-009, CT-USE-008
+    #[test]
+    fn a_file_with_unsaved_edits_that_changed_on_disk_is_a_conflict() {
+        let project = gappy("disk_change_conflict");
+        let root = project.root();
+        let text = fs::read_to_string(root.join("design.sysml")).unwrap();
+        project
+            .edit("design.sysml", &format!("{text}package Mine;\n"))
+            .unwrap();
+        fs::write(
+            root.join("design.sysml"),
+            format!("{text}package Theirs;\n"),
+        )
+        .unwrap();
+        let news = project.disk_changed(&paths(&["design.sysml"]), false);
+        assert_eq!(news.conflicts, ["design.sysml"]);
+        assert!(news.reloaded.is_empty());
+        assert!(project.read().project().model.find("Mine").is_some());
+    }
+
+    // @verifies CT-EFF-008, CT-USE-009
+    #[test]
+    fn without_a_watched_project_the_disk_wait_returns_at_once() {
+        let state = AppState::default();
+        let news = json::parse(&state.wait_for_disk_change()).unwrap();
+        assert_eq!(news.get("watching").and_then(Json::as_bool), Some(false));
+    }
+
+    // @verifies CT-EFF-008, CT-EFF-007, CT-USE-009
+    #[cfg(not(windows))]
+    #[test]
+    fn an_open_project_is_watched_and_the_ui_hears_of_changes() {
+        let root = gappy("watched").root();
+        let state = Arc::new(AppState::default());
+        state.open(root.clone()).unwrap().join().unwrap();
+        let text = fs::read_to_string(root.join("design.sysml")).unwrap();
+        fs::write(root.join("design.sysml"), format!("{text}package Later;\n")).unwrap();
+        let mut reloaded = Vec::new();
+        let started = Instant::now();
+        while !reloaded.iter().any(|p| p == "design.sysml") {
+            assert!(started.elapsed() < Duration::from_secs(10), "{reloaded:?}");
+            let news = json::parse(&state.wait_for_disk_change()).unwrap();
+            assert_eq!(news.get("watching").and_then(Json::as_bool), Some(true));
+            let rows = news.get("reloaded").unwrap().items();
+            reloaded.extend(rows.iter().filter_map(|r| r.as_str().map(String::from)));
+        }
+        let loaded = state.project().unwrap();
+        assert!(loaded.read().project().model.find("Later").is_some());
     }
 }

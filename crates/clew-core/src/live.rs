@@ -1,7 +1,7 @@
 //! Live validation: rebuilding a project as the user edits one file, without reading or
 //! parsing the others again (ADR-0005).
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::check::{self, SetupError};
@@ -76,33 +76,31 @@ impl Sources {
             parses: 0,
         };
         for path in paths {
-            let file = match index::read_file(&root.join(&path)) {
-                Ok(loaded) => sources.parse(path, &loaded.text),
-                Err(message) => ModelFile {
-                    problems: vec![index::unreadable(&path, &message)],
-                    path,
-                    members: None,
-                    sha256: Vec::new(),
-                },
-            };
+            let file = sources.read_model(root, path);
             sources.files.push(file);
         }
-        let config = &sources.config;
-        for path in check::source_files(root, config)? {
-            let excluded = (config.excludes.iter()).any(|e| check::glob_matches(&e.path, &path));
-            let syntax = check::syntax_for(config, &path).filter(|_| !excluded);
-            let loaded = syntax.and_then(|_| index::read_file(&root.join(&path)).ok());
-            if let (Some(syntax), Some(loaded)) = (syntax, loaded) {
-                let sha256 = reproduce::text_sha256(&loaded.text);
-                sources
-                    .scans
-                    .push((path, scan::scan_source(syntax, &loaded.text), sha256));
+        for path in check::source_files(root, &sources.config)? {
+            if let Some(scanned) = scan_code(root, &sources.config, path) {
+                sources.scans.push(scanned);
             }
         }
         let (problems, inputs) = (&mut sources.other_problems, &mut sources.other_inputs);
         sources.checklists = report::read_checklists(root, problems, inputs);
         sources.documents = report::read_documents(root, problems, inputs);
         Ok(sources)
+    }
+
+    /// Reads and parses the model file at `path` from disk.
+    fn read_model(&mut self, root: &Path, path: String) -> ModelFile {
+        match index::read_file(&root.join(&path)) {
+            Ok(loaded) => self.parse(path, &loaded.text),
+            Err(message) => ModelFile {
+                problems: vec![index::unreadable(&path, &message)],
+                path,
+                members: None,
+                sha256: Vec::new(),
+            },
+        }
     }
 
     /// Parses the text of the model file at `path`.
@@ -133,6 +131,55 @@ impl Sources {
     fn remove(&mut self, path: &str) -> Option<ModelFile> {
         let at = self.files.binary_search_by(|f| f.path.as_str().cmp(path));
         at.ok().map(|at| self.files.remove(at))
+    }
+
+    /// The cached model file at `path`.
+    fn file(&self, path: &str) -> Option<&ModelFile> {
+        let at = self.files.binary_search_by(|f| f.path.as_str().cmp(path));
+        at.ok().map(|at| &self.files[at])
+    }
+
+    /// Puts `scan` in place of the code scan with its path, or adds it. Returns the scan
+    /// it replaced. `order` puts the scans back in the order `read` gives them.
+    fn put_scan(&mut self, scan: Scan, order: &[String]) -> Option<Scan> {
+        let old = self.remove_scan(&scan.0);
+        self.scans.push(scan);
+        let rank: HashMap<&str, usize> = (order.iter().enumerate())
+            .map(|(i, p)| (p.as_str(), i))
+            .collect();
+        (self.scans).sort_by_key(|(p, _, _)| rank.get(p.as_str()).copied().unwrap_or(usize::MAX));
+        old
+    }
+
+    /// Takes the code scan of `path` out.
+    fn remove_scan(&mut self, path: &str) -> Option<Scan> {
+        let at = self.scans.iter().position(|(p, _, _)| p == path)?;
+        Some(self.scans.remove(at))
+    }
+
+    /// Reads the checklists and documents again. Returns the old ones when what they found
+    /// changed, or puts the old ones back and returns `None` when nothing did.
+    fn reread_others(&mut self, root: &Path) -> Option<Others> {
+        let (mut problems, mut inputs) = (Vec::new(), Vec::new());
+        let checklists = report::read_checklists(root, &mut problems, &mut inputs);
+        let documents = report::read_documents(root, &mut problems, &mut inputs);
+        if problems == self.other_problems && inputs == self.other_inputs {
+            return None;
+        }
+        Some(Others {
+            checklists: std::mem::replace(&mut self.checklists, checklists),
+            documents: std::mem::replace(&mut self.documents, documents),
+            problems: std::mem::replace(&mut self.other_problems, problems),
+            inputs: std::mem::replace(&mut self.other_inputs, inputs),
+        })
+    }
+
+    /// Puts back the checklists and documents `reread_others` replaced.
+    fn restore_others(&mut self, old: Others) {
+        self.checklists = old.checklists;
+        self.documents = old.documents;
+        self.other_problems = old.problems;
+        self.other_inputs = old.inputs;
     }
 
     /// Builds the model, trace graph, and problem list from the cached inputs.
@@ -182,6 +229,58 @@ impl Sources {
         })
     }
 }
+
+// @implements CT-EFF-007, CT-TRC-004
+/// A code file's path, its scan, and the SHA-256 of its text.
+type Scan = (String, FileScan, Vec<u8>);
+
+// @implements CT-EFF-007, CT-TRC-004
+/// Scans the code file at `path`, unless `clew check --self` would report it as excluded,
+/// untraceable, or unreadable.
+fn scan_code(root: &Path, config: &TraceConfig, path: String) -> Option<Scan> {
+    let excluded = (config.excludes.iter()).any(|e| check::glob_matches(&e.path, &path));
+    let syntax = check::syntax_for(config, &path).filter(|_| !excluded)?;
+    let loaded = index::read_file(&root.join(&path)).ok()?;
+    let sha256 = reproduce::text_sha256(&loaded.text);
+    Some((path, scan::scan_source(syntax, &loaded.text), sha256))
+}
+
+// @implements CT-EFF-007, CT-USE-009
+/// The checklists and documents as `Sources` held them before they were read again.
+struct Others {
+    checklists: Vec<Checklist>,
+    documents: Vec<Document>,
+    problems: Vec<String>,
+    inputs: Vec<(String, Vec<u8>)>,
+}
+
+// @implements CT-EFF-007, CT-USE-009
+/// One input `reload` replaced, kept so a reload that breaks the setup can be undone.
+enum Undo {
+    /// A model file and the SHA-256 the disk had for it before.
+    Model(String, Option<ModelFile>, Option<Vec<u8>>),
+    /// A code file, the scan it had, and where that scan was in the list.
+    Scan(String, Option<Scan>, usize),
+    Others(Others),
+}
+
+// @implements CT-EFF-007, CT-USE-009, CT-USE-008
+/// What `Workspace::reload` found.
+#[derive(Debug, Default)]
+pub struct Reloaded {
+    /// Project-relative paths whose new content on disk the project now uses, sorted.
+    pub reloaded: Vec<String>,
+    /// Model files with unsaved edits that changed on disk. The project keeps the edits;
+    /// the user chooses which text to keep.
+    pub conflicts: Vec<String>,
+    /// Why the new content could not be used. The project is the last one built.
+    pub error: Option<SetupError>,
+}
+
+// @implements CT-USE-008
+/// How old a temp file must be before `Workspace::open` treats it as left by a killed save.
+/// A save takes far less, so a younger one may belong to a save still running elsewhere.
+pub const STALE_TEMP_AGE: std::time::Duration = std::time::Duration::from_secs(60);
 
 // @implements CT-MOD-003
 /// What makes an element the same one across a rebuild, apart from its model index.
@@ -272,25 +371,285 @@ pub struct Workspace {
     /// project are never held together (CT-EFF-004).
     project: Option<Project>,
     ids: StableIds,
+    /// The SHA-256 of each model file as last read from or written to disk. A cached file
+    /// whose hash differs holds unsaved edits.
+    disk: HashMap<String, Vec<u8>>,
 }
 
 // @implements CT-MOD-003, CT-EFF-007, CT-USE-007
 impl Workspace {
     /// Reads the project at `root`, which must be the project root, keeping each model
-    /// file's syntax tree.
+    /// file's syntax tree. First it removes the temp files that killed saves left behind
+    /// (`io::remove_stale_temps`, older than `STALE_TEMP_AGE`).
     pub fn open(root: &Path) -> Result<Workspace, SetupError> {
+        crate::io::remove_stale_temps(root, STALE_TEMP_AGE);
         let sources = Sources::read(root)?;
         let project = sources.project(root)?;
         let mut ids = StableIds::default();
         ids.assign(&project.model);
+        let disk = (sources.files.iter())
+            .map(|f| (f.path.clone(), f.sha256.clone()))
+            .collect();
         Ok(Workspace {
             root: root.to_path_buf(),
             sources,
             project: Some(project),
             ids,
+            disk,
         })
     }
+}
 
+// @implements CT-EFF-007, CT-USE-009, CT-USE-008
+impl Workspace {
+    /// Notes that the app wrote `text` to the model file at `path`, so the file event the
+    /// write causes is known as its own and is not reloaded.
+    pub fn saved(&mut self, path: &str, text: &str) {
+        self.disk
+            .insert(path.to_string(), reproduce::text_sha256(text));
+    }
+
+    /// Whether the cached model file at `path` differs from what the disk had, given the
+    /// disk's hash `before` the change being handled.
+    fn unsaved(&self, path: &str, before: Option<&Vec<u8>>) -> bool {
+        self.sources
+            .file(path)
+            .is_some_and(|f| before != Some(&f.sha256))
+    }
+
+    /// Takes the content on disk of the project-relative `changed` paths, which file events
+    /// reported, and rebuilds the project when any input changed. Only changed model files
+    /// are parsed again and only changed code files scanned again; a change under
+    /// `docs/` or to a `.md` file reads the checklists and documents again, and a change to
+    /// `trace.toml` reads the whole project again. A file whose content is what the app
+    /// last read or saved is skipped, so the app's own saves cost one hash each.
+    ///
+    /// A model file with unsaved edits is never replaced: it is listed in `conflicts`, and
+    /// the project keeps the edits until the editor sends the text the user chose. When the
+    /// new content breaks the setup, the last project is rebuilt and the error returned.
+    pub fn reload(&mut self, changed: &[String]) -> Reloaded {
+        let mut changed: Vec<&String> = changed.iter().collect();
+        changed.sort();
+        changed.dedup();
+        if changed.iter().any(|p| p.as_str() == check::TRACE_CONFIG) {
+            return self.reread(&changed);
+        }
+        let mut done = Reloaded::default();
+        let root = self.root.clone();
+        let (models, code) = match self.listed() {
+            Ok(lists) => lists,
+            Err(error) => {
+                done.error = Some(error);
+                return done;
+            }
+        };
+        let mut undo = Vec::new();
+        let mut markdown = Vec::new();
+        for path in changed {
+            let model_file = path.ends_with(".sysml");
+            if model_file && (models.contains(path) || self.sources.file(path).is_some()) {
+                let on_disk = models.contains(path);
+                let sha = on_disk.then(|| {
+                    index::read_file(&root.join(path))
+                        .map(|l| reproduce::text_sha256(&l.text))
+                        .unwrap_or_default()
+                });
+                let before = self.disk.get(path.as_str()).cloned();
+                if sha.is_some() && sha == before {
+                    continue;
+                }
+                if self.unsaved(path, before.as_ref()) {
+                    done.conflicts.push(path.clone());
+                    continue;
+                }
+                let old = if on_disk {
+                    let file = self.sources.read_model(&root, path.clone());
+                    self.disk.insert(path.clone(), file.sha256.clone());
+                    self.sources.put(file)
+                } else {
+                    self.disk.remove(path.as_str());
+                    self.sources.remove(path)
+                };
+                undo.push(Undo::Model(path.clone(), old, before));
+                done.reloaded.push(path.clone());
+            } else if code.contains(path) {
+                let scanned = scan_code(&root, &self.sources.config, path.clone());
+                let at = self.scan_at(path);
+                let before = (self.sources.scans.iter()).find(|(p, _, _)| p == path);
+                if before.map(|(_, _, sha)| sha) == scanned.as_ref().map(|(_, _, sha)| sha) {
+                    continue;
+                }
+                let old = match scanned {
+                    Some(scan) => self.sources.put_scan(scan, &code),
+                    None => self.sources.remove_scan(path),
+                };
+                undo.push(Undo::Scan(path.clone(), old, at));
+                done.reloaded.push(path.clone());
+            } else if let at = self.scan_at(path)
+                && let Some(old) = self.sources.remove_scan(path)
+            {
+                undo.push(Undo::Scan(path.clone(), Some(old), at));
+                done.reloaded.push(path.clone());
+            }
+            if path.ends_with(".md") {
+                markdown.push(path.clone());
+            }
+        }
+        if !markdown.is_empty()
+            && let Some(old) = self.sources.reread_others(&root)
+        {
+            undo.push(Undo::Others(old));
+            done.reloaded.extend(markdown);
+        }
+        if undo.is_empty() {
+            return done;
+        }
+        if let Err(error) = self.rebuild() {
+            for step in undo.into_iter().rev() {
+                self.undo(step);
+            }
+            done.error = Some(error);
+            done.reloaded.clear();
+            self.project = Some(
+                (self.sources.project(&self.root))
+                    .expect("the restored inputs built the last project"),
+            );
+        }
+        done.reloaded.sort();
+        done.reloaded.dedup();
+        done
+    }
+}
+
+// @implements CT-EFF-007, CT-USE-009, CT-USE-008
+/// The steps of `reload`.
+impl Workspace {
+    /// Where the scan of `path` is in the list, or the end when there is none.
+    fn scan_at(&self, path: &str) -> usize {
+        let scans = &self.sources.scans;
+        scans
+            .iter()
+            .position(|(p, _, _)| p == path)
+            .unwrap_or(scans.len())
+    }
+
+    /// The model files and code files the project reads, as listed on disk now.
+    fn listed(&self) -> Result<(HashSet<String>, Vec<String>), SetupError> {
+        let models = index::sysml_files(&self.root).map_err(|e| SetupError {
+            path: String::new(),
+            line: 0,
+            message: e.to_string(),
+        })?;
+        let code = check::source_files(&self.root, &self.sources.config)?;
+        Ok((models.into_iter().collect(), code))
+    }
+
+    /// Rebuilds the project from the cached inputs, dropping the old one first so only one
+    /// is held at a time (CT-EFF-004). On an error there is no project until the caller
+    /// puts the old inputs back and builds again.
+    fn rebuild(&mut self) -> Result<(), SetupError> {
+        self.project = None;
+        let project = self.sources.project(&self.root)?;
+        self.ids.assign(&project.model);
+        self.project = Some(project);
+        Ok(())
+    }
+
+    /// Puts back one input `reload` replaced.
+    fn undo(&mut self, step: Undo) {
+        match step {
+            Undo::Model(path, old, disk) => {
+                match old {
+                    Some(file) => drop(self.sources.put(file)),
+                    None => drop(self.sources.remove(&path)),
+                }
+                match disk {
+                    Some(sha) => self.disk.insert(path, sha),
+                    None => self.disk.remove(&path),
+                };
+            }
+            Undo::Scan(path, old, at) => {
+                self.sources.remove_scan(&path);
+                if let Some(scan) = old {
+                    let at = at.min(self.sources.scans.len());
+                    self.sources.scans.insert(at, scan);
+                }
+            }
+            Undo::Others(old) => self.sources.restore_others(old),
+        }
+    }
+
+    /// Reads every input of the project again, for when what changed is not known file by
+    /// file, such as a folder renamed. Model files with unsaved edits keep them, as in
+    /// `reload`; `reloaded` lists the model files whose content on disk changed.
+    pub fn reload_all(&mut self) -> Reloaded {
+        self.reread(&[])
+    }
+
+    /// `reload` after `trace.toml` changed, and `reload_all`: reads every input again,
+    /// keeping the cached text of model files with unsaved edits.
+    fn reread(&mut self, changed: &[&String]) -> Reloaded {
+        let mut done = Reloaded::default();
+        let mut fresh = match Sources::read(&self.root) {
+            Ok(fresh) => fresh,
+            Err(error) => {
+                done.error = Some(error);
+                return done;
+            }
+        };
+        fresh.parses += self.sources.parses;
+        let mut disk: HashMap<String, Vec<u8>> = (fresh.files.iter())
+            .map(|f| (f.path.clone(), f.sha256.clone()))
+            .collect();
+        let unsaved: Vec<String> = (self.sources.files.iter())
+            .filter(|f| self.unsaved(&f.path, self.disk.get(&f.path)))
+            .map(|f| f.path.clone())
+            .collect();
+        for path in &unsaved {
+            let path = path.clone();
+            let now = disk.get(&path).cloned();
+            if now != self.disk.get(&path).cloned() {
+                done.conflicts.push(path.clone());
+            }
+            match self.disk.get(&path) {
+                Some(sha) => disk.insert(path.clone(), sha.clone()),
+                None => disk.remove(&path),
+            };
+            if let Some(file) = self.sources.remove(&path) {
+                fresh.put(file);
+            }
+        }
+        let mut news: BTreeSet<String> = changed.iter().map(|p| p.to_string()).collect();
+        let paths = (disk.keys()).chain(self.disk.keys());
+        news.extend(paths.filter(|p| disk.get(*p) != self.disk.get(*p)).cloned());
+        let old_sources = std::mem::replace(&mut self.sources, fresh);
+        let old_disk = std::mem::replace(&mut self.disk, disk);
+        match self.rebuild() {
+            Ok(()) => done.reloaded = news.into_iter().collect(),
+            Err(error) => {
+                // The kept files went into the new inputs; move them back.
+                let mut old_sources = old_sources;
+                for path in &unsaved {
+                    if let Some(file) = self.sources.remove(path) {
+                        old_sources.put(file);
+                    }
+                }
+                done.conflicts.clear();
+                self.sources = old_sources;
+                self.disk = old_disk;
+                self.project = Some(
+                    (self.sources.project(&self.root))
+                        .expect("the old inputs built the last project"),
+                );
+                done.error = Some(error);
+            }
+        }
+        done
+    }
+}
+
+// @implements CT-MOD-003, CT-EFF-007, CT-USE-007
+impl Workspace {
     /// The project as last built.
     pub fn project(&self) -> &Project {
         (self.project.as_ref()).expect("`edit` always leaves a project behind")
@@ -626,5 +985,231 @@ mod tests {
         assert_ne!(before[0], before[1]);
         ws.edit("model/a.sysml", "package A;\n").unwrap();
         assert_eq!(ids(&ws), before);
+    }
+
+    // @verifies CT-EFF-007, CT-USE-009
+    /// The project rebuilt by `reload` matches one read from disk afresh.
+    fn same_as_fresh(ws: &Workspace) {
+        let fresh = load_project(&ws.root).unwrap();
+        let p = ws.project();
+        assert_eq!(p.model.files, fresh.model.files);
+        assert_eq!(p.model.elements.len(), fresh.model.elements.len());
+        assert_eq!(p.graph.links, fresh.graph.links);
+        assert_eq!(p.inputs, fresh.inputs);
+        assert_eq!(p.problems, fresh.problems);
+        assert_eq!(p.requirements, fresh.requirements);
+        assert_eq!(p.documents, fresh.documents);
+        assert_eq!(p.checklists, fresh.checklists);
+    }
+
+    // @verifies CT-EFF-007
+    fn paths(list: &[&str]) -> Vec<String> {
+        list.iter().map(ToString::to_string).collect()
+    }
+
+    // @verifies CT-EFF-007, CT-USE-009
+    #[test]
+    fn a_model_file_changed_on_disk_is_reparsed_alone() {
+        let root = project("disk-change");
+        let mut ws = Workspace::open(&root).unwrap();
+        let text = DESIGN.replace("part wheel;", "part wheel;\n    part axle;");
+        fs::write(root.join("model/design.sysml"), &text).unwrap();
+        let done = ws.reload(&paths(&["model/design.sysml"]));
+        assert!(done.error.is_none(), "{:?}", done.error);
+        assert_eq!(done.reloaded, ["model/design.sysml"]);
+        assert!(done.conflicts.is_empty());
+        assert_eq!(ws.parses(), 3);
+        assert!(ws.project().model.find("Design::axle").is_some());
+        same_as_fresh(&ws);
+    }
+
+    // @verifies CT-EFF-007, CT-EFF-008
+    #[test]
+    fn an_event_for_a_file_that_did_not_change_parses_nothing() {
+        let root = project("no-change");
+        let mut ws = Workspace::open(&root).unwrap();
+        let done = ws.reload(&paths(&["model/design.sysml", "src/lib.rs", "notes.txt"]));
+        assert!(done.reloaded.is_empty() && done.conflicts.is_empty());
+        assert!(done.error.is_none());
+        assert_eq!(ws.parses(), 2);
+    }
+
+    // @verifies CT-USE-009, CT-USE-008
+    #[test]
+    fn the_apps_own_save_is_not_news() {
+        let root = project("own-save");
+        let mut ws = Workspace::open(&root).unwrap();
+        let saved = DESIGN.replace("wheel", "tyre");
+        ws.edit("model/design.sysml", &saved).unwrap();
+        fs::write(root.join("model/design.sysml"), &saved).unwrap();
+        ws.saved("model/design.sysml", &saved);
+        // The user typed on before the file event for the save came in.
+        ws.edit("model/design.sysml", &format!("{saved}// more\n"))
+            .unwrap();
+        let parses = ws.parses();
+        let done = ws.reload(&paths(&["model/design.sysml"]));
+        assert!(done.reloaded.is_empty() && done.conflicts.is_empty());
+        assert_eq!(ws.parses(), parses);
+    }
+
+    // @verifies CT-USE-009, CT-USE-008
+    #[test]
+    fn a_file_with_unsaved_edits_that_changed_on_disk_is_a_conflict_and_keeps_the_edits() {
+        let root = project("conflict");
+        let mut ws = Workspace::open(&root).unwrap();
+        let mine = DESIGN.replace("part wheel;", "part wheel;\n    part mine;");
+        ws.edit("model/design.sysml", &mine).unwrap();
+        let theirs = DESIGN.replace("part wheel;", "part wheel;\n    part theirs;");
+        fs::write(root.join("model/design.sysml"), &theirs).unwrap();
+        let done = ws.reload(&paths(&["model/design.sysml"]));
+        assert_eq!(done.conflicts, ["model/design.sysml"]);
+        assert!(done.reloaded.is_empty());
+        assert!(ws.project().model.find("Design::mine").is_some());
+        assert!(ws.project().model.find("Design::theirs").is_none());
+        // Taking the disk text, as the editor does when the user loads it, ends the conflict.
+        ws.edit("model/design.sysml", &theirs).unwrap();
+        same_as_fresh(&ws);
+    }
+
+    // @verifies CT-EFF-007, CT-USE-009
+    #[test]
+    fn a_deleted_model_file_leaves_and_a_new_one_joins() {
+        let root = project("delete-add");
+        let mut ws = Workspace::open(&root).unwrap();
+        fs::write(
+            root.join("model/extra.sysml"),
+            "package Extra { part spare; }\n",
+        )
+        .unwrap();
+        let done = ws.reload(&paths(&["model/extra.sysml"]));
+        assert_eq!(done.reloaded, ["model/extra.sysml"]);
+        assert!(ws.project().model.find("Extra::spare").is_some());
+        same_as_fresh(&ws);
+        fs::remove_file(root.join("model/extra.sysml")).unwrap();
+        let done = ws.reload(&paths(&["model/extra.sysml"]));
+        assert_eq!(done.reloaded, ["model/extra.sysml"]);
+        assert!(ws.project().model.find("Extra::spare").is_none());
+        same_as_fresh(&ws);
+        assert_eq!(ws.parses(), 3);
+    }
+
+    // @verifies CT-EFF-007, CT-USE-009
+    #[test]
+    fn a_changed_or_new_code_file_is_scanned_again() {
+        let root = project("code");
+        let mut ws = Workspace::open(&root).unwrap();
+        fs::write(
+            root.join("src/lib.rs"),
+            "// @verifies X-002\n#[test]\nfn b() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("src/more.rs"),
+            "// @implements X-001\nfn c() {}\n",
+        )
+        .unwrap();
+        let done = ws.reload(&paths(&["src/lib.rs", "src/more.rs"]));
+        assert!(done.error.is_none(), "{:?}", done.error);
+        assert_eq!(done.reloaded, ["src/lib.rs", "src/more.rs"]);
+        assert_eq!(ws.parses(), 2);
+        same_as_fresh(&ws);
+        fs::remove_file(root.join("src/more.rs")).unwrap();
+        assert_eq!(
+            ws.reload(&paths(&["src/more.rs"])).reloaded,
+            ["src/more.rs"]
+        );
+        same_as_fresh(&ws);
+    }
+
+    // @verifies CT-EFF-007, CT-USE-009
+    #[test]
+    fn a_changed_document_or_checklist_is_read_again() {
+        let root = project("docs");
+        let mut ws = Workspace::open(&root).unwrap();
+        fs::create_dir_all(root.join("docs/verification")).unwrap();
+        fs::write(
+            root.join("docs/verification/check.md"),
+            "<!-- @verifies X-001 -->\n# Check\n",
+        )
+        .unwrap();
+        let done = ws.reload(&paths(&["docs/verification/check.md"]));
+        assert_eq!(done.reloaded, ["docs/verification/check.md"]);
+        same_as_fresh(&ws);
+    }
+
+    // @verifies CT-EFF-007, CT-USE-009
+    #[test]
+    fn a_trace_toml_change_reads_the_project_again_but_keeps_unsaved_edits() {
+        let root = project("config");
+        let mut ws = Workspace::open(&root).unwrap();
+        let mine = DESIGN.replace("part wheel;", "part wheel;\n    part mine;");
+        ws.edit("model/design.sysml", &mine).unwrap();
+        let config = fs::read_to_string(root.join("trace.toml")).unwrap();
+        fs::write(
+            root.join("trace.toml"),
+            config.replace("source_roots = [\"src\"]", "source_roots = []"),
+        )
+        .unwrap();
+        let done = ws.reload(&paths(&["trace.toml"]));
+        assert!(done.error.is_none(), "{:?}", done.error);
+        assert_eq!(done.reloaded, ["trace.toml"]);
+        assert!(done.conflicts.is_empty());
+        assert!(ws.project().model.find("Design::mine").is_some());
+        assert!(ws.project().inputs.iter().all(|(p, _)| p != "src/lib.rs"));
+    }
+
+    // @verifies CT-USE-009, CT-USE-007
+    #[test]
+    fn a_disk_change_that_breaks_the_setup_keeps_the_last_project() {
+        let root = project("breaks");
+        let mut ws = Workspace::open(&root).unwrap();
+        fs::write(root.join("model/reqs.sysml"), "package Reqs;\n").unwrap();
+        let done = ws.reload(&paths(&["model/reqs.sysml"]));
+        let error = done.error.expect("Reqs::Top no longer resolves");
+        assert!(error.message.contains("Top"), "{error:?}");
+        assert!(ws.project().model.find("Reqs::a").is_some());
+        // Fixing the file on disk brings the project back in step.
+        fs::write(
+            root.join("model/reqs.sysml"),
+            REQS.replace("b : Top", "c : Top"),
+        )
+        .unwrap();
+        let done = ws.reload(&paths(&["model/reqs.sysml"]));
+        assert!(done.error.is_none(), "{:?}", done.error);
+        same_as_fresh(&ws);
+    }
+
+    // @verifies CT-USE-008
+    #[test]
+    fn opening_removes_stale_temp_files() {
+        let root = project("temps");
+        let stale = root.join(format!("model/.reqs.sysml.9{}", crate::io::TEMP_SUFFIX));
+        fs::write(&stale, "torn").unwrap();
+        let old = std::time::SystemTime::now() - STALE_TEMP_AGE * 2;
+        fs::File::options()
+            .write(true)
+            .open(&stale)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        Workspace::open(&root).unwrap();
+        assert!(!stale.exists());
+    }
+
+    // @verifies CT-EFF-007, CT-USE-009
+    #[test]
+    fn reloading_everything_after_a_folder_rename_lists_the_moved_files() {
+        let root = project("rename");
+        let mut ws = Workspace::open(&root).unwrap();
+        fs::create_dir_all(root.join("more")).unwrap();
+        fs::rename(
+            root.join("model/design.sysml"),
+            root.join("more/design.sysml"),
+        )
+        .unwrap();
+        let done = ws.reload_all();
+        assert!(done.error.is_none(), "{:?}", done.error);
+        assert_eq!(done.reloaded, ["model/design.sysml", "more/design.sysml"]);
+        same_as_fresh(&ws);
     }
 }

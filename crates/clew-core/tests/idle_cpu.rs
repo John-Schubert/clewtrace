@@ -19,7 +19,7 @@ const POLLING: [&str; 4] = [
 /// Files that may name a polling call, each with its reason. A new entry needs John's
 /// approval, and the reason must show why the code is not a polling loop.
 // @verifies CT-EFF-008
-const ALLOWED: [(&str, &str); 2] = [
+const ALLOWED: [(&str, &str); 4] = [
     (
         "crates/clew-core/tests/idle_cpu.rs",
         "this guard names the calls it looks for, so it would fail its own scan",
@@ -30,6 +30,18 @@ const ALLOWED: [(&str, &str); 2] = [
          once to let the idle window settle before reading memory, once for a watchdog, and \
          its injected script waits for two painted frames once per scripted action. Nothing \
          repeats, and the UI bundle holds none of it",
+    ),
+    (
+        "crates/clew-core/src/watch/burst.rs",
+        "the file watcher's burst timer (task 2.10b). Its thread blocks in `recv`, with no \
+         timeout, until the OS reports a file event; `recv_timeout` then runs only until the \
+         burst has been still for 200 ms or has lasted 2 s, and the thread goes back to \
+         `recv`. Nothing runs while no files change. Its tests sleep to space out events",
+    ),
+    (
+        "crates/clew-core/tests/watch.rs",
+        "test only, never shipped: watches a real folder and waits with timeouts, so a \
+         missed file event fails the test instead of hanging it",
     ),
 ];
 

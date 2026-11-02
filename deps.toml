@@ -72,6 +72,14 @@ scope = "shipped"
 serves = ["CT-SEC-006", "CT-TRC-009", "CT-SEC-004", "CT-EFF-007"]
 why = "Vetted SHA-256 for report hashes, evidence hashes, the change log, and the index's changed-file check. Default features off"
 
+[[dep]]
+name = "notify"
+ecosystem = "cargo"
+license = "CC0-1.0"
+scope = "shipped"
+serves = ["CT-EFF-008", "CT-EFF-007", "CT-USE-009"]
+why = "OS file events for watching the open project folder (task 2.10b). Version 8.2.1, approved by John with a per-crate CC0-1.0 exception (decisions 16 and 20 on PR #27). Linux (inotify) and macOS (FSEvents) only: its Windows watcher wakes every 100 ms, so Windows gets its own in task 2.10c. Default features off; macos_fsevent only, so macOS never falls back to polling. Its polling watcher and the notify-debouncer crates are never used"
+
 # [[dep]]
 # name = "ed25519-dalek"
 # ecosystem = "cargo"
@@ -343,6 +351,24 @@ scope = "build-only"
 via = "Tauri's Linux GTK sys crates (build scripts)"
 serves = ["CT-PLT-001"]
 why = "Indirect: target triple parsing at build time on Linux"
+
+[[dep]]
+name = "inotify"
+ecosystem = "cargo"
+license = "ISC"
+scope = "shipped"
+via = "clew-core -> notify (Linux only)"
+serves = ["CT-EFF-008"]
+why = "Indirect: Linux file events for notify. Per-crate ISC exception approved by John (decisions 16 and 20 on PR #27)"
+
+[[dep]]
+name = "inotify-sys"
+ecosystem = "cargo"
+license = "ISC"
+scope = "shipped"
+via = "clew-core -> notify -> inotify (Linux only)"
+serves = ["CT-EFF-008"]
+why = "Indirect: the Linux inotify system calls for inotify. Per-crate ISC exception approved by John (decisions 16 and 20 on PR #27)"
 
 # System libraries the Linux deb and rpm depend on (John, 2026-10-21). The distribution's
 # package manager installs its own copies; Clewtrace never distributes them, so their LGPL
