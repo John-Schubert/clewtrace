@@ -936,17 +936,18 @@ tier in ADR-0003 before adding it. Phase 2 has 21 tasks plus the gate. Milestone
       came in by mistake with the 2.5b follow-up). JS bundle 462 KB (153.6 KB gzip), from
       460 KB (153.0 KB gzip).
       Follow-ups:
-      - John to approve the two new `ALLOWED` entries in `tests/idle_cpu.rs`: the burst
-        timer in `watch/burst.rs`, and the test-only `tests/watch.rs`.
-      - Windows idle memory was not measured in the session (no Windows machine). Windows
-        starts no watcher and the UI makes one `wait_for_disk_change` call that returns at
-        once, so the change should be small; check the `app idle memory (windows-latest)`
-        job on the PR against 74 MB (71 MB on main).
+      - The two new `ALLOWED` entries in `tests/idle_cpu.rs` (the burst timer in
+        `watch/burst.rs`, and the test-only `tests/watch.rs`) were approved by John on PR 48.
+      - The Windows idle memory job failed at 74.07 MB on a2ffc62, with no Windows code
+        change since 30b2af4 passed at 72.66 MB (run-to-run noise of about 1.4 MB, in the
+        largest web view renderer). John approved raising CT-EFF-002 on Windows to 81 MB on
+        PR 48 (ci.yml gate 81e6), recorded with the 13 CI runs on main and PR 48 since task
+        2.5b: highest 74.07 MB, and about 4 MB added by the text editor in task 2.8.
       - The watcher was tested on Linux only (inotify). macOS (FSEvents) runs in CI; the
         manual check of a `git pull` while the app is open is for John.
       - A model file deleted on disk while it has unsaved edits stays in the editor and the
         project, listed as a conflict. Keeping the edits then fails to save, since
-        `save_source` saves existing files only.
+        `save_source` saves existing files only. John added the fix to task 2.12.
       - Linux watches `node_modules` and other unhidden folders without a `CACHEDIR.TAG`,
         because model files are read from them too. A large one costs watches.
       - `clew notices` now warns about 17 shipped packages with no license file, from 16:
@@ -969,6 +970,8 @@ tier in ADR-0003 before adding it. Phase 2 has 21 tasks plus the gate. Milestone
       lines, invalid UTF-8, and very large files are reported, not fatal. A fixed-seed stress
       test (deep nesting, random bytes, truncated files) runs in `cargo test` with no new
       dependency. Full fuzzing comes with the importers in 3.8.
+      Keep my edits on a file deleted on disk saves it again at the same path (a .sysml
+      file inside the project only).
       Refs: CT-SEC-009, CT-USE-007
       Model: Sonnet
 - [ ] **2.13 Accessibility and keyboard pass.** `docs/verification/accessibility.md`: WCAG 2.1

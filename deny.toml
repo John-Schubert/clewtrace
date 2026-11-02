@@ -38,7 +38,7 @@ exceptions = [
     { crate = "option-ext", allow = ["MPL-2.0"] },
     # Build-only, approved by John 2026-10-21: under Tauri's Linux GTK crates.
     { crate = "target-lexicon", allow = ["Apache-2.0 WITH LLVM-exception"] },
-    # Shipped, approved by John 2026-10-31 (decision 16 on PR #27), task 2.10b: OS file events
+    # Shipped, approved by John 2026-10-31 (decisions 16 and 20 on PR #27), task 2.10b: OS file events
     # for watching the project folder. notify is linked on Linux and macOS only.
     { crate = "notify", allow = ["CC0-1.0"] },
     # Linux only: clew-core -> notify -> inotify -> inotify-sys.
