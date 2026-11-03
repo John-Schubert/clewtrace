@@ -991,11 +991,41 @@ tier in ADR-0003 before adding it. Phase 2 has 21 tasks plus the gate. Milestone
       - A rename of a file whose name has no extension reads the whole project, the same
         rule as on Linux, since a folder renamed away cannot be told from such a file.
       - The manual check of a `git pull` while the app is open on Windows is for John.
-- [ ] **2.11 Go to definition and completion.** F12 and Ctrl or Cmd+click go to the
+- [x] **2.11 Go to definition and completion.** F12 and Ctrl or Cmd+click go to the
       definition. Find references from the model and trace links. Completion for keywords,
       names in scope, and requirement short names after `satisfy` and `verify`.
-      Refs: CT-MOD-004, CT-EFF-005
+      Hovering a name in the editor shows the element's kind, doc text, and trace
+      status, using CodeMirror's hover tooltip and the 2.11 position lookup
+      (CT-USE-010).
+      Refs: CT-MOD-004, CT-EFF-005, CT-USE-010
       Model: Sonnet
+      Done: `clew-core/src/navigate.rs` adds `Model::definition_at` (the cited name at a
+      line and column, or the element declared on that line with that name),
+      `Model::references_to`, and `Model::complete` (requirement short names after
+      `satisfy` or `verify`, with or without `requirement`; members after `::`; otherwise
+      the members of the namespaces around the cursor). Three commands, `definition_at`,
+      `element_references`, and `complete_names`, are listed in `build.rs`, granted in
+      `capabilities/main.json`, and covered by the 100 ms latency test. UI: `navigation.ts`
+      holds the name lookup, completion source, and hover text; `editor.ts` wires F12,
+      Shift+F12 (find references), Ctrl or Cmd+click, and the hover. Find references shows
+      the element in the detail view, which now lists the model names that cite it (first
+      200); its trace links are in the trace panel. Completion offers keywords and core
+      names together. No new dependency.
+      Follow-ups:
+      - Positions come from the model as last checked, which trails typing by the live
+        validation pause (about 300 ms). A lookup in that window can be off by the lines
+        just typed.
+      - On a qualified name such as `Reqs::top`, any segment leads to the whole name's
+        target, not to the package named by the first segment.
+      - Scope completion lists the members of the owners of the last element declared at or
+        before the cursor line, since elements carry no end position. It can offer members
+        of a sibling that has already closed, and it does not follow imports or inherited
+        members.
+      - The hover shows doc text for requirements only. Other elements show their kind and
+        link counts. Doc comments on other elements need a doc field in the element detail.
+      - Go to definition into the built-in library finds nothing.
+      - Not run in a real window: the Ctrl or Cmd+click and the hover are covered by the
+        editor logic tests, not by a launched app. John to try both in the app.
 - [ ] **2.12 Hardening for files from other people.** A parser recursion depth limit with an
       actionable error. An unreadable subfolder is reported and skipped instead of stopping
       `clew index`, with a test of the `sysml_files` error path in `load_project`. Very long
@@ -1014,7 +1044,10 @@ tier in ADR-0003 before adding it. Phase 2 has 21 tasks plus the gate. Milestone
       following the OS setting and the manual override. `docs/verification/editor.md`:
       highlighting, completion, go to definition, and the browser staying in step with
       edits. Fix what fails.
-      Refs: CT-USE-004, CT-USE-002, CT-USE-005, CT-MOD-004, CT-MOD-005
+      One shared, accessible tooltip component for every control: shown on hover and
+      keyboard focus, closed with Esc, linked for screen readers, giving the control's
+      name and shortcut (CT-USE-010). No title attributes.
+      Refs: CT-USE-004, CT-USE-002, CT-USE-005, CT-MOD-004, CT-MOD-005, CT-USE-010
       Model: Sonnet
 - [ ] **2.14 Linux ARM64 installers and notices.** Build deb and rpm on `ubuntu-22.04-arm` in
       the release workflow with the same 20 MB check and checksums. Add an `ubuntu-22.04-arm`

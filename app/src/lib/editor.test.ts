@@ -5,12 +5,15 @@ import { CompletionContext } from '@codemirror/autocomplete';
 import { redo, undo, undoDepth } from '@codemirror/commands';
 import { ensureSyntaxTree } from '@codemirror/language';
 import { EditorState } from '@codemirror/state';
+import { keymap, type EditorView } from '@codemirror/view';
 import { describe, expect, it, vi } from 'vitest';
 import {
   canEdit,
   completeKeywords,
   decideOpen,
+  definitionCommand,
   editorState,
+  referencesCommand,
   placeOf,
   saveCommand,
   tokenClasses,
@@ -160,6 +163,52 @@ describe('which files open in the editor', () => {
     expect(decideOpen('a.sysml', true, 'a.sysml')).toBe('open');
     expect(decideOpen('a.sysml', true, 'b.sysml')).toBe('ask');
     expect(decideOpen(undefined, true, 'b.sysml')).toBe('open');
+  });
+});
+
+// @end
+
+// @begin CT-MOD-004, CT-USE-010
+describe('go to definition and find references', () => {
+  const found = { found: true as const, id: 7, file: 'b.sysml', line: 3, column: 1, name: 'P::Engine' };
+  const navTo = (reply: object) => ({
+    definition: vi.fn().mockResolvedValue(reply),
+    complete: vi.fn().mockResolvedValue([]),
+    detail: vi.fn(),
+  });
+  const viewAt = (doc: string, head: number) =>
+    ({ state: EditorState.create({ doc, selection: { anchor: head } }) }) as unknown as EditorView;
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  // @verifies CT-MOD-004
+  it('F12 opens the place the name at the cursor leads to', async () => {
+    const open = vi.fn();
+    expect(definitionCommand(navTo(found), open)(viewAt('part e : Engine;', 12))).toBe(true);
+    await tick();
+    expect(open).toHaveBeenCalledWith(found);
+  });
+
+  // @verifies CT-MOD-004
+  it('F12 does nothing for a name that leads nowhere', async () => {
+    const open = vi.fn();
+    definitionCommand(navTo({ found: false }), open)(viewAt('part e : Engine;', 12));
+    await tick();
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  // @verifies CT-MOD-004
+  it('Shift+F12 hands the element ID to the host', async () => {
+    const show = vi.fn();
+    expect(referencesCommand(navTo(found), show)(viewAt('part e : Engine;', 12))).toBe(true);
+    await tick();
+    expect(show).toHaveBeenCalledWith(7);
+  });
+
+  // @verifies CT-MOD-004
+  it('is wired into the editor state when the host gives the lookups', () => {
+    const hooks = { onChange: vi.fn(), onSave: vi.fn(), nav: navTo(found), onDefinition: vi.fn(), onReferences: vi.fn() };
+    const state = editorState('part e : Engine;', KEYWORDS, hooks);
+    expect(state.facet(keymap).flat().map((b) => b.key)).toEqual(expect.arrayContaining(['F12', 'Shift-F12']));
   });
 });
 // @end

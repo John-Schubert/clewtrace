@@ -2,8 +2,8 @@
 <script lang="ts">
   // The main view's detail of what is selected: an element from the tree, or a problem from
   // the problems list.
-  import { elementDetail, type ElementDetail } from './api';
-  import { detailFields, problemSummary, type Selection } from './describe';
+  import { elementDetail, elementReferences, type ElementDetail, type Page, type ReferenceRow } from './api';
+  import { detailFields, problemSummary, referenceLabel, referencesNote, type Selection } from './describe';
   import { onMount } from 'svelte';
   import { canEdit, placeOf } from './editor';
   import type { Refresher } from './live';
@@ -16,15 +16,26 @@
 
   let detail = $state<ElementDetail>();
   let failure = $state('');
+  let references = $state<Page<ReferenceRow>>();
 
   // Fetches the element again. Keeps what is shown until the answer arrives, so an edit does
   // not blank the view. An element that an edit removed gives its error.
   function load(current: Selection, keep = false) {
     if (!keep) {
       detail = undefined;
+      references = undefined;
     }
     failure = '';
     if (current.kind === 'element') {
+      elementReferences(current.id)
+        .then((r) => {
+          if (selection === current) {
+            references = r;
+          }
+        })
+        .catch(() => {
+          references = undefined;
+        });
       elementDetail(current.id)
         .then((d) => {
           if (selection === current) {
@@ -72,6 +83,15 @@
       <dd>{field.value}</dd>
     {/each}
   </dl>
+  {#if references}
+    <h3>References</h3>
+    <p class="muted">{referencesNote(references.rows.length, references.total ?? references.rows.length)}</p>
+    <ul>
+      {#each references.rows as row (`${row.file}:${row.line}:${row.column}`)}
+        <li><button type="button" class="link" onclick={() => onopen(row.file, row.line)}>{referenceLabel(row)}</button></li>
+      {/each}
+    </ul>
+  {/if}
   <p><button type="button" onclick={() => onopen(detail!.file, detail!.line)}>{canEdit(detail.file) ? 'Open in editor' : 'Show in source view'}</button></p>
 {:else}
   <p class="muted">Loading...</p>
@@ -91,6 +111,23 @@
     margin: 0;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+  }
+  h3 {
+    margin: 1rem 0 0.25rem;
+    font-size: 0.95rem;
+  }
+  ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .link {
+    border: none;
+    background: none;
+    padding: 0.125rem 0;
+    color: var(--accent);
+    text-align: left;
+    cursor: pointer;
   }
   .muted {
     color: var(--text-muted);

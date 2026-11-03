@@ -21,6 +21,9 @@ pub mod live;
 // @begin CT-MOD-002, CT-USE-007
 pub mod model;
 // @end
+// @begin CT-MOD-004, CT-EFF-005
+pub mod navigate;
+// @end
 // @begin CT-DEV-014
 pub mod json;
 pub mod notices;

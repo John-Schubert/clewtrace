@@ -1,6 +1,6 @@
 // The text the detail view and the problems list show, built from the rows the Rust side
 // sends. Plain functions, so components stay thin.
-import type { ElementDetail, ProblemRow, TreeRow } from './api';
+import type { ElementDetail, ProblemRow, ReferenceRow, TreeRow } from './api';
 
 // @implements CT-EFF-005, CT-USE-007
 /** What the main view details: an element from the tree, or a problem from the list. */
@@ -54,4 +54,20 @@ export function detailFields(d: ElementDetail): Field[] {
 export function problemSummary(p: ProblemRow): string {
   const place = p.where ? `${p.where}: ` : '';
   return `${place}${p.severity}: ${p.what}. Fix: ${p.help}`;
+}
+
+// @implements CT-MOD-004
+/** The line the detail view shows for a name in the model that cites the element. */
+export function referenceLabel(row: ReferenceRow): string {
+  return `${row.role} of ${row.from} (${row.file}:${row.line})`;
+}
+
+// @implements CT-MOD-004, CT-EFF-005
+/** How many references the list holds, and whether it is only the first page. */
+export function referencesNote(shown: number, total: number): string {
+  const count = `${total} reference${total === 1 ? '' : 's'} in the model.`;
+  if (total === 0) {
+    return 'No references in the model.';
+  }
+  return shown < total ? `First ${shown} of ${count}` : count;
 }

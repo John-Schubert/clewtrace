@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./api', async (original) => {
   const real = (await original()) as object;
-  return { ...real, sourceText: vi.fn(), saveSource: vi.fn(), editorKeywords: vi.fn(), validateSource: vi.fn() };
+  return { ...real, sourceText: vi.fn(), saveSource: vi.fn(), editorKeywords: vi.fn(), validateSource: vi.fn(), definitionAt: vi.fn(), completeNames: vi.fn() };
 });
 // The test web view lacks constructed style sheets in shadow roots, which a real one has.
 vi.mock('./editor', async (original) => ({ ...((await original()) as object), supportsEditor: () => true }));
@@ -65,6 +65,8 @@ async function open(
     quietMs?: number;
     autosaveMs?: number;
     onvalidated?: (r: api.EditReply) => void;
+    ongoto?: (path: string, line: number) => void;
+    onreferences?: (id: number) => void;
     validated?: api.EditReply;
   } = {},
 ) {
@@ -75,7 +77,7 @@ async function open(
   instance = mount(TextEditor, {
     target: document.body,
     // Autosave waits a minute unless a test asks for less, so the other tests see no save.
-    props: { path: 'a.sysml', line: 1, ondirty: () => {}, onvalidated: () => {}, quietMs: 20, autosaveMs: 60_000, ...componentProps },
+    props: { path: 'a.sysml', line: 1, ondirty: () => {}, onvalidated: () => {}, ongoto: () => {}, onreferences: () => {}, quietMs: 20, autosaveMs: 60_000, ...componentProps },
   }) as unknown as Instance;
   await settle();
   return instance;
@@ -114,11 +116,29 @@ describe('TextEditor', () => {
     expect(api.sourceText).toHaveBeenCalledTimes(1);
   });
 
+  // @verifies CT-MOD-004
+  it('F12 asks the core where the name leads and opens that place; Shift+F12 shows its references', async () => {
+    const ongoto = vi.fn();
+    const onreferences = vi.fn();
+    vi.mocked(api.definitionAt).mockResolvedValue({ found: true, id: 9, file: 'b.sysml', line: 4, column: 1, name: 'B::x' });
+    const editor = await open({ ongoto, onreferences });
+    const view = editor.view()!;
+    view.contentDOM.blur();
+    view.dispatch({ selection: { anchor: 20 } });
+    for (const [key, shiftKey] of [['F12', false], ['F12', true]] as const) {
+      view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, keyCode: 123, shiftKey, bubbles: true }));
+      await settle();
+    }
+    expect(api.definitionAt).toHaveBeenCalledWith('a.sysml', 2, 8, 'x');
+    expect(ongoto).toHaveBeenCalledWith('b.sysml', 4);
+    expect(onreferences).toHaveBeenCalledWith(9);
+  });
+
   // @verifies CT-USE-007
   it('says what went wrong when the file cannot be opened', async () => {
     vi.mocked(api.sourceText).mockRejectedValue(new Error('file not found'));
     vi.mocked(api.editorKeywords).mockResolvedValue([]);
-    instance = mount(TextEditor, { target: document.body, props: { path: 'gone.sysml', line: 1, ondirty: () => {}, onvalidated: () => {} } }) as unknown as Instance;
+    instance = mount(TextEditor, { target: document.body, props: { path: 'gone.sysml', line: 1, ondirty: () => {}, onvalidated: () => {}, ongoto: () => {}, onreferences: () => {} } }) as unknown as Instance;
     await settle();
     expect(document.querySelector('[role="alert"]')?.textContent).toContain('file not found');
   });

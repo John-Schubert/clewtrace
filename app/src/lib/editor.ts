@@ -8,9 +8,12 @@ import { lintGutter, setDiagnostics, type Diagnostic } from '@codemirror/lint';
 import { indentUnit, StreamLanguage, syntaxTree, type StreamParser } from '@codemirror/language';
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
 import { EditorState, RangeSetBuilder, type Text } from '@codemirror/state';
+import type { Definition } from './api';
+import { completeNames, definitionAt, hoverFor, referencesAt, type EditorNav } from './navigation';
 import {
   Decoration,
   drawSelection,
+  hoverTooltip,
   EditorView,
   highlightActiveLine,
   keymap,
@@ -29,6 +32,12 @@ export interface EditorHooks {
   onSave: (text: string) => void;
   /** The editor lost the focus; autosave saves then. */
   onBlur?: () => void;
+  /** Asks the Rust core about names (go to definition, completion, hover). */
+  nav?: EditorNav;
+  /** Go to definition found a place; the host opens it. */
+  onDefinition?: (found: Extract<Definition, { found: true }>) => void;
+  /** Find references: show the references of this element. */
+  onReferences?: (id: number) => void;
 }
 
 /** The source classes the highlighter marks, by the token name the tokenizer returns. */
@@ -169,6 +178,75 @@ export function completeKeywords(keywords: readonly string[]) {
   };
 }
 
+// @end
+
+// @begin CT-MOD-004, CT-USE-010, CT-EFF-005
+/** F12: opens the place the name at the cursor leads to. */
+export function definitionCommand(nav: EditorNav, open: (found: Extract<Definition, { found: true }>) => void): Command {
+  return (view) => {
+    void definitionAt(view.state, view.state.selection.main.head, nav)
+      .then((found) => found && open(found))
+      .catch(() => undefined);
+    return true;
+  };
+}
+
+/** Shift+F12: shows the references of the element the name at the cursor leads to. */
+export function referencesCommand(nav: EditorNav, show: (id: number) => void): Command {
+  return (view) => {
+    void referencesAt(view.state, view.state.selection.main.head, nav)
+      .then((id) => id !== undefined && show(id))
+      .catch(() => undefined);
+    return true;
+  };
+}
+
+/** The editor's name lookups: F12, Shift+F12, Ctrl or Cmd+click, and the hover. */
+function navigation(hooks: EditorHooks) {
+  const { nav, onDefinition, onReferences } = hooks;
+  if (!nav || !onDefinition || !onReferences) {
+    return { keys: [], extensions: [] };
+  }
+  const go = definitionCommand(nav, onDefinition);
+  return {
+    keys: [
+      { key: 'F12', run: go, preventDefault: true },
+      { key: 'Shift-F12', run: referencesCommand(nav, onReferences), preventDefault: true },
+    ],
+    extensions: [
+      EditorView.domEventHandlers({
+        mousedown: (event, view) => {
+          const pos = event.button === 0 && (event.ctrlKey || event.metaKey) ? view.posAtCoords({ x: event.clientX, y: event.clientY }) : null;
+          if (pos === null) {
+            return false;
+          }
+          event.preventDefault();
+          view.dispatch({ selection: { anchor: pos } });
+          go(view);
+          return true;
+        },
+      }),
+      hoverTooltip(async (view, pos) => {
+        const tip = await hoverFor(view.state, pos, nav);
+        return tip && {
+          pos: tip.from,
+          end: tip.to,
+          above: true,
+          create: () => {
+            const dom = document.createElement('div');
+            dom.className = 'cm-sysml-hover';
+            tip.lines.forEach((text) => dom.append(Object.assign(document.createElement('div'), { textContent: text })));
+            return { dom };
+          },
+        };
+      }),
+    ],
+  };
+}
+
+// @end
+
+// @begin CT-MOD-004, CT-MOD-003, CT-USE-003, CT-USE-008, CT-EFF-005
 /** The command for Ctrl+S: hands the whole text to the host. */
 export function saveCommand(onSave: (text: string) => void): Command {
   return (view) => {
@@ -195,6 +273,7 @@ const theme = EditorView.theme({
   '.cm-panel input, .cm-panel button': { font: 'inherit', color: 'var(--text)', backgroundColor: 'var(--surface)', border: '1px solid var(--border)' },
   '.cm-tooltip': { backgroundColor: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)' },
   '.cm-tooltip-autocomplete ul li[aria-selected]': { backgroundColor: 'var(--row-selected)', color: 'var(--text)' },
+  '.cm-sysml-hover': { padding: '0.25rem 0.5rem', maxWidth: '32rem', whiteSpace: 'pre-wrap' },
   '.cm-sysml-keyword': { color: 'var(--accent)', fontWeight: 'bold' },
   '.cm-sysml-comment': { color: 'var(--text-muted)', fontStyle: 'italic' },
   '.cm-sysml-string': { color: 'var(--text-muted)' },
@@ -203,6 +282,7 @@ const theme = EditorView.theme({
 
 /** The editor state for a file's text, with undo history starting empty. */
 export function editorState(doc: string, keywords: readonly string[], hooks: EditorHooks): EditorState {
+  const names = navigation(hooks);
   return EditorState.create({
     doc,
     extensions: [
@@ -214,12 +294,14 @@ export function editorState(doc: string, keywords: readonly string[], hooks: Edi
       EditorState.tabSize.of(2),
       StreamLanguage.define(sysmlParser(new Set(keywords))),
       highlighter,
-      autocompletion({ override: [completeKeywords(keywords)] }),
+      autocompletion({ override: [completeKeywords(keywords), ...(hooks.nav ? [completeNames(hooks.nav)] : [])] }),
+      ...names.extensions,
       search({ top: true }),
       highlightSelectionMatches(),
       lintGutter(),
       keymap.of([
         { key: 'Mod-s', run: saveCommand(hooks.onSave), preventDefault: true },
+        ...names.keys,
         ...completionKeymap,
         ...searchKeymap,
         ...historyKeymap,
