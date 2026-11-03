@@ -71,8 +71,8 @@
 {:else if count === 0}
   <p class="muted">{version > 0 ? 'None.' : 'Loading...'}</p>
 {:else}
-  <div class="list" style:height="{Math.min(count, 8) * 24 + 4}px">
-    <VirtualList {count} label={title} rowAt={(i) => at(i)} onactivate={follow}>
+  <div class="list" style:height="{Math.min(count, 8) * 24 + 24}px">
+    <VirtualList {count} label={title} rowAt={(i) => at(i)} hint={(r) => `Declared at ${r.file}:${r.line}`} onactivate={follow}>
       {#snippet row(r)}
         <span use:tip={`${r.file}:${r.line}`}>{label(r)}</span>
       {/snippet}

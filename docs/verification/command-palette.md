@@ -16,17 +16,14 @@ Rule: every action the interface offers is also in the palette (Ctrl+Shift+P, or
   - [ ] Clear recent projects
   - [ ] Show detail, Show coverage, Search the model, Show source, Show editor
   - [ ] Coverage: each gap filter (one entry per filter)
-  - [ ] Trace: back, Trace: forward
+  - [ ] Trace: back, Trace: forward, Trace: show links, Trace: show impact (the trace panel
+        tab changes)
+  - [ ] Editor: save the file, Editor: undo, Editor: redo (with a file open in the editor;
+        with none open they do nothing)
   - [ ] Theme: follow the OS setting, Theme: light, Theme: dark
   - [ ] Go to Model browser, Main view, Trace panel, Problems
   - [ ] Show all commands
-- [ ] Add up the buttons on screen. Each one has an entry above, except the ones listed here
-      as follow-ups.
-
-## Known gaps
-
-- Save, Undo, and Redo (editor bar) and the trace panel's Links and Impact tabs are not yet
-  in the palette. They live inside components that do not reach the registry. Follow-up.
+- [ ] Add up the buttons on screen. Each one has an entry above.
 
 ## Result
 

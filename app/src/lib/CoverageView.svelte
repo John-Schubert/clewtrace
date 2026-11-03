@@ -70,7 +70,7 @@
     <p class="muted">{ready === filter ? 'Nothing to show: no element has this gap.' : 'Loading...'}</p>
   {:else}
     <div class="list">
-      <VirtualList {count} label="Coverage list" rowAt={(i) => at(i)} onactivate={pick}>
+      <VirtualList {count} label="Coverage list" rowAt={(i) => at(i)} hint={(r) => `${r.file}:${r.line}`} onactivate={pick}>
         {#snippet row(r)}
           <span use:tip={`${r.file}:${r.line}`}>{gapLabel(r)}</span>
         {/snippet}

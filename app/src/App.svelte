@@ -24,6 +24,7 @@
   } from './lib/api';
   import { decideDisk, DiskWatch } from './lib/disk';
   import { ActionRegistry } from './lib/actions';
+  import { registerEditorActions, registerTraceTabActions, type TraceTab } from './lib/commands';
   import type { GapFilter } from './lib/api';
   import { GAP_FILTERS } from './lib/find';
   import CoverageView from './lib/CoverageView.svelte';
@@ -73,6 +74,7 @@
   let editorDirty = $state(false);
   let blocked = $state<{ path: string; line: number }>();
   let editor = $state<ReturnType<typeof TextEditor>>();
+  let traceTab = $state<TraceTab>('links');
 
   function openSource(path: string, line: number) {
     if (canEdit(path) && supportsEditor()) {
@@ -364,6 +366,8 @@
   }
 
   registry.register({ id: 'project.open', title: 'Open project folder...', run: choose });
+  registerEditorActions(registry, () => (editing ? editor : undefined));
+  registerTraceTabActions(registry, (t) => { traceTab = t; });
   registry.register({ id: 'view.detail', title: 'Show detail', run: () => { view = 'detail'; } });
   registry.register({ id: 'view.source', title: 'Show source', run: () => { if (source) { view = 'source'; } } });
   registry.register({ id: 'view.editor', title: 'Show editor', run: () => { if (editing) { view = 'editor'; } } });
@@ -512,6 +516,7 @@
     <h2>Trace panel</h2>
     {#if opened > 0}
       <TracePanel
+        bind:tab={traceTab}
         id={selection?.kind === 'element' ? selection.id : undefined}
         {canBack}
         {canForward}

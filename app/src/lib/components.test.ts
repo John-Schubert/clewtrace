@@ -1,4 +1,4 @@
-// @begin CT-EFF-005, CT-USE-002
+// @begin CT-EFF-005, CT-USE-002, CT-USE-010
 // Tests for the shared components: they render in happy-dom and respond to the keyboard.
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -34,6 +34,31 @@ describe('VirtualList', () => {
     list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
     flushSync();
     expect(document.querySelector('[aria-selected="true"]')?.getAttribute('aria-posinset')).toBe('2');
+  });
+});
+
+describe('VirtualList hint', () => {
+  // @verifies CT-USE-010
+  it('shows the hint of the row the arrow keys select and links it to that row', () => {
+    instance = mount(VirtualListHarness, { target: document.body, props: { count: 50, hinted: true } });
+    flushSync();
+    const list = document.querySelector('[role="listbox"]') as HTMLElement;
+    const hint = document.querySelector('[data-hint]') as HTMLElement;
+    expect(hint.textContent?.trim()).toBe('');
+    list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    flushSync();
+    expect(hint.textContent).toBe('file-1.sysml:2');
+    const selected = document.querySelector('[aria-selected="true"]') as HTMLElement;
+    expect(selected.getAttribute('aria-describedby')).toBe(hint.id);
+    expect(document.querySelectorAll('[aria-describedby]')).toHaveLength(1);
+  });
+
+  // @verifies CT-USE-010
+  it('adds no hint line to a list without one', () => {
+    instance = mount(VirtualListHarness, { target: document.body, props: { count: 50 } });
+    flushSync();
+    expect(document.querySelector('[data-hint]')).toBeNull();
   });
 });
 
