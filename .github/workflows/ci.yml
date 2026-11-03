@@ -8,7 +8,7 @@
 # The trace gate fails on untraced lines, unknown IDs, and requirements from a finished
 # phase with no implementation, verification, or waiver (current-phase gaps are warnings).
 # Release installers are built by the release workflow; the installer-size job builds the
-# Linux deb on every pull request. Rules: docs/TRACEABILITY.md.
+# Linux deb on x64 and ARM64 on every pull request. Rules: docs/TRACEABILITY.md.
 name: ci
 
 on:
@@ -65,7 +65,7 @@ jobs:
       - name: Tauri Linux packages cache key
         id: apt
         if: runner.os == 'Linux'
-        run: echo "image=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+        run: echo "image=${ImageOS:-unknown}-${RUNNER_ARCH:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
 
       - name: Tauri Linux packages cache
         if: runner.os == 'Linux'
@@ -514,8 +514,14 @@ jobs:
   # before a release tag. It uses the same 20 MB check as release.yml. John adds this job to
   # the "CI must pass" ruleset.
   installer-size:
-    name: installer-size
-    runs-on: ubuntu-22.04
+    name: installer-size (${{ matrix.os }})
+    # CT-PLT-001: the same job on x64 and ARM64 Linux, so an ARM64 break shows up on the
+    # pull request and not only on a release tag.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-22.04-arm]
+    runs-on: ${{ matrix.os }}
     env:
       TAURI_APT_PACKAGES: >-
         libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev
@@ -532,8 +538,8 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: cargo-size-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: cargo-size-${{ runner.os }}-
+          key: cargo-size-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-size-${{ runner.os }}-${{ runner.arch }}-
 
       # The web view and GTK libraries Tauri links on Linux (same list as release.yml).
       # The .deb files are kept in a folder under $HOME (actions/cache cannot write to the
@@ -543,7 +549,7 @@ jobs:
       - name: Tauri Linux packages cache key
         id: apt
         if: runner.os == 'Linux'
-        run: echo "image=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+        run: echo "image=${ImageOS:-unknown}-${RUNNER_ARCH:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
 
       - name: Tauri Linux packages cache
         if: runner.os == 'Linux'
@@ -578,8 +584,9 @@ jobs:
             --config src-tauri/tauri.release.conf.json
 
       # CT-EFF-001: the deb is 20 MB (20,000,000 bytes) or smaller. Exits 1 if it is larger
-      # or was not built, so the pull request fails.
-      # @verifies CT-EFF-001
+      # or was not built, so the pull request fails. CT-PLT-001: the deb exists on x64 and
+      # on ARM64.
+      # @verifies CT-EFF-001, CT-PLT-001
       - name: Installer size
         run: |
           failed=0

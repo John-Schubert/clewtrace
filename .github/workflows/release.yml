@@ -1,6 +1,6 @@
 # @file CT-PLT-001, CT-EFF-001, CT-DEV-012, CT-DEV-014
 # Release: runs only for a signed version tag on a commit in main. Builds the installers
-# (Windows MSI, universal macOS DMG, Linux deb and rpm), fails if any is over 20 MB, and
+# (Windows MSI, universal macOS DMG, Linux deb and rpm on x64 and ARM64), fails if any is over 20 MB, and
 # attaches them to a draft GitHub release with SHA-256 checksums, the third-party notices
 # file (also shipped inside each installer), the SBOM, and the unmodified source of each
 # shipped MPL-2.0 crate. John publishes the draft after docs/verification/release.md.
@@ -93,6 +93,10 @@ jobs:
           - os: ubuntu-22.04
             bundles: deb,rpm
             args: ""
+          # The same on ARM64, built natively on the ARM runner (CT-PLT-001).
+          - os: ubuntu-22.04-arm
+            bundles: deb,rpm
+            args: ""
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
@@ -131,7 +135,7 @@ jobs:
             --config src-tauri/tauri.release.conf.json ${{ matrix.args }}
 
       # CT-EFF-001: each installer is 20 MB (20,000,000 bytes) or smaller. CT-PLT-001: each
-      # installer this matrix entry builds (x64 MSI, universal DMG, x64 deb and rpm) exists.
+      # installer this matrix entry builds (MSI, universal DMG, deb and rpm on x64 and ARM64) exists.
       # Exits 1 if either fails, so the release fails. Runs on each release tag.
       # @verifies CT-EFF-001, CT-PLT-001
       - name: Installer size

@@ -667,7 +667,28 @@ pub fn read_packages(root: &Path, run: CargoRunner) -> Result<Vec<Package>, Stri
             p.license_texts = read_license_texts(dir);
         }
     }
+    add_supplement_texts(root, &mut packages);
     Ok(packages)
+}
+
+// @implements CT-DEV-014
+/// Where license files fetched from a package's repository are kept, for packages that
+/// publish none. One folder per package version: `<root>/third-party-licenses/<ecosystem>/
+/// <name>-<version>/`.
+const SUPPLEMENT_DIR: &str = "third-party-licenses";
+
+/// Gives each package with no license text of its own the files in its supplement folder.
+/// A package that ships a license file keeps it. A new version has no folder until its file
+/// is fetched again, so the "no license file" warning returns when a dependency is updated.
+// @implements CT-DEV-014
+pub fn add_supplement_texts(root: &Path, packages: &mut [Package]) {
+    for p in packages.iter_mut().filter(|p| p.license_texts.is_empty()) {
+        let dir = root
+            .join(SUPPLEMENT_DIR)
+            .join(p.ecosystem.name())
+            .join(format!("{}-{}", p.name, p.version));
+        p.license_texts = read_license_texts(&dir);
+    }
 }
 
 // @implements CT-DEV-014
@@ -1005,6 +1026,34 @@ mod tests {
             .get("value")
             .and_then(Json::as_str);
         assert_eq!(scope, Some("build-only"));
+    }
+
+    // @verifies CT-DEV-014
+    #[test]
+    fn supplement_texts_fill_in_for_a_package_that_ships_none() {
+        let root = std::env::temp_dir().join(format!("clew-supplement-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let sup = root.join("third-party-licenses/cargo/bare-1.0.0");
+        std::fs::create_dir_all(&sup).expect("temp dir");
+        std::fs::write(sup.join("LICENSE-MIT.txt"), "Fetched MIT text\n").expect("write");
+        let bare = {
+            let mut p = package(Ecosystem::Cargo, "bare", "MIT", Scope::Shipped);
+            p.version = "1.0.0".to_string();
+            p.license_texts.clear();
+            p
+        };
+        let mut newer = bare.clone();
+        newer.version = "2.0.0".to_string();
+        let mut own = bare.clone();
+        own.license_texts = vec!["Its own text".to_string()];
+        let mut packages = vec![bare, newer, own];
+        add_supplement_texts(&root, &mut packages);
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(packages[0].license_texts, ["Fetched MIT text"]);
+        // A new version does not inherit the old version's file: the warning returns.
+        assert!(packages[1].license_texts.is_empty());
+        // A package that ships its own text keeps it.
+        assert_eq!(packages[2].license_texts, ["Its own text"]);
     }
 
     // @verifies CT-DEV-014

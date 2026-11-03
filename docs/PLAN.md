@@ -1079,13 +1079,28 @@ tier in ADR-0003 before adding it. Phase 2 has 21 tasks plus the gate. Milestone
         checked by hand (no Mac), so macOS screen reader support is unverified.
       - The app crate could not be built here (no GTK libraries), so the new `doc` check in
         `element_detail_shows_requirement_text_and_coverage` first runs in CI.
-- [ ] **2.14 Linux ARM64 installers and notices.** Build deb and rpm on `ubuntu-22.04-arm` in
+- [x] **2.14 Linux ARM64 installers and notices.** Build deb and rpm on `ubuntu-22.04-arm` in
       the release workflow with the same 20 MB check and checksums. Add an `ubuntu-22.04-arm`
       entry to the `installer-size` job, so the arm64 build is tested on every pull request
       and not only on a release tag. Remove the CT-PLT-001 ARM64 waiver. Fetch license files
       for the 16 shipped packages that publish none and add them to the notices file.
       Refs: CT-PLT-001, CT-EFF-001, CT-DEV-014
       Model: Sonnet
+      Done: the release workflow builds deb and rpm on `ubuntu-22.04-arm` with the same 20 MB
+      check and checksums; `installer-size` runs on x64 and ARM64 (its check names are now
+      `installer-size (ubuntu-22.04)` and `installer-size (ubuntu-22.04-arm)`); the CT-PLT-001
+      waiver is gone. `clew notices` reads fetched license files from
+      `third-party-licenses/<ecosystem>/<name>-<version>/` for packages that ship none.
+      Follow-ups:
+      - John updates the "CI must pass" ruleset to require the two new `installer-size` names
+        in place of `installer-size`.
+      - The ARM64 build first runs in CI on this PR. It was not built here (x64 sandbox).
+      - 15 of the 17 packages now have a license file, fetched from the upstream default
+        branch (not the release tag): the nine `objc2*` crates, `block2`, `dispatch2`, `dlopen2`,
+        `tree-sitter-typescript`, `webview2-com`, and `webview2-com-sys`. `is-reference` 3.0.3 and `locate-character`
+        3.0.0 (both Rich Harris, MIT) publish no license file upstream, only "MIT" in
+        `package.json` and the README. They still warn. John decides: write an MIT text with
+        "Copyright Rich Harris" for each, or ask the author to add one.
 - [ ] **Gate 2 check.** `clew check --self` shows 0 errors and 0 phase 2 coverage warnings
       (CT-MOD-003, -004, -005, CT-SEC-009, and CT-USE-009 are phase 2 warnings from task 2.0
       until their tasks land). The perf job passes every phase 2 budget with the app measured
