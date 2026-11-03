@@ -753,10 +753,15 @@ impl Live {
 
     /// Saves the editor's text over an existing `.sysml` file in the project, through an
     /// atomic write (CT-USE-008). Nothing else can be written: not a new file, not another
-    /// kind of file, not a path outside the project folder (CT-SEC-003).
-    // @implements CT-USE-008, CT-SEC-003
+    /// kind of file, not a path outside the project folder (CT-SEC-003). The one exception
+    /// is a model file of the project that was deleted on disk: keeping the user's edits
+    /// writes it again at the same path.
+    // @implements CT-USE-008, CT-USE-009, CT-SEC-003
     pub fn save_source(&self, path: &str, text: &str) -> Result<String, AppError> {
-        let full = self.project_file(path)?;
+        let full = match self.project_file(path) {
+            Ok(full) => full,
+            Err(refused) => self.workspace.resave_target(path).ok_or(refused)?,
+        };
         if full.extension().is_none_or(|e| e != "sysml") {
             return Err(AppError::new(
                 "only .sysml files can be saved",
@@ -771,7 +776,9 @@ impl Live {
                 "Split the model into smaller files.",
             ));
         }
-        clew_core::io::write_atomic(&full, text.as_bytes()).map_err(|e| {
+        let written = (full.parent().map_or(Ok(()), std::fs::create_dir_all))
+            .and_then(|()| clew_core::io::write_atomic(&full, text.as_bytes()));
+        written.map_err(|e| {
             AppError::new(
                 format!("the file could not be saved: {e}"),
                 path,
@@ -2001,6 +2008,25 @@ mod tests {
             })
             .count();
         assert_eq!(leftovers, 0);
+    }
+
+    // @verifies CT-USE-008, CT-USE-009, CT-SEC-003
+    #[test]
+    fn keeping_edits_of_a_file_deleted_on_disk_saves_it_again() {
+        let project = gappy("keep_edits_after_delete");
+        let root = project.root();
+        let before = fs::read_to_string(root.join("design.sysml")).unwrap();
+        let mine = format!("{before}package Mine;\n");
+        project.edit("design.sysml", &mine).unwrap();
+        fs::remove_file(root.join("design.sysml")).unwrap();
+        let news = project.disk_changed(&paths(&["design.sysml"]), false);
+        assert_eq!(news.conflicts, ["design.sysml"]);
+        let saved = ok(&reply(project.save_source("design.sysml", &mine)));
+        assert_eq!(text(&saved, "path"), "design.sysml");
+        assert_eq!(fs::read_to_string(root.join("design.sysml")).unwrap(), mine);
+        // Only that file: a file the project never had is still refused.
+        assert!(project.save_source("brand-new.sysml", "x").is_err());
+        assert!(!root.join("brand-new.sysml").exists());
     }
 
     // @verifies CT-USE-008, CT-SEC-003

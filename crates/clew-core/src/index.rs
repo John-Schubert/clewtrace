@@ -30,6 +30,19 @@ pub const INDEX_FILE: &str = "index.db";
 /// slow laptop takes a few seconds, so this leaves room for one.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(10);
 
+// @implements CT-SEC-009
+/// The largest file Clewtrace reads, in bytes. A model of 10,000 requirements is about 2 MB,
+/// so this leaves room, and a file past it cannot use a small laptop's memory.
+pub const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
+
+// @implements CT-SEC-009
+/// The longest line Clewtrace reads, in bytes, newline not counted.
+pub const MAX_LINE_BYTES: usize = 1024 * 1024;
+
+// @implements CT-SEC-009
+/// How the message for a file over `MAX_FILE_BYTES` starts.
+const TOO_LARGE: &str = "the file is too large";
+
 // @implements CT-MOD-001
 /// Stored in `PRAGMA user_version`. A database with another version is rebuilt.
 const SCHEMA_VERSION: i64 = 2;
@@ -202,7 +215,10 @@ impl Index {
             tx.execute_batch("DELETE FROM elements; DELETE FROM problems; DELETE FROM files;")
                 .map_err(|e| sql_error(&db, e))?;
         }
-        let stats = update_files(&tx, &self.root, &found).map_err(|e| sql_error(&db, e))?;
+        let mut stats =
+            update_files(&tx, &self.root, &found.paths).map_err(|e| sql_error(&db, e))?;
+        stats.problems.extend(found.problems);
+        stats.problems.sort();
         tx.commit().map_err(|e| sql_error(&db, e))?;
         Ok(stats)
     }
@@ -393,18 +409,37 @@ fn stamp(meta: &fs::Metadata) -> (i64, i64) {
 // @implements CT-EFF-007, CT-USE-007, CT-TRC-004, CT-TRC-009
 /// Reads a file, hashes it with SHA-256, and decodes it as UTF-8.
 pub(crate) fn read_file(abs: &Path) -> Result<Loaded, String> {
+    let size = fs::metadata(abs)
+        .map_err(|e| format!("cannot read the file: {e}"))?
+        .len();
+    if size > MAX_FILE_BYTES {
+        return Err(format!(
+            "{TOO_LARGE} ({size} bytes; the limit is {MAX_FILE_BYTES})"
+        ));
+    }
     let bytes = fs::read(abs).map_err(|e| format!("cannot read the file: {e}"))?;
     let sha256 = Sha256::digest(&bytes).to_vec();
+    if let Some((at, len)) = (bytes.split(|&b| b == b'\n').enumerate())
+        .map(|(i, line)| (i + 1, line.len()))
+        .find(|&(_, len)| len > MAX_LINE_BYTES)
+    {
+        return Err(format!(
+            "line {at} is too long ({len} bytes; the limit is {MAX_LINE_BYTES})"
+        ));
+    }
     let text = String::from_utf8(bytes).map_err(|_| "the file is not UTF-8 text".to_string())?;
     Ok(Loaded { sha256, text })
 }
 
-// @implements CT-USE-007, CT-TRC-004
-/// The problem for a `.sysml` file that `read_file` could not read.
+// @implements CT-USE-007, CT-TRC-004, CT-SEC-009
+/// The problem for a file that `read_file` could not read.
 pub(crate) fn unreadable(rel: &str, message: &str) -> String {
-    format!(
-        "{rel}: error: {message}\n  help: save the file as UTF-8 text and make sure it is readable"
-    )
+    let help = if message.starts_with(TOO_LARGE) || message.contains(" is too long ") {
+        "split the file into smaller files, or break the long line, and keep them under the limits"
+    } else {
+        "save the file as UTF-8 text and make sure it is readable"
+    };
+    format!("{rel}: error: {message}\n  help: {help}")
 }
 
 // @implements CT-MOD-001
@@ -491,36 +526,89 @@ fn fts_query(text: &str) -> String {
         .join(" ")
 }
 
-// @implements CT-MOD-001, CT-SEC-003
-/// Relative paths, with `/` separators and sorted, of the `.sysml` files under `root`.
+// @implements CT-MOD-001, CT-SEC-009
+/// The `.sysml` files under a project folder, and the folders that could not be read.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct ModelFiles {
+    /// Relative paths, with `/` separators, sorted.
+    pub paths: Vec<String>,
+    /// One problem for each folder below the root that could not be read, with where and
+    /// how to fix it. The folder is skipped.
+    pub problems: Vec<String>,
+}
+
+// @implements CT-MOD-001, CT-SEC-003, CT-SEC-009
+/// Lists the `.sysml` files under `root`.
 /// Skips folders whose name starts with `.` (such as `.git` and `.clewtrace`), folders
 /// marked as caches by a `CACHEDIR.TAG` file (such as Cargo's `target`), and symbolic
-/// links, so the index never reads outside the project folder.
-pub fn sysml_files(root: &Path) -> Result<Vec<String>, IndexError> {
-    let mut found = Vec::new();
+/// links, so the index never reads outside the project folder. A folder below the root
+/// that cannot be read is reported in `problems` and skipped; the root itself must be
+/// readable, or this returns an error.
+pub fn sysml_files(root: &Path) -> Result<ModelFiles, IndexError> {
+    sysml_files_with(root, &|dir| fs::read_dir(dir))
+}
+
+// @implements CT-MOD-001, CT-SEC-003, CT-SEC-009
+/// `sysml_files` with the folder reader given, so a test can make a folder unreadable on
+/// any system, including for a user who can open every folder.
+fn sysml_files_with(
+    root: &Path,
+    read_dir: &dyn Fn(&Path) -> std::io::Result<fs::ReadDir>,
+) -> Result<ModelFiles, IndexError> {
+    let mut found = ModelFiles::default();
     let mut pending = vec![(root.to_path_buf(), String::new())];
     while let Some((dir, rel)) = pending.pop() {
         if dir.join("CACHEDIR.TAG").is_file() {
             continue;
         }
-        let entries = fs::read_dir(&dir).map_err(|e| io_error(&dir, e))?;
+        let unreadable_folder = |e: std::io::Error| {
+            format!(
+                "{}: error: cannot read the folder: {e}\n  help: make the folder readable, \
+                 or move it out of the project; Clewtrace skipped it",
+                if rel.is_empty() { "." } else { &rel }
+            )
+        };
+        let entries = match read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(e) if rel.is_empty() => return Err(io_error(&dir, e)),
+            Err(e) => {
+                found.problems.push(unreadable_folder(e));
+                continue;
+            }
+        };
         for entry in entries {
-            let entry = entry.map_err(|e| io_error(&dir, e))?;
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(e) => {
+                    found.problems.push(unreadable_folder(e));
+                    break;
+                }
+            };
             let name = entry.file_name().to_string_lossy().into_owned();
-            let file_type = entry.file_type().map_err(|e| io_error(&entry.path(), e))?;
             let child = if rel.is_empty() {
                 name.clone()
             } else {
                 format!("{rel}/{name}")
             };
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(e) => {
+                    found.problems.push(format!(
+                        "{child}: error: cannot read the entry: {e}\n  help: make it readable, \
+                         or move it out of the project; Clewtrace skipped it"
+                    ));
+                    continue;
+                }
+            };
             if file_type.is_dir() && !name.starts_with('.') {
                 pending.push((entry.path(), child));
             } else if file_type.is_file() && name.ends_with(".sysml") {
-                found.push(child);
+                found.paths.push(child);
             }
         }
     }
-    found.sort();
+    found.paths.sort();
+    found.problems.sort();
     Ok(found)
 }
 
@@ -542,7 +630,7 @@ fn sql_error(db: &Path, e: rusqlite::Error) -> IndexError {
     }
 }
 
-// @verifies CT-MOD-001, CT-EFF-007, CT-EFF-006, CT-SEC-003, CT-USE-007, CT-USE-009
+// @verifies CT-MOD-001, CT-EFF-007, CT-EFF-006, CT-SEC-003, CT-USE-007, CT-USE-009, CT-SEC-009
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -750,9 +838,102 @@ mod tests {
         fs::write(root.join("target/debug/x.sysml"), "part def Built;\n").unwrap();
         fs::write(root.join("model/notes.txt"), "not a model").unwrap();
         assert_eq!(
-            sysml_files(&root).unwrap(),
+            sysml_files(&root).unwrap().paths,
             vec!["model/parts.sysml", "model/reqs.sysml"]
         );
+    }
+
+    // @verifies CT-SEC-009, CT-USE-007
+    #[test]
+    fn a_folder_that_cannot_be_read_is_reported_and_skipped() {
+        let root = project("unreadable-folder");
+        fs::create_dir_all(root.join("locked/inner")).unwrap();
+        fs::write(root.join("locked/inner/x.sysml"), "part def Hidden;\n").unwrap();
+        // Reading `locked` fails, as it does without permission; the rest is still listed.
+        let found = sysml_files_with(&root, &|dir| {
+            if dir.ends_with("locked") {
+                Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+            } else {
+                fs::read_dir(dir)
+            }
+        })
+        .unwrap();
+        assert_eq!(found.paths, vec!["model/parts.sysml", "model/reqs.sysml"]);
+        let [problem] = found.problems.as_slice() else {
+            panic!("{:?}", found.problems);
+        };
+        assert!(
+            problem.starts_with("locked: error: cannot read the folder: "),
+            "{problem}"
+        );
+        assert!(problem.contains("\n  help: "), "{problem}");
+    }
+
+    // @verifies CT-SEC-009, CT-USE-007
+    #[cfg(unix)]
+    #[test]
+    fn index_update_keeps_going_past_a_folder_the_system_will_not_open() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = project("locked-update");
+        let locked = root.join("locked");
+        fs::create_dir_all(&locked).unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+        let denied = fs::read_dir(&locked).is_err();
+        let mut index = Index::open(&root).unwrap();
+        let result = index.update();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        if !denied {
+            // Running as a user who can open any folder: the injected-reader test covers it.
+            return;
+        }
+        let stats = result.unwrap();
+        assert_eq!(stats.parsed, 2);
+        assert_eq!(stats.problems.len(), 1, "{:?}", stats.problems);
+        assert!(stats.problems[0].starts_with("locked: error: cannot read the folder"));
+    }
+
+    // @verifies CT-SEC-009, CT-USE-007
+    #[test]
+    fn a_file_over_the_size_limit_is_reported_not_read() {
+        let root = project("too-large");
+        let big = root.join("model/big.sysml");
+        let file = File::create(&big).unwrap();
+        file.set_len(MAX_FILE_BYTES + 1).unwrap();
+        let message = read_file(&big).err().unwrap();
+        assert!(message.starts_with("the file is too large"), "{message}");
+        let problem = unreadable("model/big.sysml", &message);
+        assert!(problem.contains("help: split"), "{problem}");
+        let mut index = Index::open(&root).unwrap();
+        let stats = index.update().unwrap();
+        assert_eq!(stats.problems, vec![problem]);
+        assert_eq!(stats.parsed, 2);
+    }
+
+    // @verifies CT-SEC-009, CT-USE-007
+    #[test]
+    fn a_very_long_line_is_reported_with_its_line_number() {
+        let root = project("long-line");
+        let path = root.join("model/long.sysml");
+        let line = "a".repeat(MAX_LINE_BYTES + 1);
+        fs::write(&path, format!("package P;\n\n// {line}\n")).unwrap();
+        let message = read_file(&path).err().unwrap();
+        assert!(message.starts_with("line 3 is too long"), "{message}");
+        assert!(unreadable("long.sysml", &message).contains("help: split"));
+        // A line exactly at the limit is fine.
+        fs::write(&path, "a".repeat(MAX_LINE_BYTES)).unwrap();
+        assert!(read_file(&path).is_ok());
+    }
+
+    // @verifies CT-SEC-009
+    #[test]
+    fn invalid_utf8_is_reported_and_other_files_still_index() {
+        let root = project("bad-bytes");
+        fs::write(root.join("model/bad.sysml"), [b'p', 0xFF, 0xFE, 0x00, 0x80]).unwrap();
+        let mut index = Index::open(&root).unwrap();
+        let stats = index.update().unwrap();
+        assert_eq!(stats.problems.len(), 1, "{:?}", stats.problems);
+        assert!(stats.problems[0].starts_with("model/bad.sysml: error: the file is not UTF-8"));
+        assert_eq!(index.element_count().unwrap(), 7);
     }
 
     // @verifies CT-USE-007
@@ -853,7 +1034,7 @@ mod tests {
         );
         assert!(err.to_string().contains("\n  help: "), "{err}");
 
-        let err = sysml_files(&root.join("missing")).unwrap_err();
+        let err = sysml_files(&root.join("missing")).err().unwrap();
         assert!(err.path.ends_with("missing"), "{err}");
         assert_eq!(
             err.help,

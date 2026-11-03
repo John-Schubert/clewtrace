@@ -2,7 +2,7 @@
 //! parsing the others again (ADR-0005).
 
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::check::{self, SetupError};
 use crate::config::TraceConfig;
@@ -59,11 +59,12 @@ impl Sources {
         let config_sha256 = index::read_file(&root.join(check::TRACE_CONFIG))
             .ok()
             .map(|loaded| reproduce::text_sha256(&loaded.text));
-        let paths = index::sysml_files(root).map_err(|e| SetupError {
+        let found = index::sysml_files(root).map_err(|e| SetupError {
             path: String::new(),
             line: 0,
             message: e.to_string(),
         })?;
+        let paths = found.paths;
         let mut sources = Sources {
             config,
             config_sha256,
@@ -71,7 +72,7 @@ impl Sources {
             scans: Vec::new(),
             checklists: Vec::new(),
             documents: Vec::new(),
-            other_problems: Vec::new(),
+            other_problems: found.problems,
             other_inputs: Vec::new(),
             parses: 0,
         };
@@ -409,6 +410,44 @@ impl Workspace {
             .insert(path.to_string(), reproduce::text_sha256(text));
     }
 
+    // @implements CT-USE-008, CT-USE-009, CT-SEC-003
+    /// Where to save the editor's text for the model file at `path` when the file was deleted
+    /// on disk while it had unsaved edits, so that keeping the edits writes the file again at
+    /// the same path. `None` unless all of these hold: `path` is relative, without `..`,
+    /// and names a `.sysml` file the project has; nothing is on disk at it now; and its
+    /// nearest existing folder is inside the project folder once links are resolved. The
+    /// folders between that one and the file may be gone too, and the caller creates them.
+    pub fn resave_target(&self, path: &str) -> Option<PathBuf> {
+        let relative = Path::new(path);
+        let inside =
+            !path.is_empty() && (relative.components()).all(|c| matches!(c, Component::Normal(_)));
+        let is_model = relative.extension().is_some_and(|e| e == "sysml");
+        if !(inside && is_model && self.sources.file(path).is_some()) {
+            return None;
+        }
+        let full = self.root.join(relative);
+        if std::fs::symlink_metadata(&full).is_ok() {
+            return None;
+        }
+        let root = self.root.canonicalize().ok()?;
+        let mut gone = Vec::new();
+        let mut ancestor = full.as_path();
+        let mut target = loop {
+            match ancestor.canonicalize() {
+                Ok(existing) => break existing,
+                Err(_) => {
+                    gone.push(ancestor.file_name()?);
+                    ancestor = ancestor.parent()?;
+                }
+            }
+        };
+        if !target.starts_with(&root) {
+            return None;
+        }
+        target.extend(gone.iter().rev());
+        Some(target)
+    }
+
     /// Whether the cached model file at `path` differs from what the disk had, given the
     /// disk's hash `before` the change being handled.
     fn unsaved(&self, path: &str, before: Option<&Vec<u8>>) -> bool {
@@ -541,7 +580,8 @@ impl Workspace {
             message: e.to_string(),
         })?;
         let code = check::source_files(&self.root, &self.sources.config)?;
-        Ok((models.into_iter().collect(), code))
+        // Folders it could not read were reported when the project was read.
+        Ok((models.paths.into_iter().collect(), code))
     }
 
     /// Rebuilds the project from the cached inputs, dropping the old one first so only one
@@ -715,7 +755,7 @@ impl Workspace {
     }
 }
 
-// @verifies CT-MOD-003, CT-EFF-007
+// @verifies CT-MOD-003, CT-EFF-007, CT-USE-008, CT-USE-009, CT-SEC-003
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -774,6 +814,69 @@ mod tests {
         assert_eq!(p.top_level, loaded.top_level);
         assert_eq!(p.requirements, loaded.requirements);
         assert_eq!(ws.parses(), 2);
+    }
+
+    // @verifies CT-USE-008, CT-USE-009, CT-SEC-003
+    #[test]
+    fn a_model_file_deleted_on_disk_can_be_saved_again_at_its_own_path() {
+        let root = project("resave");
+        let real = root.canonicalize().unwrap();
+        let mut ws = Workspace::open(&root).unwrap();
+        let edited = DESIGN.replace("wheel;", "tyre;");
+        ws.edit("model/design.sysml", &edited).unwrap();
+        // Nothing to re-save while the file is there: the ordinary save applies.
+        assert_eq!(ws.resave_target("model/design.sysml"), None);
+        fs::remove_file(root.join("model/design.sysml")).unwrap();
+        let news = ws.reload(&["model/design.sysml".to_string()]);
+        assert_eq!(news.conflicts, ["model/design.sysml"]);
+        assert_eq!(
+            ws.resave_target("model/design.sysml"),
+            Some(real.join("model/design.sysml"))
+        );
+        // The whole folder may be gone too; the target is still inside the project.
+        fs::remove_file(root.join("model/reqs.sysml")).unwrap();
+        fs::remove_dir(root.join("model")).unwrap();
+        assert_eq!(
+            ws.resave_target("model/design.sysml"),
+            Some(real.join("model/design.sysml"))
+        );
+    }
+
+    // @verifies CT-SEC-003, CT-USE-008
+    #[test]
+    fn only_a_known_model_file_inside_the_project_can_be_saved_again() {
+        let root = project("resave-refused");
+        let mut ws = Workspace::open(&root).unwrap();
+        ws.edit("model/design.sysml", &DESIGN.replace("wheel;", "tyre;"))
+            .unwrap();
+        fs::remove_file(root.join("model/design.sysml")).unwrap();
+        // Not a file the project has, not a model file, or not inside the folder.
+        for path in [
+            "model/new.sysml",
+            "src/lib.rs",
+            "../design.sysml",
+            "/tmp/design.sysml",
+            "model/../model/design.sysml",
+            "",
+        ] {
+            assert_eq!(ws.resave_target(path), None, "{path}");
+        }
+    }
+
+    // @verifies CT-SEC-003, CT-USE-008
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_turned_into_a_link_out_of_the_project_is_not_followed_on_resave() {
+        let root = project("resave-link");
+        let mut ws = Workspace::open(&root).unwrap();
+        ws.edit("model/design.sysml", &DESIGN.replace("wheel;", "tyre;"))
+            .unwrap();
+        let outside = root.parent().unwrap().join("resave-outside");
+        let _ = fs::remove_dir_all(&outside);
+        fs::create_dir_all(&outside).unwrap();
+        fs::remove_dir_all(root.join("model")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("model")).unwrap();
+        assert_eq!(ws.resave_target("model/design.sysml"), None);
     }
 
     // @verifies CT-EFF-007
