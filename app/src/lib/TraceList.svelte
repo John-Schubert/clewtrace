@@ -1,5 +1,6 @@
-<!-- @begin CT-TRC-005, CT-TRC-006, CT-MOD-003, CT-EFF-005, CT-USE-007 -->
+<!-- @begin CT-TRC-005, CT-TRC-006, CT-MOD-003, CT-EFF-005, CT-USE-007, CT-USE-010 -->
 <script lang="ts" generics="Row extends LinkRow">
+  import { tip } from './tooltip';
   // One titled list of trace rows, fetched a page at a time. Click or Enter follows an
   // element row, and opens a code row in the source view.
   import type { LinkRow, Page } from './api';
@@ -73,7 +74,7 @@
   <div class="list" style:height="{Math.min(count, 8) * 24 + 4}px">
     <VirtualList {count} label={title} rowAt={(i) => at(i)} onactivate={follow}>
       {#snippet row(r)}
-        <span title="{r.file}:{r.line}">{label(r)}</span>
+        <span use:tip={`${r.file}:${r.line}`}>{label(r)}</span>
       {/snippet}
     </VirtualList>
   </div>

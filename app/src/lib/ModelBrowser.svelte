@@ -1,5 +1,6 @@
-<!-- @begin CT-MOD-005, CT-MOD-003, CT-EFF-005, CT-USE-004, CT-USE-007 -->
+<!-- @begin CT-MOD-005, CT-MOD-003, CT-EFF-005, CT-USE-004, CT-USE-007, CT-USE-010 -->
 <script lang="ts">
+  import { tip } from './tooltip';
   // The model tree: packages, definitions, and usages, loaded a page at a time as the user
   // opens a package or scrolls. Right opens, Left closes or moves to the parent, Enter selects.
   import { onMount } from 'svelte';
@@ -92,7 +93,7 @@
         <span
           class="twisty"
           aria-hidden="true"
-          title={node.row.kind}
+          use:tip={node.row.kind}
           onclick={(e) => { e.stopPropagation(); void tree.toggle(tree.indexOf(node.row?.id ?? -1)); }}
         >{node.row.children > 0 ? (node.expanded ? '▾' : '▸') : ''}</span>
         {treeLabel(node.row)}

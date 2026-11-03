@@ -1,11 +1,12 @@
 <script lang="ts">
-  // @begin CT-MOD-004, CT-MOD-003, CT-USE-003, CT-USE-008, CT-USE-007, CT-EFF-005, CT-EFF-008, CT-USE-009
+  // @begin CT-MOD-004, CT-MOD-003, CT-USE-003, CT-USE-008, CT-USE-007, CT-EFF-005, CT-EFF-008, CT-USE-009, CT-USE-010
   // The text editor for one .sysml file. The Rust side serves the text and keywords and
   // saves it; the CodeMirror setup is in editor.ts. Edits are saved by themselves after a
   // short pause and when the editor loses focus (autosave.ts), or at once with Save or
   // Ctrl+S.
   // After a short pause in typing the unsaved text goes to the Rust side to be checked, and
   // the problems it finds in this file come back as markers in the text.
+  import { tip } from './tooltip';
   import { onMount, untrack } from 'svelte';
   import { redo, undo } from '@codemirror/commands';
   import type { Text } from '@codemirror/state';
@@ -234,9 +235,9 @@
 <div class="editor" data-view="editor">
   <h2>{path}</h2>
   <div class="bar" role="toolbar" aria-label="Editor actions">
-    <button type="button" disabled={!dirty || saving} onclick={() => void save()}>Save</button>
-    <button type="button" disabled={!loaded} onclick={() => editor && undo(editor)}>Undo</button>
-    <button type="button" disabled={!loaded} onclick={() => editor && redo(editor)}>Redo</button>
+    <button type="button" use:tip={{ name: 'Save the file', shortcut: 'Ctrl+S' }} disabled={!dirty || saving} onclick={() => void save()}>Save</button>
+    <button type="button" use:tip={{ name: 'Undo', shortcut: 'Ctrl+Z' }} disabled={!loaded} onclick={() => editor && undo(editor)}>Undo</button>
+    <button type="button" use:tip={{ name: 'Redo', shortcut: 'Ctrl+Y' }} disabled={!loaded} onclick={() => editor && redo(editor)}>Redo</button>
     <span class="status" role="status">{dirty ? 'Unsaved changes' : notice}</span>
   </div>
   {#if failure}

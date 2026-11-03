@@ -99,6 +99,8 @@ pub struct Element {
     pub file: usize,
     pub pos: Pos,
     pub members: Vec<ElementId>,
+    /// The text of its `doc` comments, joined by newlines, or empty.
+    pub doc: String,
     /// Owned members by name and by short name, in declaration order.
     by_name: HashMap<String, Vec<ElementId>>,
     /// Indexes into `Model::references` of the elements this one inherits members from.
@@ -404,6 +406,8 @@ impl Model {
                         (e, cited.collect(), &d.members)
                     }
                 };
+            let mut element = element;
+            element.doc = doc_text(nested);
             let id = self.add_element(ns, element);
             for (role, name) in cited {
                 self.cite(role, file, name, Cite::Itself(id));
@@ -754,6 +758,18 @@ impl ElementKind {
     }
 }
 
+// @implements CT-USE-010
+/// The text of the `doc` comments among an element's members, joined by newlines.
+fn doc_text(members: &[Member]) -> String {
+    let docs: Vec<&str> = (members.iter())
+        .filter_map(|m| match m {
+            Member::Comment(c) if c.is_doc => Some(c.body.as_str()),
+            _ => None,
+        })
+        .collect();
+    docs.join("\n")
+}
+
 // @implements CT-MOD-002
 impl Element {
     fn new(kind: ElementKind, name: Option<String>, file: usize, pos: Pos) -> Element {
@@ -766,6 +782,7 @@ impl Element {
             file,
             pos,
             members: Vec::new(),
+            doc: String::new(),
             by_name: HashMap::new(),
             generals: Vec::new(),
             imports: Vec::new(),
@@ -1101,6 +1118,21 @@ mod tests {
         assert_eq!(m.element(Model::ROOT).kind, ElementKind::Root);
         assert_eq!(target(&m, Role::SatisfiedBy, "p"), Some("P::R::p".into()));
         assert!(m.errors.is_empty(), "{:?}", rendered(&m));
+    }
+
+    // @verifies CT-USE-010
+    #[test]
+    fn every_element_keeps_its_doc_text() {
+        let m = one(
+            "package P {\n  doc /* The package. */\n  part def D {\n    doc /* Line one.\n * Line two. */\n  }\n  \
+             part p : D;\n}\n",
+        );
+        assert_eq!(m.element(m.find("P").unwrap()).doc, "The package.");
+        assert_eq!(
+            m.element(m.find("P::D").unwrap()).doc,
+            "Line one.\nLine two."
+        );
+        assert_eq!(m.element(m.find("P::p").unwrap()).doc, "");
     }
 
     // @verifies CT-MOD-001, CT-EFF-005

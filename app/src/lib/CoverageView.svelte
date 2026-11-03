@@ -1,5 +1,6 @@
-<!-- @begin CT-TRC-004, CT-EFF-005, CT-USE-007 -->
+<!-- @begin CT-TRC-004, CT-EFF-005, CT-USE-007, CT-USE-010 -->
 <script lang="ts">
+  import { tip } from './tooltip';
   // The coverage view: requirements with no parent, implementation, or verification, and
   // elements traced to no requirement, one filter at a time. A click selects the element.
   import { untrack } from 'svelte';
@@ -60,7 +61,7 @@
 <div class="view" data-view="coverage" data-filter={filter} data-ready={ready === filter ? '' : undefined}>
   <div class="bar">
     {#each GAP_FILTERS as f (f.id)}
-      <button type="button" aria-pressed={filter === f.id} onclick={() => onfilter(f.id)}>{filterLabel(f, counts)}</button>
+      <button type="button" use:tip={filterLabel(f, counts)} aria-pressed={filter === f.id} onclick={() => onfilter(f.id)}>{filterLabel(f, counts)}</button>
     {/each}
   </div>
   {#if failure}
@@ -71,7 +72,7 @@
     <div class="list">
       <VirtualList {count} label="Coverage list" rowAt={(i) => at(i)} onactivate={pick}>
         {#snippet row(r)}
-          <span title="{r.file}:{r.line}">{gapLabel(r)}</span>
+          <span use:tip={`${r.file}:${r.line}`}>{gapLabel(r)}</span>
         {/snippet}
       </VirtualList>
     </div>

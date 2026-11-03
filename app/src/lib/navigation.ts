@@ -90,12 +90,12 @@ export function completeNames(nav: EditorNav) {
 /** The lines the hover shows for an element: its kind and name, its doc text, and its trace status. */
 export function hoverLines(d: ElementDetail): string[] {
   const lines = [`${d.kind} ${d.qualifiedName}`];
+  if (d.doc) {
+    lines.push(d.doc);
+  }
   const r = d.requirement;
   if (!r) {
     return [...lines, `Trace links: ${d.linksFrom} out, ${d.linksTo} in`];
-  }
-  if (r.doc) {
-    lines.push(r.doc);
   }
   const status = [r.hasParent ? 'has a parent' : 'no parent', r.implemented ? 'implemented' : 'not implemented', r.verified ? 'verified' : 'not verified'];
   if (r.waived) {
