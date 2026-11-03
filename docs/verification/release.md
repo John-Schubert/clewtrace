@@ -43,6 +43,10 @@ Go through this list for every release, before publishing the draft, and record 
       hand. Their license and repository link are in the notices file. Files fetched from a
       repository are in `third-party-licenses/<ecosystem>/<name>-<version>/`; a dependency
       update needs its folder renamed, or fetched again if the license changed.
+- [ ] Known exception: `is-reference` 3.0.3 and `locate-character` 3.0.0 publish no license
+      file. Both are MIT per their `package.json`, and their repository link is in the
+      notices file. So `clew notices` is expected to show exactly 2 "no license file"
+      warnings, for these two. Any other warning needs a hand check.
 - [ ] Each shipped MPL-2.0 crate (`scope = "shipped"` in `deps.toml`, today `option-ext`)
       has its `.crate` archive attached, and the notices file names its version and source
       link. The attached archive matches the one on crates.io (same SHA-256).
