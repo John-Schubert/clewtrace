@@ -19,7 +19,7 @@ const POLLING: [&str; 4] = [
 /// Files that may name a polling call, each with its reason. A new entry needs John's
 /// approval, and the reason must show why the code is not a polling loop.
 // @verifies CT-EFF-008
-const ALLOWED: [(&str, &str); 4] = [
+const ALLOWED: [(&str, &str); 5] = [
     (
         "crates/clew-core/tests/idle_cpu.rs",
         "this guard names the calls it looks for, so it would fail its own scan",
@@ -42,6 +42,12 @@ const ALLOWED: [(&str, &str); 4] = [
         "crates/clew-core/tests/watch.rs",
         "test only, never shipped: watches a real folder and waits with timeouts, so a \
          missed file event fails the test instead of hanging it",
+    ),
+    (
+        "app/src-tauri/src/within.rs",
+        "test only, never shipped (`#[cfg(test)] mod within`): a time limit for the app \
+         tests that wait on the file watcher. One `recv_timeout` per test, so a watcher bug \
+         fails the test instead of hanging it. The app's own disk wait has no timeout",
     ),
 ];
 

@@ -25,6 +25,10 @@ env:
 jobs:
   check:
     name: check (${{ matrix.os }})
+    # A hung test fails the job instead of running for hours (task 2.10c). Windows, the
+    # slowest, reached its last test in about 4 minutes on PR 51; 30 leaves room for a
+    # cold cache.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

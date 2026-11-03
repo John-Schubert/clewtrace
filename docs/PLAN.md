@@ -976,8 +976,16 @@ tier in ADR-0003 before adding it. Phase 2 has 21 tasks plus the gate. Milestone
       Win32_System_Threading; listed in `deps.toml`. `docs/verification/idle-cpu.md`
       updated.
       Follow-ups:
-      - The Windows code was type-checked and linted for the Windows target here, but not
-        built or run: the Windows CI test job runs it. Check its result on the PR.
+      - Fixed on PR 51: the first Windows CI run hung in the app's watch test. The
+        first read was started on the app's load thread, and Windows cancels a thread's
+        overlapped reads when it ends, so the watch died once the project loaded. Every
+        read now starts on the watcher thread, and `start` waits once for the first. New
+        test: a watch started by a thread that ends keeps watching. The root path was not
+        the cause: event paths are the watched root joined with names relative to it, and
+        the core watch tests passed on the runner. Each watcher test now runs inside a
+        time limit (`within`), the app one in the test-only `app/src-tauri/src/within.rs`
+        (a new `ALLOWED` entry in `tests/idle_cpu.rs`, for John to approve). The stop
+        event is manual-reset. The CI check job has `timeout-minutes: 30`.
       - Windows idle memory with the watcher comes from the app-idle-memory job on the PR
         (gate 81 MB, about 71 MB before). The watcher adds two threads and a 64 KB buffer.
       - A rename of a file whose name has no extension reads the whole project, the same
