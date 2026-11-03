@@ -133,6 +133,18 @@
     return autosave.flush();
   }
 
+  /** Undo and redo for the palette. */
+  export function undoEdit(): void {
+    if (editor) {
+      undo(editor);
+    }
+  }
+  export function redoEdit(): void {
+    if (editor) {
+      redo(editor);
+    }
+  }
+
   // The file changed on disk while it has unsaved edits: stop saving until the user says
   // which text to keep.
   export function hold() {

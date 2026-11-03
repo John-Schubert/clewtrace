@@ -87,7 +87,7 @@
     <p class="muted">{ready === query ? 'No matches.' : 'Searching...'}</p>
   {:else}
     <div class="list">
-      <VirtualList {count} label="Search results" rowAt={(i) => at(i)} onactivate={pick}>
+      <VirtualList {count} label="Search results" rowAt={(i) => at(i)} hint={(hit) => `${hit.file}:${hit.line}`} onactivate={pick}>
         {#snippet row(hit)}
           <span use:tip={`${hit.file}:${hit.line}`}>{hitLabel(hit)}</span>
         {/snippet}

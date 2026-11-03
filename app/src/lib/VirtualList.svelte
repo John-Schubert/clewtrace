@@ -1,4 +1,4 @@
-<!-- @begin CT-EFF-005, CT-USE-004 -->
+<!-- @begin CT-EFF-005, CT-USE-004, CT-USE-010 -->
 <script lang="ts" generics="Row">
   // The one list component for anything that can pass 200 rows. It renders only the rows in
   // view; the caller supplies a row snippet and the number of rows. Arrow keys, Home, and End
@@ -17,8 +17,14 @@
     onselect?: (index: number) => void;
     /** Called on a click or Enter, not on arrow keys. */
     onactivate?: (index: number) => void;
+    /** Extra text for a row, such as its file and line. Shown below the list for the selected row. */
+    hint?: (row: Row) => string | undefined;
   }
-  let { count, rowHeight = 24, label, rowAt, row, selected = $bindable(-1), onselect, onactivate }: Props = $props();
+  let { count, rowHeight = 24, label, rowAt, row, selected = $bindable(-1), onselect, onactivate, hint }: Props = $props();
+
+  const selectedRow = $derived(hint && selected >= 0 && selected < count ? rowAt(selected) : undefined);
+  const hintText = $derived(selectedRow === undefined ? '' : (hint?.(selectedRow) ?? ''));
+  const hintId = $derived(`${label}-hint`);
 
   let scroller = $state<HTMLDivElement>();
   let viewport = $state(400);
@@ -62,6 +68,7 @@
   }
 </script>
 
+<div class="wrap">
 <div
   class="list"
   role="listbox"
@@ -87,6 +94,7 @@
           aria-selected={i === selected}
           aria-posinset={i + 1}
           aria-setsize={count}
+          aria-describedby={hint && i === selected && hintText ? hintId : undefined}
           style:height="{rowHeight}px"
           onclick={() => {
             select(i);
@@ -103,11 +111,30 @@
     </div>
   </div>
 </div>
+{#if hint}
+  <div class="hint" id={hintId} data-hint>{hintText}</div>
+{/if}
+</div>
 
 <style>
-  .list {
-    overflow-y: auto;
+  .wrap {
+    display: flex;
+    flex-direction: column;
     height: 100%;
+  }
+  .hint {
+    min-height: 1.25rem;
+    padding: 0 0.5rem;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
     background: var(--surface);
     color: var(--text);
   }

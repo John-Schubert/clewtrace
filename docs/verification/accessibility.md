@@ -25,6 +25,8 @@ whenever a pane or component changes. Record the result below.
 - [ ] Tooltips (CT-USE-010): hover a control and the tooltip shows its name and shortcut.
       Tab to a control and the same tooltip shows. Esc closes it. No control has a `title`
       attribute (a unit test checks this).
+- [ ] List rows (trace lists, coverage, search): arrow to a row. The file and line show in
+      the line under the list, and a screen reader reads them with the row.
 
 ## Screen readers
 
@@ -44,6 +46,8 @@ or Insert.
       arrow on a package: it reads "expanded".
 - [ ] In the main view, Tab through the view buttons (Detail, Coverage, Search, Source,
       Editor). Narrator reads each name and whether it is pressed.
+- [ ] In a search result list, press Down arrow. Narrator reads the row, then its file and
+      line.
 - [ ] Hover the pointer on a button, then Tab to another. Narrator reads the button name and
       then its tooltip as the description (name and shortcut). Press Esc: the tooltip closes.
 - [ ] Open the command palette with Ctrl+Shift+P. Narrator reads "Command palette, dialog"

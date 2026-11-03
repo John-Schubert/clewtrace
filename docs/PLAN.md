@@ -1071,12 +1071,12 @@ tier in ADR-0003 before adding it. Phase 2 has 21 tasks plus the gate. Milestone
       - Contrast test `app/src/contrast.test.ts`; palette gained Show detail, source, editor.
       - Checklists: `accessibility.md`, `command-palette.md`, `themes.md`, `editor.md` in
         `docs/verification/`. None has been run on a built app yet.
+      - Review round: Editor save, undo, redo and Trace: show links and impact are in the
+        palette (`app/src/lib/commands.ts`). The shared list shows the file and line of the
+        row the arrow keys select, under the list and linked to the row.
       Follow-ups:
       - John runs the Narrator steps in `accessibility.md` by hand. VoiceOver is marked not
         checked by hand (no Mac), so macOS screen reader support is unverified.
-      - Save, Undo, Redo, and the trace panel tabs are not in the palette yet.
-      - The file:line tooltips on list rows show on hover only. Rows are not focusable, so
-        keyboard users do not get them. The same text is in the detail view.
       - The app crate could not be built here (no GTK libraries), so the new `doc` check in
         `element_detail_shows_requirement_text_and_coverage` first runs in CI.
 - [ ] **2.14 Linux ARM64 installers and notices.** Build deb and rpm on `ubuntu-22.04-arm` in

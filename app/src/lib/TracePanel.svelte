@@ -18,10 +18,10 @@
     onforward: () => void;
     onopen: (path: string, line: number) => void;
     refresher?: Refresher;
+    /** Which tab shows; the command palette can switch it. */
+    tab?: 'links' | 'impact';
   }
-  let { id, canBack, canForward, onfollow, onback, onforward, onopen, refresher }: Props = $props();
-
-  let tab = $state<'links' | 'impact'>('links');
+  let { id, canBack, canForward, onfollow, onback, onforward, onopen, refresher, tab = $bindable('links') }: Props = $props();
 </script>
 
 <div class="panel" data-element={id}>
