@@ -1,7 +1,8 @@
 <script lang="ts">
-  // @begin CT-PLT-001, CT-EFF-004, CT-MOD-005, CT-TRC-005, CT-TRC-004, CT-EFF-006, CT-MOD-004, CT-USE-008, CT-MOD-003
+  // @begin CT-PLT-001, CT-EFF-004, CT-MOD-005, CT-TRC-005, CT-TRC-004, CT-EFF-006, CT-MOD-004, CT-USE-008, CT-MOD-003, CT-USE-010
   // The app window: shows the app name and version, read from the Rust side, and the
   // project opened from the command line once its background load ends.
+  import { tip } from './lib/tooltip';
   import { getName, getVersion } from '@tauri-apps/api/app';
   import { CloseGuard, MAIN_WINDOW, windowCloseRequests } from './lib/autosave';
   import {
@@ -363,6 +364,9 @@
   }
 
   registry.register({ id: 'project.open', title: 'Open project folder...', run: choose });
+  registry.register({ id: 'view.detail', title: 'Show detail', run: () => { view = 'detail'; } });
+  registry.register({ id: 'view.source', title: 'Show source', run: () => { if (source) { view = 'source'; } } });
+  registry.register({ id: 'view.editor', title: 'Show editor', run: () => { if (editing) { view = 'editor'; } } });
   registry.register({ id: 'view.coverage', title: 'Show coverage', run: () => { view = 'coverage'; } });
   for (const f of GAP_FILTERS) {
     registry.register({ id: `coverage.${f.id}`, title: `Coverage: ${f.label.toLowerCase()}`, run: () => { gapFilter = f.id; view = 'coverage'; } });
@@ -418,10 +422,10 @@
   <header>
     <h1>{name}</h1>
     {#if version}<span class="version">Version {version}</span>{/if}
-    <button type="button" onclick={() => (paletteOpen = true)}>Commands (Ctrl+Shift+P)</button>
+    <button type="button" use:tip={{ name: 'Open the command palette', shortcut: 'Ctrl+Shift+P' }} onclick={() => (paletteOpen = true)}>Commands (Ctrl+Shift+P)</button>
     <label>
       Theme
-      <select value={preference} onchange={(e) => setTheme(e.currentTarget.value as ThemePreference)}>
+      <select use:tip={'Choose the color theme'} value={preference} onchange={(e) => setTheme(e.currentTarget.value as ThemePreference)}>
         <option value="system">Follow the OS</option>
         <option value="light">Light</option>
         <option value="dark">Dark</option>
@@ -439,30 +443,30 @@
       <h3>Recent projects</h3>
       <ul>
         {#each recent as r (r.path)}
-          <li><button type="button" title={r.path} onclick={() => open(r.path)}>{r.name}</button></li>
+          <li><button type="button" use:tip={r.path} onclick={() => open(r.path)}>{r.name}</button></li>
         {/each}
       </ul>
-      <button type="button" onclick={clear}>Clear recent</button>
+      <button type="button" use:tip={'Forget the recent projects'} onclick={clear}>Clear recent</button>
     {/if}
   </nav>
   <main id="pane-main" tabindex="-1" aria-label="Main view">
     {#if project}
       <p class="project">{project}</p>
     {/if}
-    <p><button type="button" onclick={choose}>Open project folder...</button></p>
+    <p><button type="button" use:tip={'Choose a project folder to open'} onclick={choose}>Open project folder...</button></p>
     {#if problem}
       <p class="problem" role="alert">{problem}</p>
     {/if}
     {#if opened > 0}
       <div class="views" role="group" aria-label="Main views">
-        <button type="button" aria-pressed={view === 'detail'} onclick={() => (view = 'detail')}>Detail</button>
-        <button type="button" aria-pressed={view === 'coverage'} onclick={() => (view = 'coverage')}>Coverage</button>
-        <button type="button" aria-pressed={view === 'search'} onclick={() => (view = 'search')}>Search</button>
+        <button type="button" use:tip={'Show the detail of the selected element'} aria-pressed={view === 'detail'} onclick={() => (view = 'detail')}>Detail</button>
+        <button type="button" use:tip={'Show requirements with trace gaps'} aria-pressed={view === 'coverage'} onclick={() => (view = 'coverage')}>Coverage</button>
+        <button type="button" use:tip={'Search the model'} aria-pressed={view === 'search'} onclick={() => (view = 'search')}>Search</button>
         {#if source}
-          <button type="button" aria-pressed={view === 'source'} onclick={() => (view = 'source')}>Source</button>
+          <button type="button" use:tip={'Show the source file read-only'} aria-pressed={view === 'source'} onclick={() => (view = 'source')}>Source</button>
         {/if}
         {#if editing}
-          <button type="button" aria-pressed={view === 'editor'} onclick={() => (view = 'editor')}>
+          <button type="button" use:tip={'Edit the source file'} aria-pressed={view === 'editor'} onclick={() => (view = 'editor')}>
             Editor{editorDirty ? ' (unsaved)' : ''}
           </button>
         {/if}
@@ -470,16 +474,16 @@
       {#if blocked && editing}
         <div class="ask" role="alertdialog" aria-label="Unsaved changes">
           <p>{editing.path} has changes that could not be saved. Opening {blocked.path} would lose them.</p>
-          <button type="button" onclick={saveAndOpen}>Save and open {blocked.path}</button>
-          <button type="button" onclick={discardAndOpen}>Discard and open {blocked.path}</button>
-          <button type="button" onclick={() => (blocked = undefined)}>Keep editing</button>
+          <button type="button" use:tip={'Save the edits, then open the file'} onclick={saveAndOpen}>Save and open {blocked.path}</button>
+          <button type="button" use:tip={'Throw away the edits, then open the file'} onclick={discardAndOpen}>Discard and open {blocked.path}</button>
+          <button type="button" use:tip={'Stay in the editor'} onclick={() => (blocked = undefined)}>Keep editing</button>
         </div>
       {/if}
       {#if diskConflict}
         <div class="ask" role="alertdialog" aria-label="Changed on disk">
           <p>{diskConflict} changed on disk while it has unsaved edits here. Nothing is saved until you choose.</p>
-          <button type="button" onclick={takeDiskVersion}>Load the version on disk</button>
-          <button type="button" onclick={keepMyEdits}>Keep my edits</button>
+          <button type="button" use:tip={'Replace the editor text with the file on disk'} onclick={takeDiskVersion}>Load the version on disk</button>
+          <button type="button" use:tip={'Keep the editor text and save it over the file'} onclick={keepMyEdits}>Keep my edits</button>
         </div>
       {/if}
       {#if editing}

@@ -552,7 +552,7 @@ tier in ADR-0003 before adding it. Phase 2 has 21 tasks plus the gate. Milestone
       browser storage use outside the theme. CLAUDE.md has the storage rule.
       Follow-ups:
       - The Inspection and Demonstration checklists (`docs/verification/app-shell-demo.md`,
-        `app-accessibility.md`) are unticked until someone runs a built app on each OS.
+        `accessibility.md`) are unticked until someone runs a built app on each OS.
       - Nothing uses `VirtualList` yet; 2.6 is its first caller. Pane contents are
         placeholders until 2.6 and 2.7a.
       - Colors were chosen for AA contrast but not measured with a tool.
@@ -1050,7 +1050,7 @@ tier in ADR-0003 before adding it. Phase 2 has 21 tasks plus the gate. Milestone
         GTK libraries), so its change and test (`keeping_edits_of_a_file_deleted_on_disk_
         saves_it_again`) first run in CI. The permission tests skip when the user can open
         any folder, as root can.
-- [ ] **2.13 Accessibility and keyboard pass.** `docs/verification/accessibility.md`: WCAG 2.1
+- [x] **2.13 Accessibility and keyboard pass.** `docs/verification/accessibility.md`: WCAG 2.1
       AA checks for contrast in both themes, visible focus, keyboard paths through every pane,
       and screen reader labels, with Narrator on Windows and VoiceOver on macOS checked by
       John and recorded in the checklist. `docs/verification/command-palette.md`: every
@@ -1063,6 +1063,22 @@ tier in ADR-0003 before adding it. Phase 2 has 21 tasks plus the gate. Milestone
       name and shortcut (CT-USE-010). No title attributes.
       Refs: CT-USE-004, CT-USE-002, CT-USE-005, CT-MOD-004, CT-MOD-005, CT-USE-010
       Model: Sonnet
+      Done:
+      - Tooltip: `app/src/lib/tooltip.ts` (the `use:tip` action), on every button, the theme
+        select, and the file:line spans. No `title` attributes (a test checks the components).
+      - CT-USE-010 hover: the core keeps `doc` on every element (`Element::doc`), the element
+        detail sends it, and the editor hover shows it for any element.
+      - Contrast test `app/src/contrast.test.ts`; palette gained Show detail, source, editor.
+      - Checklists: `accessibility.md`, `command-palette.md`, `themes.md`, `editor.md` in
+        `docs/verification/`. None has been run on a built app yet.
+      Follow-ups:
+      - John runs the Narrator steps in `accessibility.md` by hand. VoiceOver is marked not
+        checked by hand (no Mac), so macOS screen reader support is unverified.
+      - Save, Undo, Redo, and the trace panel tabs are not in the palette yet.
+      - The file:line tooltips on list rows show on hover only. Rows are not focusable, so
+        keyboard users do not get them. The same text is in the detail view.
+      - The app crate could not be built here (no GTK libraries), so the new `doc` check in
+        `element_detail_shows_requirement_text_and_coverage` first runs in CI.
 - [ ] **2.14 Linux ARM64 installers and notices.** Build deb and rpm on `ubuntu-22.04-arm` in
       the release workflow with the same 20 MB check and checksums. Add an `ubuntu-22.04-arm`
       entry to the `installer-size` job, so the arm64 build is tested on every pull request

@@ -395,6 +395,7 @@ impl Live {
             .num("children", self.members(e).len())
             .num("linksFrom", graph.links_from(element_id).count())
             .num("linksTo", graph.links_to(element_id).count())
+            .str("doc", &e.doc)
             .raw("requirement", &self.requirement(element_id, e))
             .end())
     }
@@ -1559,6 +1560,10 @@ mod tests {
         assert_eq!((num(&detail, "line"), num(&detail, "column")), (30, 5));
         assert_eq!(num(&detail, "linksFrom"), 1);
         assert!(num(&detail, "linksTo") >= 4);
+        assert_eq!(
+            text(&detail, "doc"),
+            "The system shall handle case 7 within its budget."
+        );
         let req = detail.get("requirement").unwrap();
         assert_eq!(
             text(req, "doc"),

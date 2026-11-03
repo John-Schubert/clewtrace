@@ -1,5 +1,6 @@
-<!-- @begin CT-EFF-006, CT-EFF-005, CT-TRC-004, CT-USE-007 -->
+<!-- @begin CT-EFF-006, CT-EFF-005, CT-TRC-004, CT-USE-007, CT-USE-010 -->
 <script lang="ts">
+  import { tip } from './tooltip';
   // Full-text search over the model: a box, and the hits a page at a time. A click selects
   // the element of a hit, or opens its file when the model has no element for it.
   import { onMount, untrack } from 'svelte';
@@ -88,7 +89,7 @@
     <div class="list">
       <VirtualList {count} label="Search results" rowAt={(i) => at(i)} onactivate={pick}>
         {#snippet row(hit)}
-          <span title="{hit.file}:{hit.line}">{hitLabel(hit)}</span>
+          <span use:tip={`${hit.file}:${hit.line}`}>{hitLabel(hit)}</span>
         {/snippet}
       </VirtualList>
     </div>

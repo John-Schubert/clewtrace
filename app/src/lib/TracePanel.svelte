@@ -1,5 +1,6 @@
-<!-- @begin CT-TRC-005, CT-TRC-006, CT-MOD-003, CT-EFF-005 -->
+<!-- @begin CT-TRC-005, CT-TRC-006, CT-MOD-003, CT-EFF-005, CT-USE-010 -->
 <script lang="ts">
+  import { tip } from './tooltip';
   // The trace panel: links to and from the selected element, grouped by kind, and an impact
   // view of everything upstream and downstream. Back and forward step through the elements
   // looked at.
@@ -25,10 +26,10 @@
 
 <div class="panel" data-element={id}>
 <div class="bar">
-  <button type="button" disabled={!canBack} onclick={onback}>Back</button>
-  <button type="button" disabled={!canForward} onclick={onforward}>Forward</button>
-  <button type="button" aria-pressed={tab === 'links'} onclick={() => (tab = 'links')}>Links</button>
-  <button type="button" aria-pressed={tab === 'impact'} onclick={() => (tab = 'impact')}>Impact</button>
+  <button type="button" use:tip={'Go back to the previous element'} disabled={!canBack} onclick={onback}>Back</button>
+  <button type="button" use:tip={'Go forward to the next element'} disabled={!canForward} onclick={onforward}>Forward</button>
+  <button type="button" use:tip={'Show the links of the element'} aria-pressed={tab === 'links'} onclick={() => (tab = 'links')}>Links</button>
+  <button type="button" use:tip={'Show what the element affects'} aria-pressed={tab === 'impact'} onclick={() => (tab = 'impact')}>Impact</button>
 </div>
 {#if id === undefined}
   <p class="muted">Select an element to see its trace links.</p>

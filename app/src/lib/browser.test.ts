@@ -117,7 +117,7 @@ describe('DetailView', () => {
   it('shows the kind, qualified name, and file and line of the selected element', async () => {
     vi.mocked(api.elementDetail).mockResolvedValue({
       id: 7, kind: 'package', name: 'Reqs', shortName: null, qualifiedName: 'Reqs', file: 'm.sysml', line: 4, column: 1,
-      owner: null, children: 2, linksFrom: 0, linksTo: 0, requirement: null,
+      owner: null, children: 2, linksFrom: 0, linksTo: 0, doc: '', requirement: null,
     });
     instance = mount(DetailView, { target: document.body, props: { selection: { kind: 'element', id: 7 }, onopen: vi.fn() } });
     await settle();
@@ -129,7 +129,7 @@ describe('DetailView', () => {
   it('opens the file of the selected element in the source view at its line', async () => {
     vi.mocked(api.elementDetail).mockResolvedValue({
       id: 7, kind: 'package', name: 'Reqs', shortName: null, qualifiedName: 'Reqs', file: 'm.sysml', line: 4, column: 1,
-      owner: null, children: 2, linksFrom: 0, linksTo: 0, requirement: null,
+      owner: null, children: 2, linksFrom: 0, linksTo: 0, doc: '', requirement: null,
     });
     const onopen = vi.fn();
     instance = mount(DetailView, { target: document.body, props: { selection: { kind: 'element', id: 7 }, onopen } });
@@ -142,7 +142,7 @@ describe('DetailView', () => {
   it('shows the element again after the text changed, and says when it is gone', async () => {
     const detail = (line: number): api.ElementDetail => ({
       id: 7, kind: 'package', name: 'Reqs', shortName: null, qualifiedName: 'Reqs', file: 'm.sysml', line, column: 1,
-      owner: null, children: 2, linksFrom: 0, linksTo: 0, requirement: null,
+      owner: null, children: 2, linksFrom: 0, linksTo: 0, doc: '', requirement: null,
     });
     vi.mocked(api.elementDetail).mockResolvedValue(detail(4));
     const refresher = new Refresher();

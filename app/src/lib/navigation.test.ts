@@ -12,7 +12,7 @@ const found = { found: true as const, id: 7, file: 'a.sysml', line: 3, column: 1
 const detail = (extra: Partial<ElementDetail> = {}): ElementDetail => ({
   id: 7, kind: 'part def', name: 'Engine', shortName: null, qualifiedName: 'P::Engine',
   file: 'a.sysml', line: 3, column: 1, owner: 2, children: 0, linksFrom: 1, linksTo: 3,
-  requirement: null, ...extra,
+  doc: '', requirement: null, ...extra,
 });
 
 function nav(extra: Partial<EditorNav> = {}): EditorNav {
@@ -130,13 +130,19 @@ describe('hover', () => {
   // @verifies CT-USE-010
   it('shows the kind, the doc text, and the trace status of a requirement', () => {
     const r = { doc: 'It shall go.', verificationMethod: 'Test', phase: 2, hasParent: true, implemented: true, verified: false, waived: false };
-    expect(hoverLines(detail({ kind: 'requirement', qualifiedName: 'R::go', requirement: r }))).toEqual([
+    expect(hoverLines(detail({ kind: 'requirement', qualifiedName: 'R::go', doc: r.doc, requirement: r }))).toEqual([
       'requirement R::go',
       'It shall go.',
       'Trace: has a parent, implemented, not verified',
     ]);
     const waived = { ...r, hasParent: false, implemented: false, verified: false, waived: true };
-    expect(hoverLines(detail({ requirement: waived }))[2]).toBe('Trace: no parent, not implemented, not verified, waived');
+    expect(hoverLines(detail({ requirement: waived })).at(-1)).toBe('Trace: no parent, not implemented, not verified, waived');
+  });
+
+  // @verifies CT-USE-010
+  it('shows the doc text of any element that has some', () => {
+    const d = detail({ doc: 'Makes the thrust.' });
+    expect(hoverLines(d)).toEqual(['part def P::Engine', 'Makes the thrust.', 'Trace links: 1 out, 3 in']);
   });
 
   // @verifies CT-USE-010

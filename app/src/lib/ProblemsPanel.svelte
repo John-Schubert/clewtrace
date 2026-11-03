@@ -1,5 +1,6 @@
-<!-- @begin CT-USE-007, CT-MOD-003, CT-EFF-005, CT-USE-004 -->
+<!-- @begin CT-USE-007, CT-MOD-003, CT-EFF-005, CT-USE-004, CT-USE-010 -->
 <script lang="ts">
+  import { tip } from './tooltip';
   // Every syntax, name, and trace problem as file:line:column, what went wrong, and the
   // fix hint. Errors come first, then warnings. Click or arrow to select a problem.
   import { onMount } from 'svelte';
@@ -50,7 +51,7 @@
   <div class="problems">
     <VirtualList {count} label="Problems list" rowAt={(i) => at(i)} onselect={pick}>
       {#snippet row(p)}
-        <span class={p.severity} title={problemSummary(p)}>
+        <span class={p.severity} use:tip={problemSummary(p)}>
           <strong>{p.severity}</strong>
           {p.where}: {p.what}. Fix: {p.help}
         </span>

@@ -119,6 +119,8 @@ export interface ElementDetail {
   children: number;
   linksFrom: number;
   linksTo: number;
+  /** The element's doc text, or an empty string. */
+  doc: string;
   requirement: RequirementDetail | null;
 }
 

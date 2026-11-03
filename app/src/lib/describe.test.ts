@@ -7,7 +7,7 @@ import { detailFields, problemSummary, referenceLabel, referencesNote, treeLabel
 const detail = (extra: Partial<ElementDetail> = {}): ElementDetail => ({
   id: 7, kind: 'requirement usage', name: 'fast', shortName: 'CT-EFF-001', qualifiedName: 'Reqs::fast',
   file: 'model/requirements.sysml', line: 12, column: 5, owner: 2, children: 0, linksFrom: 1, linksTo: 3,
-  requirement: null, ...extra,
+  doc: '', requirement: null, ...extra,
 });
 
 describe('treeLabel', () => {

@@ -1,5 +1,6 @@
-<!-- @begin CT-EFF-005, CT-USE-007, CT-TRC-004, CT-MOD-004, CT-MOD-003 -->
+<!-- @begin CT-EFF-005, CT-USE-007, CT-TRC-004, CT-MOD-004, CT-MOD-003, CT-USE-010 -->
 <script lang="ts">
+  import { tip } from './tooltip';
   // The main view's detail of what is selected: an element from the tree, or a problem from
   // the problems list.
   import { elementDetail, elementReferences, type ElementDetail, type Page, type ReferenceRow } from './api';
@@ -73,7 +74,7 @@
   <p class="muted">{problemSummary(selection.problem)}</p>
   {#if placeOf(selection.problem.where)}
     {@const place = placeOf(selection.problem.where)!}
-    <p><button type="button" onclick={() => onopen(place.path, place.line)}>{canEdit(place.path) ? 'Open in editor' : 'Show in source view'}</button></p>
+    <p><button type="button" use:tip={'Open the file at the element'} onclick={() => onopen(place.path, place.line)}>{canEdit(place.path) ? 'Open in editor' : 'Show in source view'}</button></p>
   {/if}
 {:else if detail}
   <h2>{detail.shortName ?? detail.name ?? '(unnamed)'}</h2>
@@ -88,11 +89,11 @@
     <p class="muted">{referencesNote(references.rows.length, references.total ?? references.rows.length)}</p>
     <ul>
       {#each references.rows as row (`${row.file}:${row.line}:${row.column}`)}
-        <li><button type="button" class="link" onclick={() => onopen(row.file, row.line)}>{referenceLabel(row)}</button></li>
+        <li><button type="button" class="link" use:tip={`${row.file}:${row.line}`} onclick={() => onopen(row.file, row.line)}>{referenceLabel(row)}</button></li>
       {/each}
     </ul>
   {/if}
-  <p><button type="button" onclick={() => onopen(detail!.file, detail!.line)}>{canEdit(detail.file) ? 'Open in editor' : 'Show in source view'}</button></p>
+  <p><button type="button" use:tip={'Open the file at the element'} onclick={() => onopen(detail!.file, detail!.line)}>{canEdit(detail.file) ? 'Open in editor' : 'Show in source view'}</button></p>
 {:else}
   <p class="muted">Loading...</p>
 {/if}
