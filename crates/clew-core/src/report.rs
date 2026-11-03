@@ -516,7 +516,7 @@ fn end_label(model: &Model, end: &End) -> String {
     }
 }
 
-// @verifies CT-TRC-004, CT-TRC-005, CT-DEV-003, CT-USE-007
+// @verifies CT-TRC-004, CT-TRC-005, CT-DEV-003, CT-USE-007, CT-SEC-009
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1037,6 +1037,47 @@ Downstream, what traces to it (0):
         // Excluded, unreadable, and untraceable code adds no link to Reqs::lone.
         let lone = project.model.find("Reqs::lone").unwrap();
         assert_eq!(project.graph.links_to(lone).count(), 0);
+    }
+
+    // @verifies CT-SEC-009, CT-USE-007
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_the_system_will_not_open_is_a_problem_not_a_stop() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = project("locked-folder", &[]);
+        let locked = root.join("model/locked");
+        fs::create_dir_all(&locked).unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+        let denied = fs::read_dir(&locked).is_err();
+        let loaded = load_project(&root);
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        if !denied {
+            return;
+        }
+        let project = loaded.unwrap();
+        let [problem] = project.problems.as_slice() else {
+            panic!("{:?}", project.problems);
+        };
+        assert!(
+            problem.starts_with("model/locked: error: cannot read the folder"),
+            "{problem}"
+        );
+        assert!(project.model.find("Reqs").is_some());
+    }
+
+    // @verifies CT-SEC-009, CT-USE-007
+    #[test]
+    fn a_file_that_is_too_large_or_not_text_is_a_problem_not_a_stop() {
+        let root = project("bad-files", &[("model/latin1.sysml", &[b'p', 0xE9, 0xFF])]);
+        let big = fs::File::create(root.join("model/big.sysml")).unwrap();
+        big.set_len(crate::index::MAX_FILE_BYTES + 1).unwrap();
+        let project = load_project(&root).unwrap();
+        assert_eq!(project.problems.len(), 2, "{:?}", project.problems);
+        assert!(project.problems[0].starts_with("model/big.sysml: error: the file is too large"));
+        assert!(
+            project.problems[1].starts_with("model/latin1.sysml: error: the file is not UTF-8")
+        );
+        assert!(project.model.find("Reqs").is_some());
     }
 
     // @verifies CT-USE-007

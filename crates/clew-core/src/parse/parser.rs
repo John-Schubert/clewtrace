@@ -81,6 +81,7 @@ pub fn parse(src: &str) -> Parsed {
         tokens: lexed.tokens,
         at: 0,
         errors: Vec::new(),
+        depth: 0,
     };
     let members = parser.members(None);
     let mut errors: Vec<SyntaxError> = lexed.errors.into_iter().map(SyntaxError::from).collect();
@@ -88,6 +89,12 @@ pub fn parse(src: &str) -> Parsed {
     errors.sort_by_key(|e| (e.line, e.column));
     Parsed { members, errors }
 }
+
+// @implements CT-SEC-009
+/// The deepest nesting of bodies the parser follows. Real models stay under a dozen levels.
+/// A body opened deeper is reported and skipped, so a hostile file cannot run the parser,
+/// or the code that walks its tree, out of stack.
+pub const MAX_NESTING: usize = 64;
 
 // @implements CT-MOD-002, CT-USE-007
 const SUPPORTED: &str = "Clewtrace reads packages, imports, comments and doc, part, attribute, \
@@ -150,6 +157,8 @@ struct Parser<'a> {
     tokens: Vec<Token>,
     at: usize,
     errors: Vec<SyntaxError>,
+    /// How many bodies the parser is inside, at most `MAX_NESTING`.
+    depth: usize,
 }
 
 // @implements CT-MOD-002, CT-USE-007
@@ -396,7 +405,19 @@ impl Parser<'_> {
         }
         if self.is("{") {
             let open = self.bump();
-            return self.members(Some(open));
+            if self.depth >= MAX_NESTING {
+                self.error(
+                    open,
+                    format!("bodies are nested more than {MAX_NESTING} levels deep"),
+                    "move the inner packages and definitions out to their own file or to the top level",
+                );
+                self.skip_block(open);
+                return Vec::new();
+            }
+            self.depth += 1;
+            let members = self.members(Some(open));
+            self.depth -= 1;
+            return members;
         }
         let token = self.peek();
         let found = self.describe(token);
@@ -946,7 +967,7 @@ fn pos(token: Token) -> Pos {
     }
 }
 
-// @verifies CT-MOD-002, CT-USE-007
+// @verifies CT-MOD-002, CT-USE-007, CT-SEC-009
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -965,6 +986,53 @@ mod tests {
             .into_iter()
             .map(|e| (e.line, e.column, e.message))
             .collect()
+    }
+
+    // @verifies CT-SEC-009, CT-USE-007
+    /// `levels` packages inside one another, one per line, each `{` at column 11.
+    fn nested(levels: usize) -> String {
+        let open = "package p {\n".repeat(levels);
+        format!("{open}{}", "}\n".repeat(levels))
+    }
+
+    // @verifies CT-SEC-009
+    #[test]
+    fn nesting_up_to_the_limit_parses() {
+        let members = parse_ok(&nested(MAX_NESTING));
+        assert_eq!(members.len(), 1);
+    }
+
+    // @verifies CT-SEC-009, CT-USE-007
+    #[test]
+    fn nesting_past_the_limit_is_an_error_that_says_where_and_how_to_fix_it() {
+        let parsed = parse(&nested(MAX_NESTING + 1));
+        let [error] = parsed.errors.as_slice() else {
+            panic!("{:?}", parsed.errors);
+        };
+        assert_eq!((error.line as usize, error.column), (MAX_NESTING + 1, 11));
+        assert!(
+            error.message.contains("more than 64 levels deep"),
+            "{}",
+            error.message
+        );
+        assert!(error.help.contains("own file"), "{}", error.help);
+    }
+
+    // @verifies CT-SEC-009
+    #[test]
+    fn absurd_nesting_does_not_overflow_a_small_stack() {
+        // Every kind of body counts, and a stack smaller than any thread the app runs on.
+        let mut src = String::new();
+        for _ in 0..50_000 {
+            src.push_str("package p {\npart def d {\nrequirement r {\n");
+        }
+        let thread = std::thread::Builder::new().stack_size(512 * 1024);
+        let errors = thread
+            .spawn(move || parse(&src).errors.len())
+            .unwrap()
+            .join()
+            .expect("the parser overflowed the stack");
+        assert!(errors >= 1);
     }
 
     // @verifies CT-MOD-002

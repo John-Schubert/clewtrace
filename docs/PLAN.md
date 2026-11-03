@@ -1026,7 +1026,7 @@ tier in ADR-0003 before adding it. Phase 2 has 21 tasks plus the gate. Milestone
       - Go to definition into the built-in library finds nothing.
       - Not run in a real window: the Ctrl or Cmd+click and the hover are covered by the
         editor logic tests, not by a launched app. John to try both in the app.
-- [ ] **2.12 Hardening for files from other people.** A parser recursion depth limit with an
+- [x] **2.12 Hardening for files from other people.** A parser recursion depth limit with an
       actionable error. An unreadable subfolder is reported and skipped instead of stopping
       `clew index`, with a test of the `sysml_files` error path in `load_project`. Very long
       lines, invalid UTF-8, and very large files are reported, not fatal. A fixed-seed stress
@@ -1036,6 +1036,20 @@ tier in ADR-0003 before adding it. Phase 2 has 21 tasks plus the gate. Milestone
       file inside the project only).
       Refs: CT-SEC-009, CT-USE-007
       Model: Sonnet
+      - Limits: bodies nest at most 64 deep (`parser::MAX_NESTING`), a file is at most 8 MiB
+        and a line at most 1 MiB (`index::MAX_FILE_BYTES`, `MAX_LINE_BYTES`). A file over a
+        limit, or not UTF-8, is a problem for that file and the rest of the project loads.
+        John to confirm the limits; they are constants in one place each.
+      - A folder below the root that cannot be read is a problem and is skipped
+        (`index::sysml_files` returns `ModelFiles`). The project folder itself still fails.
+        The file watcher's reload does not list such a folder again, so one that becomes
+        unreadable while the app is open shows only after the project is reopened.
+      - The stress test is `crates/clew-core/tests/stress.rs` (fixed seed, no dependency).
+      - Keep my edits on a deleted file: `Workspace::resave_target` in the core, used by
+        `save_source` in the app. The app crate could not be built in the cloud session (no
+        GTK libraries), so its change and test (`keeping_edits_of_a_file_deleted_on_disk_
+        saves_it_again`) first run in CI. The permission tests skip when the user can open
+        any folder, as root can.
 - [ ] **2.13 Accessibility and keyboard pass.** `docs/verification/accessibility.md`: WCAG 2.1
       AA checks for contrast in both themes, visible focus, keyboard paths through every pane,
       and screen reader labels, with Narrator on Windows and VoiceOver on macOS checked by
