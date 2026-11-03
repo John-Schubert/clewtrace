@@ -44,8 +44,8 @@ The deb and rpm use your distribution's own WebKitGTK 4.1 and GTK 3 packages, wh
 package manager installs as dependencies. On an offline machine, those packages must be
 available from a local mirror or installed first.
 
-- Debian or Ubuntu: `sudo apt install ./Clewtrace_<version>_amd64.deb`
-- Fedora or RHEL: `sudo dnf install ./Clewtrace-<version>-1.x86_64.rpm`
+- Debian or Ubuntu: `sudo apt install ./Clewtrace_<version>_amd64.deb` (`arm64` on ARM64)
+- Fedora or RHEL: `sudo dnf install ./Clewtrace-<version>-1.x86_64.rpm` (`aarch64` on ARM64)
 
 There is no AppImage. It would bundle GTK and WebKitGTK, which are LGPL, and exceed the
 20 MB installer budget (ADR-0001, ADR-0003).

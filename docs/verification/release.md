@@ -16,7 +16,8 @@ Go through this list for every release, before publishing the draft, and record 
 - `verify tag`: the tag is annotated and signed by a key in `.github/release-signers` or
   `.github/release-keys.asc`, it points to a commit on `main`, and it matches the version in
   `Cargo.toml` and `app/package.json`. Nothing else runs if this fails.
-- `build`: MSI on Windows, a universal DMG on macOS, deb and rpm on Ubuntu 22.04. The job
+- `build`: MSI on Windows, a universal DMG on macOS, deb and rpm on Ubuntu 22.04 for x64 and,
+  on `ubuntu-22.04-arm`, for ARM64. Each job
   fails if any installer is over 20,000,000 bytes or a bundle type is missing.
 - `notices`: `clew notices --out target/notices` writes `THIRD-PARTY-NOTICES.txt`,
   `sbom.cdx.json`, and `mpl-sources/`, and fails on any license policy error.
@@ -39,7 +40,9 @@ Go through this list for every release, before publishing the draft, and record 
       Spot-check five entries against `cargo tree -e normal,no-proc-macro` and the
       production packages in `app/package-lock.json`.
 - [ ] The packages the run warned about (no license file in the package) were checked by
-      hand. Their license and repository link are in the notices file.
+      hand. Their license and repository link are in the notices file. Files fetched from a
+      repository are in `third-party-licenses/<ecosystem>/<name>-<version>/`; a dependency
+      update needs its folder renamed, or fetched again if the license changed.
 - [ ] Each shipped MPL-2.0 crate (`scope = "shipped"` in `deps.toml`, today `option-ext`)
       has its `.crate` archive attached, and the notices file names its version and source
       link. The attached archive matches the one on crates.io (same SHA-256).
@@ -48,7 +51,7 @@ Go through this list for every release, before publishing the draft, and record 
 
 ## CT-PLT-001 and CT-EFF-001 Installers
 
-- [ ] MSI, DMG, deb, and rpm are attached, each 20 MB or smaller, and each matches its line
+- [ ] MSI, DMG, and the deb and rpm for x64 and ARM64 are attached, each 20 MB or smaller, and each matches its line
       in `SHA256SUMS.txt` (`sha256sum -c SHA256SUMS.txt`).
 - [ ] No AppImage or other bundle that includes GTK or WebKitGTK is attached (ADR-0001).
 - [ ] The installer opens the app on Windows 10, macOS 13, and Ubuntu (Gate 0).
