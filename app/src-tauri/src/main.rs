@@ -29,6 +29,12 @@ use data::AppState;
 mod generate;
 // @end
 
+// @begin CT-EFF-008
+// A time limit for the tests that wait on the file watcher.
+#[cfg(test)]
+mod within;
+// @end
+
 /// The context the app is built with: tauri.conf.json and the capability files.
 /// Generated once, because a second `generate_context!` in the same build defines the
 /// embedded Info.plist symbol twice on macOS.

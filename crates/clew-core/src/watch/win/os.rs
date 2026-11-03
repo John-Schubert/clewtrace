@@ -64,10 +64,11 @@ impl Handle {
         }
     }
 
-    /// A new auto-reset event, not signaled.
-    fn event() -> io::Result<Self> {
+    /// A new event, not signaled. An auto-reset event is reset by the wait it wakes; a
+    /// manual-reset one stays signaled, so every later wait sees it too.
+    fn event(manual_reset: bool) -> io::Result<Self> {
         // SAFETY: no attributes and no name; the result is checked.
-        Self::new(unsafe { CreateEventW(null(), 0, 0, null()) })
+        Self::new(unsafe { CreateEventW(null(), manual_reset.into(), 0, null()) })
     }
 }
 
@@ -80,8 +81,10 @@ impl Drop for Handle {
 }
 
 // @implements CT-EFF-008
-/// Stops the watch when dropped: it signals the stop event, and the watcher thread
-/// cancels its read and ends.
+/// Stops the watch when dropped, from any thread: it signals the stop event, which wakes
+/// the watcher thread from its wait, and the thread cancels its read and ends. The event
+/// is manual-reset, so it stays signaled: a stop that comes while the thread is busy
+/// passing on changes wakes its next wait at once.
 pub struct Stop(Arc<Handle>);
 
 // @implements CT-EFF-008
@@ -127,7 +130,7 @@ impl Reader {
         })?;
         Ok(Self {
             folder,
-            done: Handle::event()?,
+            done: Handle::event(false)?,
             buf: vec![0; WORDS],
             overlapped: Box::default(),
             pending: false,
@@ -201,18 +204,34 @@ impl Drop for Reader {
 
 // @implements CT-EFF-008, CT-EFF-007, CT-USE-009
 /// Starts watching the tree under `root`, sending what changes to `tx` from a thread
-/// of its own. The first read starts before this returns, so no change made after it
-/// is missed. The thread ends, dropping `tx`, when the `Stop` is dropped or the watch
+/// of its own. The thread ends, dropping `tx`, when the `Stop` is dropped or the watch
 /// fails.
+///
+/// Every read starts on the watcher thread: Windows cancels the overlapped reads a thread
+/// started when that thread ends, and the app starts the watch on its load thread, which
+/// ends once the project is loaded. This waits, once and with no timeout, until the
+/// thread's first read has started, so no change made after it returns is missed.
 pub fn start(root: &Path, tx: Sender<Seen>) -> io::Result<Stop> {
     let mut reader = Reader::open(root)?;
-    let stop = Arc::new(Handle::event()?);
-    reader.read()?;
+    let stop = Arc::new(Handle::event(true)?);
     let root = root.to_path_buf();
     let stopped = Arc::clone(&stop);
+    let (report, started) = std::sync::mpsc::sync_channel(1);
+    let watch = move || {
+        let first = reader.read();
+        let reading = first.is_ok();
+        let _ = report.send(first);
+        if reading {
+            run(reader, &stopped, &root, &tx);
+        }
+    };
     std::thread::Builder::new()
         .name("clew-watch-os".into())
-        .spawn(move || run(reader, &stopped, &root, &tx))?;
+        .spawn(watch)?;
+    let first = started
+        .recv()
+        .map_err(|_| io::Error::other("the watcher thread ended"))?;
+    first?;
     Ok(Stop(stop))
 }
 

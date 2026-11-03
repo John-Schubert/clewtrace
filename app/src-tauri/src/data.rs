@@ -2267,29 +2267,38 @@ mod tests {
     // @verifies CT-EFF-008, CT-USE-009
     #[test]
     fn without_a_watched_project_the_disk_wait_returns_at_once() {
-        let state = AppState::default();
-        let news = json::parse(&state.wait_for_disk_change()).unwrap();
-        assert_eq!(news.get("watching").and_then(Json::as_bool), Some(false));
+        crate::within::within(Duration::from_secs(10), || {
+            let state = AppState::default();
+            let news = json::parse(&state.wait_for_disk_change()).unwrap();
+            assert_eq!(news.get("watching").and_then(Json::as_bool), Some(false));
+        });
     }
 
     // @verifies CT-EFF-008, CT-EFF-007, CT-USE-009
     #[test]
     fn an_open_project_is_watched_and_the_ui_hears_of_changes() {
-        let root = gappy("watched").root();
-        let state = Arc::new(AppState::default());
-        state.open(root.clone()).unwrap().join().unwrap();
-        let text = fs::read_to_string(root.join("design.sysml")).unwrap();
-        fs::write(root.join("design.sysml"), format!("{text}package Later;\n")).unwrap();
-        let mut reloaded = Vec::new();
-        let started = Instant::now();
-        while !reloaded.iter().any(|p| p == "design.sysml") {
-            assert!(started.elapsed() < Duration::from_secs(10), "{reloaded:?}");
-            let news = json::parse(&state.wait_for_disk_change()).unwrap();
-            assert_eq!(news.get("watching").and_then(Json::as_bool), Some(true));
-            let rows = news.get("reloaded").unwrap().items();
-            reloaded.extend(rows.iter().filter_map(|r| r.as_str().map(String::from)));
-        }
-        let loaded = state.project().unwrap();
-        assert!(loaded.read().project().model.find("Later").is_some());
+        // The project opens on the load thread, which ends before the file changes, as in
+        // the app. `within` fails the test instead of letting a lost event hang it.
+        crate::within::within(Duration::from_secs(60), || {
+            let root = gappy("watched").root();
+            let state = Arc::new(AppState::default());
+            state.open(root.clone()).unwrap().join().unwrap();
+            let text = fs::read_to_string(root.join("design.sysml")).unwrap();
+            fs::write(root.join("design.sysml"), format!("{text}package Later;\n")).unwrap();
+            let mut reloaded = Vec::new();
+            while !reloaded.iter().any(|p| p == "design.sysml") {
+                let news = json::parse(&state.wait_for_disk_change()).unwrap();
+                assert_eq!(news.get("watching").and_then(Json::as_bool), Some(true));
+                let problems = news.get("problems").unwrap().items();
+                assert!(
+                    problems.is_empty(),
+                    "the watcher reported trouble: {problems:?}"
+                );
+                let rows = news.get("reloaded").unwrap().items();
+                reloaded.extend(rows.iter().filter_map(|r| r.as_str().map(String::from)));
+            }
+            let loaded = state.project().unwrap();
+            assert!(loaded.read().project().model.find("Later").is_some());
+        });
     }
 }
