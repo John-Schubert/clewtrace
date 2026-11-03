@@ -420,6 +420,70 @@ impl Live {
     }
 }
 
+// @implements CT-MOD-004, CT-EFF-005
+impl Live {
+    /// Where the name at `line` and `column` of `path` leads: the element, its place, and
+    /// its name, or `found: false` for a name that leads nowhere or into the built-in library.
+    pub fn definition(&self, path: &str, line: u32, column: u32, word: &str) -> String {
+        let model = &self.project().model;
+        let target = model
+            .definition_at(path, line, column, word)
+            .filter(|&t| !self.is_library(model.element(t)));
+        let Some(id) = target else {
+            return Obj::new().bool("found", false).end();
+        };
+        let e = model.element(id);
+        Obj::new()
+            .bool("found", true)
+            .num("id", self.sid(id))
+            .str("file", &model.files[e.file])
+            .num("line", e.pos.line)
+            .num("column", e.pos.column)
+            .str("name", &model.qualified_name(id))
+            .end()
+    }
+
+    /// One page of the model's names that cite element `id`, in file and line order.
+    pub fn references(&self, id: usize, offset: usize, limit: usize) -> Result<String, AppError> {
+        let (element_id, _) = self.get(id)?;
+        let model = &self.project().model;
+        let all: Vec<_> = (model.references_to(element_id).into_iter())
+            .filter(|r| model.files[r.file] != LIBRARY_PATH)
+            .collect();
+        let rows = (page_of(&all, offset, limit).iter())
+            .map(|r| {
+                Obj::new()
+                    .str("role", r.role.noun())
+                    .str("from", &model.qualified_name(r.source))
+                    .str("file", &model.files[r.file])
+                    .num("line", r.name.pos.line)
+                    .num("column", r.name.pos.column)
+                    .end()
+            })
+            .collect();
+        Ok(page(offset, Some(all.len()), rows))
+    }
+
+    /// The names that fit at the cursor, at most one page.
+    pub fn completions(&self, path: &str, line: u32, before: &str, prefix: &str) -> String {
+        let found = self
+            .project()
+            .model
+            .complete(path, line, before, prefix, MAX_PAGE);
+        array(
+            (found.iter())
+                .map(|c| {
+                    Obj::new()
+                        .str("label", &c.label)
+                        .str("insert", &c.insert)
+                        .str("detail", &c.detail)
+                        .end()
+                })
+                .collect(),
+        )
+    }
+}
+
 // @implements CT-EFF-005, CT-USE-007
 impl Live {
     /// One page of the links that start at an element (`from`: what it traces to) or end
@@ -815,6 +879,18 @@ impl Loaded {
         limit: usize,
     ) -> Result<String, AppError> {
         self.read().impact(id, direction, offset, limit)
+    }
+
+    pub fn definition(&self, path: &str, line: u32, column: u32, word: &str) -> String {
+        self.read().definition(path, line, column, word)
+    }
+
+    pub fn references(&self, id: usize, offset: usize, limit: usize) -> Result<String, AppError> {
+        self.read().references(id, offset, limit)
+    }
+
+    pub fn completions(&self, path: &str, line: u32, before: &str, prefix: &str) -> String {
+        self.read().completions(path, line, before, prefix)
     }
 
     pub fn problems(&self, offset: usize, limit: usize) -> String {
@@ -1624,7 +1700,7 @@ mod tests {
         let state = &generated().1;
         let id = find("PF-00100");
         let budget = Duration::from_millis(100);
-        let calls: [(&str, &dyn Fn() -> String); 16] = [
+        let calls: [(&str, &dyn Fn() -> String); 20] = [
             ("status", &|| state.status()),
             ("children", &|| reply(project.children(0, 0, MAX_PAGE))),
             ("element", &|| reply(project.element(id))),
@@ -1661,6 +1737,31 @@ mod tests {
                 reply(project.source_text("model/perf.sysml"))
             }),
             ("editor keywords", &|| reply(Ok(editor_keywords()))),
+            ("definition", &|| {
+                reply(Ok(project.definition(
+                    "model/perf.sysml",
+                    10,
+                    1,
+                    "PF-00100",
+                )))
+            }),
+            ("references", &|| reply(project.references(id, 0, MAX_PAGE))),
+            ("complete requirements", &|| {
+                reply(Ok(project.completions(
+                    "model/perf.sysml",
+                    10,
+                    "  satisfy ",
+                    "PF-001",
+                )))
+            }),
+            ("complete names", &|| {
+                reply(Ok(project.completions(
+                    "model/perf.sysml",
+                    10,
+                    "  part x : ",
+                    "",
+                )))
+            }),
         ];
         for (name, call) in calls {
             let started = Instant::now();
@@ -1913,6 +2014,61 @@ mod tests {
         std::os::unix::fs::symlink(&outside, root.join("link.sysml")).unwrap();
         assert!(project.save_source("link.sysml", "x").is_err());
         assert_eq!(fs::read_to_string(&outside).unwrap(), "secret");
+    }
+
+    // @verifies CT-MOD-004, CT-EFF-005
+    #[test]
+    fn a_name_leads_to_its_definition_and_the_definition_lists_its_citations() {
+        let project = gappy("a_name_leads_to_its_definition");
+        let found = ok(&reply(Ok(project.definition("design.sysml", 3, 15, "top"))));
+        assert_eq!(found.get("found"), Some(&Json::Bool(true)));
+        assert_eq!(text(&found, "file"), "reqs.sysml");
+        assert_eq!(
+            (num(&found, "line"), text(&found, "name")),
+            (3, "Reqs::top")
+        );
+        let cited = ok(&reply(project.references(num(&found, "id"), 0, 50)));
+        let rows = cited.get("rows").unwrap().items();
+        let places: Vec<_> = rows
+            .iter()
+            .map(|r| (text(r, "file"), num(r, "line"), text(r, "role")))
+            .collect();
+        assert!(
+            places.contains(&("design.sysml", 3, "requirement")),
+            "{places:?}"
+        );
+        assert!(
+            places.iter().any(|p| p.2 == "dependency target"),
+            "{places:?}"
+        );
+        let nowhere = ok(&reply(Ok(project.definition(
+            "design.sysml",
+            1,
+            1,
+            "package",
+        ))));
+        assert_eq!(nowhere.get("found"), Some(&Json::Bool(false)));
+        assert!(project.references(usize::MAX, 0, 50).is_err());
+    }
+
+    // @verifies CT-MOD-004, CT-EFF-005
+    #[test]
+    fn completion_offers_requirements_after_satisfy_and_names_elsewhere() {
+        let project = gappy("completion_offers_requirements");
+        let names = |rows: String| -> Vec<String> {
+            ok(&reply(Ok(rows)))
+                .items()
+                .iter()
+                .map(|c| text(c, "label").to_string())
+                .collect()
+        };
+        let after = names(project.completions("design.sysml", 3, "    satisfy ", "X-00"));
+        assert_eq!(after, ["X-001", "X-002", "X-003", "X-004"]);
+        let around = names(project.completions("design.sysml", 3, "    part x : ", "Eng"));
+        assert_eq!(around, ["Engine"]);
+        assert!(
+            names(project.completions("design.sysml", 3, "    part x : ", "")).len() <= MAX_PAGE
+        );
     }
 
     // @verifies CT-MOD-004

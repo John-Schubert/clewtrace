@@ -139,7 +139,8 @@ pub enum Role {
 
 // @implements CT-MOD-002, CT-USE-007
 impl Role {
-    fn noun(self) -> &'static str {
+    /// What the cited name is, such as `type` or `requirement`.
+    pub fn noun(self) -> &'static str {
         match self {
             Role::Import => "import target",
             Role::Specializes => "specialized definition",
@@ -771,7 +772,7 @@ impl Element {
         }
     }
 
-    fn is_named(&self, name: &str) -> bool {
+    pub(crate) fn is_named(&self, name: &str) -> bool {
         self.name.as_deref() == Some(name) || self.short_name.as_deref() == Some(name)
     }
 }
@@ -786,7 +787,7 @@ enum Cite {
 
 // @implements CT-MOD-002
 /// Quotes a name segment unless it is a plain identifier.
-fn quote(name: &str) -> String {
+pub(crate) fn quote(name: &str) -> String {
     let plain = name
         .chars()
         .next()

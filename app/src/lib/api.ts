@@ -301,6 +301,48 @@ export function editorKeywords(): Promise<string[]> {
   return call('editor_keywords', {});
 }
 
+// @implements CT-MOD-004
+/** Where a name leads: the element and its place, or `found: false`. */
+export type Definition =
+  | { found: false }
+  | { found: true; id: number; file: string; line: number; column: number; name: string };
+
+// @implements CT-MOD-004
+/** A name that fits at the cursor: how the list shows it, what to insert, and what it is. */
+export interface NameCompletion {
+  label: string;
+  insert: string;
+  detail: string;
+}
+
+// @implements CT-MOD-004
+/** A name in the model that cites an element, and the place of the citation. */
+export interface ReferenceRow {
+  role: string;
+  from: string;
+  file: string;
+  line: number;
+  column: number;
+}
+
+// @implements CT-MOD-004, CT-EFF-005
+/** Where the name at a place in a model file leads. */
+export function definitionAt(path: string, line: number, column: number, word: string): Promise<Definition> {
+  return call('definition_at', { path, line, column, word });
+}
+
+// @implements CT-MOD-004, CT-EFF-005
+/** One page of the names in the model that cite an element. */
+export function elementReferences(id: number, offset = 0, limit = MAX_PAGE): Promise<Page<ReferenceRow>> {
+  return call('element_references', { id, offset, limit });
+}
+
+// @implements CT-MOD-004, CT-EFF-005
+/** The names that fit at the cursor in a model file. */
+export function completeNames(path: string, line: number, before: string, prefix: string): Promise<NameCompletion[]> {
+  return call('complete_names', { path, line, before, prefix });
+}
+
 // @implements CT-EFF-005, CT-USE-007
 /** One page of the project's errors, then its warnings. */
 export function problems(offset = 0, limit = MAX_PAGE): Promise<Page<ProblemRow>> {

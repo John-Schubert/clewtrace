@@ -168,6 +168,54 @@ pub fn editor_keywords() -> Response {
     Response::new(reply(Ok(data::editor_keywords())))
 }
 
+// @implements CT-MOD-004, CT-EFF-005
+/// Where the name at a place in a model file leads, for go to definition.
+#[tauri::command(async)]
+pub fn definition_at(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+    line: u32,
+    column: u32,
+    word: String,
+) -> Response {
+    let result = state
+        .project()
+        .map(|p| p.definition(&path, line, column, &word));
+    Response::new(reply(result))
+}
+
+// @implements CT-MOD-004, CT-EFF-005
+/// One page of the names in the model that cite an element, for find references.
+#[tauri::command(async)]
+pub fn element_references(
+    state: State<'_, Arc<AppState>>,
+    id: usize,
+    offset: usize,
+    limit: usize,
+) -> Response {
+    Response::new(reply(
+        state
+            .project()
+            .and_then(|p| p.references(id, offset, limit)),
+    ))
+}
+
+// @implements CT-MOD-004, CT-EFF-005
+/// The names that fit at the editor's cursor, for completion.
+#[tauri::command(async)]
+pub fn complete_names(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+    line: u32,
+    before: String,
+    prefix: String,
+) -> Response {
+    let result = state
+        .project()
+        .map(|p| p.completions(&path, line, &before, &prefix));
+    Response::new(reply(result))
+}
+
 // @implements CT-EFF-005, CT-USE-007
 /// One page of the project's errors and warnings.
 #[tauri::command(async)]

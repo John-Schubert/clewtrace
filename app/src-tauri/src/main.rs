@@ -105,6 +105,9 @@ fn main() {
             commands::validate_source,
             commands::revert_source,
             commands::editor_keywords,
+            commands::definition_at,
+            commands::element_references,
+            commands::complete_names,
             commands::problems,
             commands::search,
             commands::pick_folder,
@@ -192,7 +195,7 @@ mod no_network {
     /// The `core:event` listen and unlisten permissions and `core:window:allow-destroy` let
     /// the page hear its own window's close request and then close the window, so the
     /// editor saves first (CT-USE-008). They pass events inside the app only.
-    const OFFLINE_PERMISSIONS: [&str; 25] = [
+    const OFFLINE_PERMISSIONS: [&str; 28] = [
         "core:app:allow-name",
         "core:app:allow-version",
         "core:event:allow-listen",
@@ -212,6 +215,9 @@ mod no_network {
         "allow-validate-source",
         "allow-revert-source",
         "allow-editor-keywords",
+        "allow-definition-at",
+        "allow-element-references",
+        "allow-complete-names",
         "allow-problems",
         "allow-search",
         "allow-pick-folder",

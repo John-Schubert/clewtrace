@@ -1,8 +1,8 @@
 // @begin CT-USE-007, CT-EFF-005
 // Tests for the text the detail view and the problems list show.
 import { describe, expect, it } from 'vitest';
-import type { ElementDetail, ProblemRow, TreeRow } from './api';
-import { detailFields, problemSummary, treeLabel } from './describe';
+import type { ElementDetail, ProblemRow, ReferenceRow, TreeRow } from './api';
+import { detailFields, problemSummary, referenceLabel, referencesNote, treeLabel } from './describe';
 
 const detail = (extra: Partial<ElementDetail> = {}): ElementDetail => ({
   id: 7, kind: 'requirement usage', name: 'fast', shortName: 'CT-EFF-001', qualifiedName: 'Reqs::fast',
@@ -49,6 +49,23 @@ describe('problemSummary', () => {
   it('states where, what, and how to fix it', () => {
     expect(problemSummary(p)).toBe('a.sysml:3:9: error: unknown name `X`. Fix: Define X or fix the spelling');
     expect(problemSummary({ ...p, where: '' })).toBe('error: unknown name `X`. Fix: Define X or fix the spelling');
+  });
+});
+
+describe('references', () => {
+  const row: ReferenceRow = { role: 'requirement', from: 'Design::Engine', file: 'design.sysml', line: 3, column: 13 };
+
+  // @verifies CT-MOD-004
+  it('labels a reference with what it is, who cites, and where', () => {
+    expect(referenceLabel(row)).toBe('requirement of Design::Engine (design.sysml:3)');
+  });
+
+  // @verifies CT-MOD-004
+  it('says how many references there are, and when only a page is shown', () => {
+    expect(referencesNote(0, 0)).toBe('No references in the model.');
+    expect(referencesNote(1, 1)).toBe('1 reference in the model.');
+    expect(referencesNote(5, 5)).toBe('5 references in the model.');
+    expect(referencesNote(200, 450)).toBe('First 200 of 450 references in the model.');
   });
 });
 // @end

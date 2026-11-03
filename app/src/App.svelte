@@ -484,7 +484,7 @@
       {/if}
       {#if editing}
         <div class="editor-pane" hidden={view !== 'editor'}>
-          <TextEditor bind:this={editor} path={editing.path} line={editing.line} ondirty={(d) => { editorDirty = d; if (d) closeGuard.arm(); }} onvalidated={validated} />
+          <TextEditor bind:this={editor} path={editing.path} line={editing.line} ondirty={(d) => { editorDirty = d; if (d) closeGuard.arm(); }} onvalidated={validated} ongoto={openSource} onreferences={showElement} />
         </div>
       {/if}
       {#key opened}

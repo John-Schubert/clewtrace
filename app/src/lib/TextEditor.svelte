@@ -10,7 +10,7 @@
   import { redo, undo } from '@codemirror/commands';
   import type { Text } from '@codemirror/state';
   import type { EditorView } from '@codemirror/view';
-  import { editorKeywords, saveSource, sourceText, validateSource, type EditReply } from './api';
+  import { completeNames, definitionAt, editorKeywords, elementDetail, saveSource, sourceText, validateSource, type EditReply } from './api';
   import { editorState, goToLine, openView, showDiagnostics } from './editor';
   import { AUTOSAVE_MS, Autosaver } from './autosave';
   import { markers, QUIET_MS, QuietTimer } from './live';
@@ -20,6 +20,8 @@
     line,
     ondirty,
     onvalidated,
+    ongoto,
+    onreferences,
     quietMs = QUIET_MS,
     autosaveMs = AUTOSAVE_MS,
   }: {
@@ -28,6 +30,10 @@
     ondirty: (dirty: boolean) => void;
     /** The project was rebuilt from this file's unsaved text; the panes should refresh. */
     onvalidated: (reply: EditReply) => void;
+    /** Go to definition: open this place. */
+    ongoto: (path: string, line: number) => void;
+    /** Find references: show the references of this element. */
+    onreferences: (id: number) => void;
     quietMs?: number;
     autosaveMs?: number;
   } = $props();
@@ -186,6 +192,13 @@
         },
         onSave: () => void save(),
         onBlur: () => void save(),
+        nav: {
+          definition: (line, column, word) => definitionAt(current, line, column, word),
+          complete: (line, before, prefix) => completeNames(current, line, before, prefix),
+          detail: elementDetail,
+        },
+        onDefinition: (found) => ongoto(found.file, found.line),
+        onReferences: (id) => onreferences(id),
       });
       saved = state.doc;
       if (editor) {
