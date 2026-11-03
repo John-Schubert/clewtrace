@@ -143,6 +143,12 @@ package ClewtraceRequirements {
             attribute :>> verificationMethod = "Test";
             attribute :>> phase = 2;
         }
+
+        requirement <'CT-USE-010'> hints : ProductRequirement {
+            doc /* Every control shall show its name and keyboard shortcut on hover and keyboard focus, and hovering a name in the editor shall show the element's kind, doc text, and trace status. */
+            attribute :>> verificationMethod = "Demonstration";
+            attribute :>> phase = 2;
+        }
     }
 
     package Traceability {
