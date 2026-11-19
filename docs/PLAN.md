@@ -1116,10 +1116,10 @@ tier in ADR-0003 before adding it. Phase 2 has 21 tasks plus the gate. Milestone
 ## Phase 3: Requirements product and pilot readiness
 
 Exit gate: a requirements engineer with no SysML knowledge can create, trace, and exchange
-requirements, and sees requirement and structure diagrams generated from the model. Licensing and the trial work fully offline and never lock anyone out of their
-data. A signed release carries its full evidence, installs and runs on an offline machine, and
-builds reproducibly. Ready for the first business pilot. Phase 3 has 19 tasks plus code
-signing and the gate.
+requirements, and see requirement and structure diagrams generated from the model. Licensing
+and the trial work fully offline and never lock anyone out of their data. A signed release
+carries its full evidence, installs and runs on an offline machine, and builds reproducibly.
+Ready for the first business pilot. Phase 3 has 19 tasks plus code signing and the gate.
 
 - [ ] **3.1a Minimal-edit writer.** The core makes minimal text edits that create, change,
       and delete a requirement with the CT-TRC-001 fields (ID, title, statement, rationale,
@@ -1276,10 +1276,10 @@ signing and the gate.
       Refs: CT-PLT-001, CT-DEV-012, CT-PLT-003
       Model: Sonnet
 - [ ] **Gate 3 check.** `clew check --self` shows 0 errors and 0 phase 3 coverage warnings.
-      John installs the signed MSI per user on his laptop with no administrator prompt and with
-      networking turned off. A new user finishes the first-run steps within 5 minutes. The diagrams checklist passes on the
-      laptop, and idle memory stays within CT-EFF-002. A
-      license file from the signing tool is accepted offline, and an expired test license
+      John installs the signed MSI per user on his laptop with no administrator prompt and
+      with networking turned off. A new user finishes the first-run steps within 5 minutes.
+      The diagrams checklist passes on the laptop, and idle memory stays within CT-EFF-002.
+      A license file from the signing tool is accepted offline, and an expired test license
       leaves the project readable and exportable. Raise the test coverage minimum. Then set
       `current_phase = 4`.
 
@@ -1299,7 +1299,8 @@ risk.
 - Built-in libraries are not hashed: they are fixed by the tool version, which reports record.
 
 Phase 4 (CMMC pack, plus baselines CT-TRC-007 and the change log CT-SEC-004) and phase 5
-(interconnection diagrams, v1 import, API, AI assist, plus manual update checks CT-PLT-004) are broken into
-tasks when the previous gate passes, using the phase column in `model/requirements.sysml`.
+(interconnection diagrams, v1 import, API, AI assist, plus manual update checks CT-PLT-004)
+are broken into tasks when the previous gate passes, using the phase column in
+`model/requirements.sysml`.
 
 Use case and activity diagrams are unplanned and need their own requirements and parser growth.
