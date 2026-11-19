@@ -1116,9 +1116,9 @@ tier in ADR-0003 before adding it. Phase 2 has 21 tasks plus the gate. Milestone
 ## Phase 3: Requirements product and pilot readiness
 
 Exit gate: a requirements engineer with no SysML knowledge can create, trace, and exchange
-requirements. Licensing and the trial work fully offline and never lock anyone out of their
+requirements, and sees requirement and structure diagrams generated from the model. Licensing and the trial work fully offline and never lock anyone out of their
 data. A signed release carries its full evidence, installs and runs on an offline machine, and
-builds reproducibly. Ready for the first business pilot. Phase 3 has 17 tasks plus code
+builds reproducibly. Ready for the first business pilot. Phase 3 has 19 tasks plus code
 signing and the gate.
 
 - [ ] **3.1a Minimal-edit writer.** The core makes minimal text edits that create, change,
@@ -1237,6 +1237,27 @@ signing and the gate.
       Document each exception and why. Byte-identical MSI and DMG are not promised.
       Refs: CT-DEV-007, CT-DEV-012
       Model: Sonnet
+- [ ] **3.16 Requirement diagram view.** A read-only SVG view generated in Rust from
+      the model: a selected requirement or package with its derived and refined
+      children and its satisfy, verify, and evidence links, laid out top-down with
+      a tree layout written in Rust, with no new dependency. Click a box to select
+      its element; zoom and pan; a node limit with "show more" so a
+      10,000-requirement project stays within the CT-EFF budgets, with a perf test
+      at that size. Keyboard reachable, with the model browser tree as the text
+      alternative (CT-USE-004). Refreshes after a live-validation rebuild using
+      stable IDs. Nothing is built until the view is opened, so idle memory with
+      an empty project does not grow (Windows has about 9 MB of headroom under
+      CT-EFF-002). Export as SVG, and include it in the 3.5 HTML reports.
+      ADR-0007 records the rendering and layout approach.
+      `docs/verification/diagrams.md` is the Demonstration checklist.
+      Refs: CT-MOD-006, CT-EFF-005, CT-USE-004
+      Model: Opus
+- [ ] **3.17 Structure view.** The same renderer for part definitions and usages as a
+      composition tree, with attributes, ports, and specialization shown in each
+      box. Same node limit, perf test, and keyboard rules as 3.16. Extend
+      `docs/verification/diagrams.md`.
+      Refs: CT-MOD-006, CT-EFF-005
+      Model: Sonnet
 - [ ] **Code-signed installers.** Every Windows and macOS installer is code-signed before the
       first business pilot. The Linux deb and rpm are verified by `SHA256SUMS.txt` and the
       3.12 attestation (John, decision 23, PR #27). Plan on Microsoft Artifact Signing (Basic,
@@ -1256,7 +1277,8 @@ signing and the gate.
       Model: Sonnet
 - [ ] **Gate 3 check.** `clew check --self` shows 0 errors and 0 phase 3 coverage warnings.
       John installs the signed MSI per user on his laptop with no administrator prompt and with
-      networking turned off. A new user finishes the first-run steps within 5 minutes. A
+      networking turned off. A new user finishes the first-run steps within 5 minutes. The diagrams checklist passes on the
+      laptop, and idle memory stays within CT-EFF-002. A
       license file from the signing tool is accepted offline, and an expired test license
       leaves the project readable and exportable. Raise the test coverage minimum. Then set
       `current_phase = 4`.
@@ -1277,5 +1299,7 @@ risk.
 - Built-in libraries are not hashed: they are fixed by the tool version, which reports record.
 
 Phase 4 (CMMC pack, plus baselines CT-TRC-007 and the change log CT-SEC-004) and phase 5
-(diagrams, v1 import, API, AI assist, plus manual update checks CT-PLT-004) are broken into
+(interconnection diagrams, v1 import, API, AI assist, plus manual update checks CT-PLT-004) are broken into
 tasks when the previous gate passes, using the phase column in `model/requirements.sysml`.
+
+Use case and activity diagrams are unplanned and need their own requirements and parser growth.
