@@ -243,15 +243,21 @@ package ClewtraceRequirements {
         }
 
         requirement <'CT-MOD-006'> generatedDiagrams : ProductRequirement {
-            doc /* The application shall generate structure, interconnection, and requirement diagram views with automatic layout. */
+            doc /* The application shall generate read-only requirement diagram and structure views from the model, with automatic layout. */
             attribute :>> verificationMethod = "Demonstration";
-            attribute :>> phase = 5;
+            attribute :>> phase = 3;
         }
 
         requirement <'CT-MOD-007'> conformance : ProductRequirement {
             doc /* Parser conformance shall be measured against the example models in the OMG SysML v2 release and reported per release. */
             attribute :>> verificationMethod = "Test";
             attribute :>> phase = 3;
+        }
+
+        requirement <'CT-MOD-008'> interconnectionViews : ProductRequirement {
+            doc /* The application shall generate interconnection views of parts, ports, and their connections, with automatic layout. */
+            attribute :>> verificationMethod = "Demonstration";
+            attribute :>> phase = 5;
         }
     }
 
